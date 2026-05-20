@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,6 +26,7 @@ public class DiscoService {
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
         disco.setEstado(EstadoDisco.DISPONIBLE);
+        disco.setCodigoQr(UUID.randomUUID().toString());
         return DiscoMapper.toDTO(discoRepository.save(disco));
     }
 
