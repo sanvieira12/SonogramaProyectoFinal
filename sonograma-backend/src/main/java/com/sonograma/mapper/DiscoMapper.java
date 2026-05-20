@@ -1,15 +1,15 @@
 package com.sonograma.mapper;
 
-import com.sonograma.dto.DiscoDTO;
-import com.sonograma.dto.DiscoRequest;
+import com.sonograma.dto.DiscoRequestDTO;
+import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.entity.Disco;
 
 public class DiscoMapper {
 
     private DiscoMapper() {}
 
-    public static DiscoDTO toDTO(Disco disco) {
-        return DiscoDTO.builder()
+    public static DiscoResponseDTO toDTO(Disco disco) {
+        return DiscoResponseDTO.builder()
                 .idDisco(disco.getIdDisco())
                 .codigoInterno(disco.getCodigoInterno())
                 .codigoQr(disco.getCodigoQr())
@@ -27,7 +27,7 @@ public class DiscoMapper {
                 .build();
     }
 
-    public static Disco toEntity(DiscoRequest request) {
+    public static Disco toEntity(DiscoRequestDTO request) {
         return Disco.builder()
                 .codigoInterno(request.getCodigoInterno())
                 .artista(request.getArtista())
@@ -41,7 +41,7 @@ public class DiscoMapper {
                 .build();
     }
 
-    public static void updateFromRequest(Disco disco, DiscoRequest request) {
+    public static void updateFromRequest(Disco disco, DiscoRequestDTO request) {
         if (request.getCodigoInterno() != null) disco.setCodigoInterno(request.getCodigoInterno());
         if (request.getArtista() != null) disco.setArtista(request.getArtista());
         if (request.getAlbum() != null) disco.setAlbum(request.getAlbum());

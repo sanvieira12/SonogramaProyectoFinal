@@ -1,6 +1,6 @@
 package com.sonograma.service;
 
-import com.sonograma.dto.DiscoDTO;
+import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.mapper.DiscoMapper;
@@ -29,7 +29,7 @@ public class QRService {
         return qrCodeGenerator.generarQRBytes(disco.getCodigoQr());
     }
 
-    public DiscoDTO obtenerPorQRScaneado(String codigoQr) {
+    public DiscoResponseDTO obtenerPorQRScaneado(String codigoQr) {
         return discoRepository.findByCodigoQr(codigoQr)
                 .map(DiscoMapper::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("QR no válido o disco no encontrado"));

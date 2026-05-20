@@ -1,6 +1,10 @@
 package com.sonograma.dto;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -8,7 +12,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class DiscoDTO {
+public class DiscoResponseDTO {
     private Long idDisco;
     private String codigoInterno;
     private String codigoQr;

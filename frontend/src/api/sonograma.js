@@ -36,10 +36,10 @@ export const api = {
     disponibles: () => request('GET', '/discos/disponibles'),
     crear: (disco) => request('POST', '/discos', disco),
     actualizar: (id, disco) => request('PUT', `/discos/${id}`, disco),
-    cambiarEstado: (id, estado) => request('PATCH', `/discos/${id}/estado`, { estado }),
+    cambiarEstado: (id, estado) =>
+      request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
-    buscarArtista: (q) => request('GET', `/discos/buscar/artista?q=${encodeURIComponent(q)}`),
-    buscarAlbum: (q) => request('GET', `/discos/buscar/album?q=${encodeURIComponent(q)}`),
+    buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
   },
 
   clientes: {

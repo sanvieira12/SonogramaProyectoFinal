@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 
 function SunIcon() {
@@ -25,6 +25,13 @@ function LogoutIcon() {
   )
 }
 
+const navLinkClass = ({ isActive }) =>
+  `text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
+    isActive
+      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
+      : 'text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800'
+  }`
+
 export default function Navbar({ usuario }) {
   const navigate = useNavigate()
   const { dark, toggle } = useTheme()
@@ -41,25 +48,29 @@ export default function Navbar({ usuario }) {
 
   return (
     <nav className="bg-white dark:bg-gray-900 border-b border-slate-200 dark:border-gray-800 px-6 py-0 transition-colors duration-300 sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto flex items-center justify-between h-14">
+      <div className="max-w-6xl mx-auto flex items-center justify-between h-14 gap-4">
 
         {/* Brand */}
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
             <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
             </svg>
           </div>
-          <div>
+          <div className="hidden sm:block">
             <span className="text-slate-900 dark:text-white font-bold text-base tracking-tight leading-none block">Sonograma</span>
             <span className="text-slate-400 dark:text-gray-500 text-xs leading-none">Disquería</span>
           </div>
         </div>
 
+        {/* Nav links */}
+        <div className="flex items-center gap-1">
+          <NavLink to="/" end className={navLinkClass}>Dashboard</NavLink>
+          <NavLink to="/discos" className={navLinkClass}>Catálogo</NavLink>
+        </div>
+
         {/* Right side */}
         <div className="flex items-center gap-2">
-
-          {/* Theme toggle */}
           <button
             onClick={toggle}
             className="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
@@ -70,7 +81,6 @@ export default function Navbar({ usuario }) {
 
           <div className="w-px h-5 bg-slate-200 dark:bg-gray-700 mx-1" />
 
-          {/* User info */}
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center">
               <span className="text-indigo-600 dark:text-indigo-400 text-xs font-bold">{initials}</span>

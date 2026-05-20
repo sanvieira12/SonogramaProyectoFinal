@@ -1,6 +1,6 @@
 package com.sonograma.controller;
 
-import com.sonograma.dto.DiscoDTO;
+import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.EscaneoQRRequest;
 import com.sonograma.service.QRService;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,7 @@ public class QRController {
     }
 
     @PostMapping("/escanear")
-    public ResponseEntity<DiscoDTO> escanearQR(@RequestBody EscaneoQRRequest request) {
+    public ResponseEntity<DiscoResponseDTO> escanearQR(@RequestBody EscaneoQRRequest request) {
         return ResponseEntity.ok(qrService.obtenerPorQRScaneado(request.getCodigoQr()));
     }
 }

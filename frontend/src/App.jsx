@@ -1,10 +1,13 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import DiscosCatalogo from './pages/DiscosCatalogo'
 import Navbar from './components/Navbar'
 
-function PrivateRoute({ children }) {
-  return localStorage.getItem('token') ? children : <Navigate to="/login" replace />
+function PrivateRoute() {
+  return localStorage.getItem('token')
+    ? <Outlet />
+    : <Navigate to="/login" replace />
 }
 
 function Layout() {
@@ -12,7 +15,7 @@ function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-gray-950 transition-colors duration-300">
       <Navbar usuario={usuario} />
-      <Dashboard />
+      <Outlet />
     </div>
   )
 }
@@ -22,7 +25,12 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>} />
+        <Route element={<PrivateRoute />}>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/discos" element={<DiscosCatalogo />} />
+          </Route>
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

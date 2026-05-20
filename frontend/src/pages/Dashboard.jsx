@@ -110,7 +110,7 @@ export default function Dashboard() {
     if (q.length === 0) { cargarDiscos(); return }
     if (q.length < 2) return
     try {
-      const data = await api.discos.buscarArtista(q)
+      const data = await api.discos.buscar(q)
       setDiscos(data)
     } catch { /* ignore */ }
   }

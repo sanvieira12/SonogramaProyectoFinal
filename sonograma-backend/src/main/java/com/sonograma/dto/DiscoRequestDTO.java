@@ -17,7 +17,7 @@ import java.math.BigDecimal;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class DiscoRequest {
+public class DiscoRequestDTO {
 
     @Size(max = 50)
     private String codigoInterno;

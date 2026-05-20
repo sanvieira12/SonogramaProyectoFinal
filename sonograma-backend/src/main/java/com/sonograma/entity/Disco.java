@@ -60,9 +60,20 @@ public class Disco {
     private EstadoDisco estado = EstadoDisco.DISPONIBLE;
 
     @Column(name = "fecha_ingreso")
-    @Builder.Default
-    private LocalDateTime fechaIngreso = LocalDateTime.now();
+    private LocalDateTime fechaIngreso;
 
     @Column(name = "fecha_actualizacion")
     private LocalDateTime fechaActualizacion;
+
+    @PrePersist
+    void onPrePersist() {
+        LocalDateTime ahora = LocalDateTime.now();
+        fechaIngreso = ahora;
+        fechaActualizacion = ahora;
+    }
+
+    @PreUpdate
+    void onPreUpdate() {
+        fechaActualizacion = LocalDateTime.now();
+    }
 }
