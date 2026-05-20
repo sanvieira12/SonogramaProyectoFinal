@@ -51,7 +51,7 @@ export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar
       <div className="flex gap-2 pt-1 border-t border-slate-100 dark:border-gray-700/50 flex-wrap">
         <button
           onClick={() => onEditar(disco)}
-          className="text-xs px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 font-medium transition-colors"
+          className="text-xs px-2.5 py-1.5 rounded-lg bg-[#7E9FA8]/10 dark:bg-[#7E9FA8]/10 text-[#5C7D87] dark:text-[#7E9FA8] hover:bg-[#7E9FA8]/20 dark:hover:bg-[#7E9FA8]/20 font-medium transition-colors"
         >
           Editar
         </button>

@@ -43,11 +43,11 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-gray-950 flex items-center justify-center px-4 transition-colors duration-300">
+    <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center px-4 transition-colors duration-300">
 
       <button
         onClick={toggle}
-        className="fixed top-4 right-4 p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-800 transition-colors"
+        className="fixed top-4 right-4 p-2 rounded-lg text-slate-500 dark:text-stone-400 hover:bg-slate-100 dark:hover:bg-stone-900 transition-colors"
         title="Cambiar tema"
       >
         {dark ? <SunIcon /> : <MoonIcon />}
@@ -56,21 +56,19 @@ export default function Login() {
       <div className="w-full max-w-sm">
 
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4 shadow-lg shadow-indigo-500/30">
-            <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
-            </svg>
-          </div>
+          <img
+            src="/logo-sonograma.png"
+            alt="Sonograma"
+            className="h-16 w-16 object-contain dark:invert mx-auto mb-4 transition-all"
+          />
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Sonograma</h1>
-          <p className="text-slate-500 dark:text-gray-400 mt-1 text-sm">Sistema de gestión de disquería</p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400 mt-1">Disquería</p>
         </div>
 
         <div className="card p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1.5">
-                Usuario
-              </label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-stone-300 mb-1.5">Usuario</label>
               <input
                 type="text"
                 value={form.nombreUsuario}
@@ -83,9 +81,7 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1.5">
-                Contraseña
-              </label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-stone-300 mb-1.5">Contraseña</label>
               <input
                 type="password"
                 value={form.contrasenia}
@@ -117,7 +113,7 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-400 dark:text-gray-600 mt-6">
+        <p className="text-center text-xs text-slate-400 dark:text-stone-600 mt-6">
           Sonograma v1.0 · Gestión de inventario
         </p>
       </div>

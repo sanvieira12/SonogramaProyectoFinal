@@ -52,18 +52,18 @@ export default function AddDiscoModal({ onClose, onCreado }) {
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-gray-700 w-full max-w-lg"
+        className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-stone-700 w-full max-w-lg"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-gray-800">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-stone-800">
           <div>
             <h2 className="text-slate-900 dark:text-white font-bold text-base">Agregar disco</h2>
-            <p className="text-slate-400 dark:text-gray-500 text-xs mt-0.5">Completá los datos del nuevo registro</p>
+            <p className="text-slate-400 dark:text-stone-500 text-xs mt-0.5">Completá los datos del nuevo registro</p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 dark:text-stone-500 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-stone-800 transition-colors"
           >
             <XIcon />
           </button>
@@ -74,7 +74,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
           {/* Artista / Álbum */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">
                 Artista <span className="text-red-400">*</span>
               </label>
               <input
@@ -86,7 +86,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">
                 Álbum <span className="text-red-400">*</span>
               </label>
               <input
@@ -102,7 +102,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
           {/* Género / Año / Tipo */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Género</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Género</label>
               <input
                 value={form.genero}
                 onChange={e => set('genero', e.target.value)}
@@ -111,7 +111,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Año</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Año</label>
               <input
                 value={form.anio}
                 onChange={e => set('anio', e.target.value)}
@@ -123,7 +123,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Tipo</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Tipo</label>
               <select value={form.tipoDisco} onChange={e => set('tipoDisco', e.target.value)} className="input">
                 {TIPOS.map(t => <option key={t}>{t}</option>)}
               </select>
@@ -133,13 +133,13 @@ export default function AddDiscoModal({ onClose, onCreado }) {
           {/* Condición / Costo / Precio */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Condición</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Condición</label>
               <select value={form.condicion} onChange={e => set('condicion', e.target.value)} className="input">
                 {CONDICIONES.map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Costo $</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Costo $</label>
               <input
                 value={form.costo}
                 onChange={e => set('costo', e.target.value)}
@@ -151,7 +151,7 @@ export default function AddDiscoModal({ onClose, onCreado }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Precio venta $</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Precio venta $</label>
               <input
                 value={form.precioVenta}
                 onChange={e => set('precioVenta', e.target.value)}

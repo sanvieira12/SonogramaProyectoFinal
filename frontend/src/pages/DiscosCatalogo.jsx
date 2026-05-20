@@ -9,11 +9,11 @@ const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'DESCONTINUADO']
 function Spinner() {
   return (
     <div className="flex items-center justify-center py-24 gap-3">
-      <svg className="animate-spin w-5 h-5 text-indigo-500" viewBox="0 0 24 24" fill="none">
+      <svg className="animate-spin w-5 h-5 text-[#7E9FA8]" viewBox="0 0 24 24" fill="none">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
-      <span className="text-slate-500 dark:text-gray-400 text-sm">Cargando catálogo...</span>
+      <span className="text-slate-500 dark:text-stone-400 text-sm">Cargando catálogo...</span>
     </div>
   )
 }
@@ -21,15 +21,15 @@ function Spinner() {
 function EmptyState({ hayFiltro }) {
   return (
     <div className="text-center py-20">
-      <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
-        <svg className="w-8 h-8 text-slate-400 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-stone-900 flex items-center justify-center mx-auto mb-4">
+        <svg className="w-8 h-8 text-slate-400 dark:text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
         </svg>
       </div>
-      <p className="text-slate-500 dark:text-gray-400 font-medium">
+      <p className="text-slate-500 dark:text-stone-400 font-medium">
         {hayFiltro ? 'No hay discos con ese criterio' : 'No hay discos en el catálogo'}
       </p>
-      <p className="text-slate-400 dark:text-gray-600 text-sm mt-1">
+      <p className="text-slate-400 dark:text-stone-600 text-sm mt-1">
         {hayFiltro ? 'Probá con otro filtro o búsqueda' : 'Agregá el primero usando el botón de arriba'}
       </p>
     </div>
@@ -126,7 +126,7 @@ export default function DiscosCatalogo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white">Catálogo de discos</h1>
-          <p className="text-slate-400 dark:text-gray-500 text-sm mt-0.5">
+          <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">
             {!loading && `${discosFiltrados.length} ${discosFiltrados.length === 1 ? 'disco' : 'discos'} mostrados`}
           </p>
         </div>
@@ -144,7 +144,7 @@ export default function DiscosCatalogo() {
       {/* Barra búsqueda + filtros */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
           <input
@@ -162,8 +162,8 @@ export default function DiscosCatalogo() {
               onClick={() => setFiltroEstado(estado)}
               className={`text-xs px-3 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 filtroEstado === estado
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'
+                  ? 'bg-[#7E9FA8] text-white'
+                  : 'bg-slate-100 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-200 dark:hover:bg-stone-700'
               }`}
             >
               {estado === 'TODOS' ? 'Todos' : estado.charAt(0) + estado.slice(1).toLowerCase()}
