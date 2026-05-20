@@ -1,0 +1,14 @@
+{
+  "properties": [
+    {
+      "name": "jwt.secret",
+      "type": "java.lang.String",
+      "description": "Clave secreta para firmar tokens JWT (minimo 32 caracteres)."
+    },
+    {
+      "name": "jwt.expiration",
+      "type": "java.lang.Long",
+      "description": "Duracion del token JWT en milisegundos. Default: 86400000 (24hs)."
+    }
+  ]
+}

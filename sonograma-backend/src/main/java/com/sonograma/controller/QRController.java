@@ -1,0 +1,31 @@
+package com.sonograma.controller;
+
+import com.sonograma.dto.DiscoDTO;
+import com.sonograma.dto.EscaneoQRRequest;
+import com.sonograma.service.QRService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/qr")
+@RequiredArgsConstructor
+public class QRController {
+
+    private final QRService qrService;
+
+    @GetMapping("/descargar/{idDisco}")
+    public ResponseEntity<byte[]> descargarQR(@PathVariable Long idDisco) {
+        byte[] qrBytes = qrService.descargarQR(idDisco);
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .header("Content-Disposition", "attachment; filename=\"qr-" + idDisco + ".png\"")
+                .body(qrBytes);
+    }
+
+    @PostMapping("/escanear")
+    public ResponseEntity<DiscoDTO> escanearQR(@RequestBody EscaneoQRRequest request) {
+        return ResponseEntity.ok(qrService.obtenerPorQRScaneado(request.getCodigoQr()));
+    }
+}
