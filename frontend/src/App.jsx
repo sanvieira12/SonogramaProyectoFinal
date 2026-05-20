@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import DiscosCatalogo from './pages/DiscosCatalogo'
+import Clientes from './pages/Clientes'
+import NuevaVenta from './pages/NuevaVenta'
 import Navbar from './components/Navbar'
 
 function PrivateRoute() {
@@ -13,7 +15,7 @@ function PrivateRoute() {
 function Layout() {
   const usuario = JSON.parse(localStorage.getItem('usuario') || '{}')
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-gray-950 transition-colors duration-300">
+    <div className="min-h-screen bg-white dark:bg-black transition-colors duration-300">
       <Navbar usuario={usuario} />
       <Outlet />
     </div>
@@ -29,6 +31,8 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/discos" element={<DiscosCatalogo />} />
+            <Route path="/clientes" element={<Clientes />} />
+            <Route path="/ventas/nueva" element={<NuevaVenta />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

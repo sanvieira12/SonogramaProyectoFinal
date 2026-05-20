@@ -28,8 +28,8 @@ function LogoutIcon() {
 const navLinkClass = ({ isActive }) =>
   `text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
     isActive
-      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
-      : 'text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800'
+      ? 'bg-[#7E9FA8]/15 text-[#5C7D87] dark:text-[#7E9FA8]'
+      : 'text-slate-600 dark:text-stone-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-900'
   }`
 
 export default function Navbar({ usuario }) {
@@ -47,53 +47,55 @@ export default function Navbar({ usuario }) {
     : '?'
 
   return (
-    <nav className="bg-white dark:bg-gray-900 border-b border-slate-200 dark:border-gray-800 px-6 py-0 transition-colors duration-300 sticky top-0 z-40">
+    <nav className="bg-white dark:bg-black border-b border-slate-200 dark:border-stone-800 px-6 py-0 transition-colors duration-300 sticky top-0 z-40">
       <div className="max-w-6xl mx-auto flex items-center justify-between h-14 gap-4">
 
         {/* Brand */}
         <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
-            </svg>
-          </div>
-          <div className="hidden sm:block">
-            <span className="text-slate-900 dark:text-white font-bold text-base tracking-tight leading-none block">Sonograma</span>
-            <span className="text-slate-400 dark:text-gray-500 text-xs leading-none">Disquería</span>
+          <img
+            src="/logo-sonograma.png"
+            alt="Sonograma"
+            className="h-9 w-9 object-contain dark:invert transition-all"
+          />
+          <div className="hidden sm:flex flex-col leading-tight">
+            <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Sonograma</span>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-[#5C7D87] dark:text-[#7E9FA8]">Disquería</span>
           </div>
         </div>
 
         {/* Nav links */}
         <div className="flex items-center gap-1">
-          <NavLink to="/" end className={navLinkClass}>Dashboard</NavLink>
+          <NavLink to="/" end className={navLinkClass}>Inventario</NavLink>
           <NavLink to="/discos" className={navLinkClass}>Catálogo</NavLink>
+          <NavLink to="/clientes" className={navLinkClass}>Clientes</NavLink>
+          <NavLink to="/ventas/nueva" className={navLinkClass}>Nueva venta</NavLink>
         </div>
 
         {/* Right side */}
         <div className="flex items-center gap-2">
           <button
             onClick={toggle}
-            className="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
+            className="p-2 rounded-lg text-slate-500 dark:text-stone-400 hover:bg-slate-100 dark:hover:bg-stone-900 transition-colors"
             title={dark ? 'Modo claro' : 'Modo oscuro'}
           >
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
 
-          <div className="w-px h-5 bg-slate-200 dark:bg-gray-700 mx-1" />
+          <div className="w-px h-5 bg-slate-200 dark:bg-stone-800 mx-1" />
 
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center">
-              <span className="text-indigo-600 dark:text-indigo-400 text-xs font-bold">{initials}</span>
+            <div className="w-7 h-7 rounded-full bg-[#7E9FA8]/20 dark:bg-[#7E9FA8]/20 flex items-center justify-center">
+              <span className="text-[#5C7D87] dark:text-[#7E9FA8] text-xs font-bold">{initials}</span>
             </div>
             <div className="hidden sm:block">
-              <div className="text-slate-700 dark:text-gray-300 text-sm font-medium leading-none">{usuario?.nombreUsuario}</div>
-              <div className="text-indigo-500 dark:text-indigo-400 text-xs mt-0.5">{usuario?.rol}</div>
+              <div className="text-slate-700 dark:text-stone-300 text-sm font-medium leading-none">{usuario?.nombreUsuario}</div>
+              <div className="text-[#7E9FA8] text-xs mt-0.5">{usuario?.rol}</div>
             </div>
           </div>
 
           <button
             onClick={logout}
-            className="ml-1 flex items-center gap-1.5 text-slate-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-sm transition-colors px-2 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
+            className="ml-1 flex items-center gap-1.5 text-slate-400 dark:text-stone-500 hover:text-red-500 dark:hover:text-red-400 text-sm transition-colors px-2 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
             title="Cerrar sesión"
           >
             <LogoutIcon />

@@ -20,7 +20,7 @@ async function request(method, path, body) {
   })
   if (res.status === 204) return null
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Error en la solicitud')
+  if (!res.ok) throw new Error(data.message || data.error || 'Error en la solicitud')
   return data
 }
 
@@ -44,7 +44,18 @@ export const api = {
 
   clientes: {
     todos: () => request('GET', '/clientes'),
+    porId: (id) => request('GET', `/clientes/${id}`),
+    buscar: (q) => request('GET', `/clientes/buscar?q=${encodeURIComponent(q)}`),
     crear: (cliente) => request('POST', '/clientes', cliente),
+    actualizar: (id, cliente) => request('PUT', `/clientes/${id}`, cliente),
+  },
+
+  ventas: {
+    todas: () => request('GET', '/ventas'),
+    porId: (id) => request('GET', `/ventas/${id}`),
+    porCliente: (idCliente) => request('GET', `/ventas/cliente/${idCliente}`),
+    registrar: (venta) => request('POST', '/ventas', venta),
+    estadisticasPorMes: () => request('GET', '/ventas/estadisticas/por-mes'),
   },
 
   qr: {
