@@ -1,7 +1,11 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.CanalVenta;
+import com.sonograma.enums.EstadoVenta;
+import com.sonograma.enums.TipoEntrega;
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -30,21 +34,21 @@ public class Venta {
     @Builder.Default
     private LocalDateTime fechaVenta = LocalDateTime.now();
 
-    // LOCAL, INSTAGRAM
+    @Enumerated(EnumType.STRING)
     @Column(name = "canal_venta")
-    private String canalVenta;
+    private CanalVenta canalVenta;
 
     @Column(name = "total", precision = 10, scale = 2)
     private BigDecimal total;
 
-    // RETIRO, ENVIO
+    @Enumerated(EnumType.STRING)
     @Column(name = "tipo_entrega")
-    private String tipoEntrega;
+    private TipoEntrega tipoEntrega;
 
-    // PENDIENTE, COMPLETADA, CANCELADA
+    @Enumerated(EnumType.STRING)
     @Column(name = "estado")
     @Builder.Default
-    private String estado = "PENDIENTE";
+    private EstadoVenta estado = EstadoVenta.PENDIENTE;
 
     @Column(name = "observaciones")
     private String observaciones;

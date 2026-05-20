@@ -1,8 +1,9 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.ClienteDTO;
-import com.sonograma.entity.Cliente;
+import com.sonograma.dto.ClienteRequest;
 import com.sonograma.service.ClienteService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,24 +28,25 @@ public class ClienteController {
         return ResponseEntity.ok(clienteService.obtenerPorId(id));
     }
 
-    @GetMapping("/buscar/nombre")
-    public ResponseEntity<List<ClienteDTO>> buscarPorNombre(@RequestParam String q) {
-        return ResponseEntity.ok(clienteService.buscarPorNombre(q));
-    }
-
     @GetMapping("/cedula/{cedula}")
     public ResponseEntity<ClienteDTO> obtenerPorCedula(@PathVariable String cedula) {
         return ResponseEntity.ok(clienteService.obtenerPorCedula(cedula));
     }
 
+    @GetMapping("/buscar")
+    public ResponseEntity<List<ClienteDTO>> buscar(@RequestParam String q) {
+        return ResponseEntity.ok(clienteService.buscar(q));
+    }
+
     @PostMapping
-    public ResponseEntity<ClienteDTO> crearCliente(@RequestBody Cliente cliente) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.crearCliente(cliente));
+    public ResponseEntity<ClienteDTO> crearCliente(@Valid @RequestBody ClienteRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.crearCliente(request));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ClienteDTO> actualizarCliente(@PathVariable Long id, @RequestBody Cliente cliente) {
-        return ResponseEntity.ok(clienteService.actualizarCliente(id, cliente));
+    public ResponseEntity<ClienteDTO> actualizarCliente(@PathVariable Long id,
+                                                         @Valid @RequestBody ClienteRequest request) {
+        return ResponseEntity.ok(clienteService.actualizarCliente(id, request));
     }
 
     @DeleteMapping("/{id}")

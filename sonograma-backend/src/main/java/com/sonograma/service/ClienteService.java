@@ -1,7 +1,11 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.ClienteDTO;
+import com.sonograma.dto.ClienteRequest;
 import com.sonograma.entity.Cliente;
+import com.sonograma.exception.NegocioException;
+import com.sonograma.exception.RecursoNoEncontradoException;
+import com.sonograma.mapper.ClienteMapper;
 import com.sonograma.repository.ClienteRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,74 +21,64 @@ public class ClienteService {
 
     private final ClienteRepository clienteRepository;
 
-    public ClienteDTO crearCliente(Cliente cliente) {
-        return mapearADTO(clienteRepository.save(cliente));
+    public ClienteDTO crearCliente(ClienteRequest request) {
+        if (request.getCedula() != null && clienteRepository.existsByCedula(request.getCedula())) {
+            throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
+        }
+        Cliente cliente = ClienteMapper.toEntity(request);
+        cliente.setActivo(true);
+        return ClienteMapper.toDTO(clienteRepository.save(cliente));
     }
 
     @Transactional(readOnly = true)
     public ClienteDTO obtenerPorId(Long id) {
         return clienteRepository.findById(id)
-                .map(this::mapearADTO)
-                .orElseThrow(() -> new IllegalArgumentException("Cliente no encontrado: " + id));
-    }
-
-    @Transactional(readOnly = true)
-    public List<ClienteDTO> buscarPorNombre(String nombre) {
-        return clienteRepository.findByNombreContainingIgnoreCase(nombre).stream()
-                .map(this::mapearADTO)
-                .collect(Collectors.toList());
+                .filter(Cliente::getActivo)
+                .map(ClienteMapper::toDTO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", id));
     }
 
     @Transactional(readOnly = true)
     public ClienteDTO obtenerPorCedula(String cedula) {
-        Cliente cliente = clienteRepository.findByCedula(cedula);
-        if (cliente == null) {
-            throw new IllegalArgumentException("Cliente no encontrado con cédula: " + cedula);
-        }
-        return mapearADTO(cliente);
+        return clienteRepository.findByCedulaAndActivoTrue(cedula)
+                .map(ClienteMapper::toDTO)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado con cédula: " + cedula));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ClienteDTO> buscar(String q) {
+        return clienteRepository.buscarActivosPorNombreOApellido(q).stream()
+                .map(ClienteMapper::toDTO)
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<ClienteDTO> obtenerTodos() {
-        return clienteRepository.findAll().stream()
-                .map(this::mapearADTO)
+        return clienteRepository.findByActivoTrue().stream()
+                .map(ClienteMapper::toDTO)
                 .collect(Collectors.toList());
     }
 
-    public ClienteDTO actualizarCliente(Long id, Cliente datosActualizados) {
+    public ClienteDTO actualizarCliente(Long id, ClienteRequest request) {
         Cliente cliente = clienteRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Cliente no encontrado: " + id));
+                .filter(Cliente::getActivo)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", id));
 
-        if (datosActualizados.getNombre() != null) cliente.setNombre(datosActualizados.getNombre());
-        if (datosActualizados.getApellido() != null) cliente.setApellido(datosActualizados.getApellido());
-        if (datosActualizados.getTelefono() != null) cliente.setTelefono(datosActualizados.getTelefono());
-        if (datosActualizados.getEmail() != null) cliente.setEmail(datosActualizados.getEmail());
-        if (datosActualizados.getDireccion() != null) cliente.setDireccion(datosActualizados.getDireccion());
-        if (datosActualizados.getInstagramUsuario() != null) cliente.setInstagramUsuario(datosActualizados.getInstagramUsuario());
-        if (datosActualizados.getObservaciones() != null) cliente.setObservaciones(datosActualizados.getObservaciones());
+        if (request.getCedula() != null
+                && !request.getCedula().equals(cliente.getCedula())
+                && clienteRepository.existsByCedulaAndIdClienteNot(request.getCedula(), id)) {
+            throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
+        }
 
-        return mapearADTO(clienteRepository.save(cliente));
+        ClienteMapper.updateFromRequest(cliente, request);
+        return ClienteMapper.toDTO(clienteRepository.save(cliente));
     }
 
     public void eliminarCliente(Long id) {
-        if (!clienteRepository.existsById(id)) {
-            throw new IllegalArgumentException("Cliente no encontrado: " + id);
-        }
-        clienteRepository.deleteById(id);
-    }
-
-    private ClienteDTO mapearADTO(Cliente cliente) {
-        return ClienteDTO.builder()
-                .idCliente(cliente.getIdCliente())
-                .nombre(cliente.getNombre())
-                .apellido(cliente.getApellido())
-                .telefono(cliente.getTelefono())
-                .email(cliente.getEmail())
-                .cedula(cliente.getCedula())
-                .instagramUsuario(cliente.getInstagramUsuario())
-                .direccion(cliente.getDireccion())
-                .observaciones(cliente.getObservaciones())
-                .fechaAlta(cliente.getFechaAlta())
-                .build();
+        Cliente cliente = clienteRepository.findById(id)
+                .filter(Cliente::getActivo)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", id));
+        cliente.setActivo(false);
+        clienteRepository.save(cliente);
     }
 }

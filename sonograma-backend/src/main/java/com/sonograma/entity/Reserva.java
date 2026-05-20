@@ -1,7 +1,9 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.EstadoReserva;
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -34,7 +36,7 @@ public class Reserva {
     @Column(name = "senia", precision = 10, scale = 2)
     private BigDecimal senia;
 
-    // ACTIVA, EXPIRADA, COMPRADA
+    @Enumerated(EnumType.STRING)
     @Column(name = "estado")
-    private String estado = "ACTIVA";
+    private EstadoReserva estado = EstadoReserva.ACTIVA;
 }

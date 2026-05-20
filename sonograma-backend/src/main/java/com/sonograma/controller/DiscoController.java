@@ -1,15 +1,17 @@
 package com.sonograma.controller;
 
+import com.sonograma.dto.CambioEstadoRequest;
 import com.sonograma.dto.DiscoDTO;
-import com.sonograma.entity.Disco;
+import com.sonograma.dto.DiscoRequest;
+import com.sonograma.enums.EstadoDisco;
 import com.sonograma.service.DiscoService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/discos")
@@ -23,45 +25,36 @@ public class DiscoController {
         return ResponseEntity.ok(discoService.obtenerTodos());
     }
 
-    @GetMapping("/disponibles")
-    public ResponseEntity<List<DiscoDTO>> obtenerDisponibles() {
-        return ResponseEntity.ok(discoService.obtenerDisponibles());
-    }
-
     @GetMapping("/{id}")
     public ResponseEntity<DiscoDTO> obtenerPorId(@PathVariable Long id) {
         return ResponseEntity.ok(discoService.obtenerPorId(id));
     }
 
-    @GetMapping("/qr/{codigoQr}")
-    public ResponseEntity<DiscoDTO> obtenerPorQR(@PathVariable String codigoQr) {
-        return ResponseEntity.ok(discoService.obtenerPorQR(codigoQr));
+    @GetMapping("/buscar")
+    public ResponseEntity<List<DiscoDTO>> buscar(@RequestParam String q) {
+        return ResponseEntity.ok(discoService.buscar(q));
     }
 
-    @GetMapping("/buscar/artista")
-    public ResponseEntity<List<DiscoDTO>> buscarPorArtista(@RequestParam String q) {
-        return ResponseEntity.ok(discoService.buscarPorArtista(q));
-    }
-
-    @GetMapping("/buscar/album")
-    public ResponseEntity<List<DiscoDTO>> buscarPorAlbum(@RequestParam String q) {
-        return ResponseEntity.ok(discoService.buscarPorAlbum(q));
+    @GetMapping("/estado/{estado}")
+    public ResponseEntity<List<DiscoDTO>> obtenerPorEstado(@PathVariable EstadoDisco estado) {
+        return ResponseEntity.ok(discoService.obtenerPorEstado(estado));
     }
 
     @PostMapping
-    public ResponseEntity<DiscoDTO> crearDisco(@RequestBody Disco disco) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(discoService.crearDisco(disco));
+    public ResponseEntity<DiscoDTO> crearDisco(@Valid @RequestBody DiscoRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(discoService.crearDisco(request));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<DiscoDTO> actualizarDisco(@PathVariable Long id, @RequestBody Disco disco) {
-        return ResponseEntity.ok(discoService.actualizarDisco(id, disco));
+    public ResponseEntity<DiscoDTO> actualizarDisco(@PathVariable Long id,
+                                                      @Valid @RequestBody DiscoRequest request) {
+        return ResponseEntity.ok(discoService.actualizarDisco(id, request));
     }
 
     @PatchMapping("/{id}/estado")
     public ResponseEntity<DiscoDTO> cambiarEstado(@PathVariable Long id,
-                                                   @RequestBody Map<String, String> body) {
-        return ResponseEntity.ok(discoService.cambiarEstado(id, body.get("estado")));
+                                                   @Valid @RequestBody CambioEstadoRequest request) {
+        return ResponseEntity.ok(discoService.cambiarEstado(id, request.getEstado()));
     }
 
     @DeleteMapping("/{id}")

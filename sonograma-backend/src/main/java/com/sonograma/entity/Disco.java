@@ -1,7 +1,11 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.TipoDisco;
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -36,13 +40,13 @@ public class Disco {
     @Column(name = "anio")
     private Integer anio;
 
-    // NUEVO, USADO, CONSIGNACION, CATALOGO
+    @Enumerated(EnumType.STRING)
     @Column(name = "condicion")
-    private String condicion;
+    private CondicionDisco condicion;
 
-    // VINILO, CD, DIGITAL, etc.
+    @Enumerated(EnumType.STRING)
     @Column(name = "tipo_disco")
-    private String tipoDisco;
+    private TipoDisco tipoDisco;
 
     @Column(name = "costo", precision = 10, scale = 2)
     private BigDecimal costo;
@@ -50,10 +54,10 @@ public class Disco {
     @Column(name = "precio_venta", precision = 10, scale = 2)
     private BigDecimal precioVenta;
 
-    // DISPONIBLE, RESERVADO, VENDIDO, DESCONTINUADO
+    @Enumerated(EnumType.STRING)
     @Column(name = "estado", nullable = false)
     @Builder.Default
-    private String estado = "DISPONIBLE";
+    private EstadoDisco estado = EstadoDisco.DISPONIBLE;
 
     @Column(name = "fecha_ingreso")
     @Builder.Default

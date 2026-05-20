@@ -2,6 +2,7 @@ package com.sonograma.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 
 @Entity
@@ -28,7 +29,7 @@ public class Cliente {
     @Column(name = "email")
     private String email;
 
-    @Column(name = "cedula")
+    @Column(name = "cedula", unique = true)
     private String cedula;
 
     @Column(name = "instagram_usuario")
@@ -42,4 +43,7 @@ public class Cliente {
 
     @Column(name = "fecha_alta")
     private LocalDateTime fechaAlta = LocalDateTime.now();
+
+    @Column(name = "activo", nullable = false)
+    private Boolean activo = true;
 }
