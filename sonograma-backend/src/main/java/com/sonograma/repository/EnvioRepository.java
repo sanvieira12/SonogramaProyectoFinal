@@ -9,6 +9,7 @@ import java.util.Optional;
 public interface EnvioRepository extends JpaRepository<Envio, Long> {
     Optional<Envio> findByVentaIdVenta(Long idVenta);
     List<Envio> findByEstadoLogistico(String estadoLogistico);
+    List<Envio> findByVentaClienteIdClienteOrderByFechaEnvioDesc(Long idCliente);
 
     @Query("SELECT e FROM Envio e WHERE e.estadoLogistico IN ('PREPARANDO', 'EN_CAMINO') ORDER BY e.fechaEnvio ASC")
     List<Envio> findEnviosPendientes();

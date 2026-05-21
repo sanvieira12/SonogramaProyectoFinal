@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -67,7 +68,12 @@ public class DiscoService {
 
     @Transactional(readOnly = true)
     public List<DiscoResponseDTO> buscar(String q) {
-        return discoRepository.buscarPorArtistaOAlbum(q).stream()
+        String query = normalizar(q);
+        if (query.isBlank()) {
+            return obtenerTodos();
+        }
+        return discoRepository.findAll().stream()
+                .filter(d -> coincide(d, query))
                 .map(DiscoMapper::toDTO)
                 .collect(Collectors.toList());
     }
@@ -97,5 +103,26 @@ public class DiscoService {
         }
         disco.setEstado(EstadoDisco.DESCONTINUADO);
         discoRepository.save(disco);
+    }
+
+    private boolean coincide(Disco disco, String query) {
+        return contiene(disco.getAlbum(), query)
+                || contiene(disco.getArtista(), query)
+                || contiene(disco.getGenero(), query)
+                || contiene(disco.getSelloDiscografico(), query)
+                || contiene(disco.getDescripcion(), query)
+                || contiene(disco.getCodigoInterno(), query)
+                || contiene(disco.getEstado() != null ? disco.getEstado().name() : null, query)
+                || contiene(disco.getCondicion() != null ? disco.getCondicion().name() : null, query)
+                || contiene(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null, query)
+                || contiene(disco.getAnio() != null ? String.valueOf(disco.getAnio()) : null, query);
+    }
+
+    private boolean contiene(String valor, String query) {
+        return valor != null && normalizar(valor).contains(query);
+    }
+
+    private String normalizar(String valor) {
+        return valor == null ? "" : valor.trim().toLowerCase(Locale.ROOT);
     }
 }

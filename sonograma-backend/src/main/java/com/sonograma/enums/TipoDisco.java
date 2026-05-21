@@ -1,5 +1,5 @@
 package com.sonograma.enums;
 
 public enum TipoDisco {
-    VINILO, CD, DIGITAL
+    VINILO, CD, DIGITAL, CASSETTE, OTRO
 }

@@ -20,6 +20,14 @@ public class VentaResponseDTO {
     private LocalDateTime fechaVenta;
     private String canalVenta;
     private BigDecimal total;
+    private BigDecimal costoDisco;
+    private BigDecimal precioVenta;
+    private BigDecimal costoEnvio;
+    private BigDecimal porcentajeImpuesto;
+    private BigDecimal montoImpuesto;
+    private BigDecimal otrosCostos;
+    private BigDecimal totalFinal;
+    private BigDecimal gananciaEstimada;
     private String tipoEntrega;
     private String estado;
     private String observaciones;

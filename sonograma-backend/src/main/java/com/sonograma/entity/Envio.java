@@ -2,6 +2,7 @@ package com.sonograma.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -23,6 +24,18 @@ public class Envio {
 
     @Column(name = "direccion_envio", nullable = false)
     private String direccionEnvio;
+
+    @Column(name = "departamento")
+    private String departamento;
+
+    @Column(name = "sucursal_dac_codigo")
+    private String sucursalDacCodigo;
+
+    @Column(name = "sucursal_dac_nombre")
+    private String sucursalDacNombre;
+
+    @Column(name = "costo_envio", precision = 10, scale = 2)
+    private BigDecimal costoEnvio;
 
     // PREPARANDO, EN_CAMINO, ENTREGADO, DEVUELTO
     @Column(name = "estado_logistico")

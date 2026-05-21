@@ -16,6 +16,8 @@ public class DiscoMapper {
                 .artista(disco.getArtista())
                 .album(disco.getAlbum())
                 .genero(disco.getGenero())
+                .selloDiscografico(disco.getSelloDiscografico())
+                .descripcion(disco.getDescripcion())
                 .anio(disco.getAnio())
                 .condicion(disco.getCondicion() != null ? disco.getCondicion().name() : null)
                 .tipoDisco(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null)
@@ -33,6 +35,8 @@ public class DiscoMapper {
                 .artista(request.getArtista())
                 .album(request.getAlbum())
                 .genero(request.getGenero())
+                .selloDiscografico(request.getSelloDiscografico())
+                .descripcion(request.getDescripcion())
                 .anio(request.getAnio())
                 .condicion(request.getCondicion())
                 .tipoDisco(request.getTipoDisco())
@@ -46,6 +50,8 @@ public class DiscoMapper {
         if (request.getArtista() != null) disco.setArtista(request.getArtista());
         if (request.getAlbum() != null) disco.setAlbum(request.getAlbum());
         if (request.getGenero() != null) disco.setGenero(request.getGenero());
+        if (request.getSelloDiscografico() != null) disco.setSelloDiscografico(request.getSelloDiscografico());
+        if (request.getDescripcion() != null) disco.setDescripcion(request.getDescripcion());
         if (request.getAnio() != null) disco.setAnio(request.getAnio());
         if (request.getCondicion() != null) disco.setCondicion(request.getCondicion());
         if (request.getTipoDisco() != null) disco.setTipoDisco(request.getTipoDisco());

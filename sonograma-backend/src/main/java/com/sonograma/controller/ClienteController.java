@@ -1,7 +1,9 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.ClienteDTO;
+import com.sonograma.dto.ClienteDetalleDTO;
 import com.sonograma.dto.ClienteRequest;
+import com.sonograma.dto.DireccionClienteDTO;
 import com.sonograma.service.ClienteService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,16 @@ public class ClienteController {
         return ResponseEntity.ok(clienteService.obtenerPorId(id));
     }
 
+    @GetMapping("/{id}/detalle")
+    public ResponseEntity<ClienteDetalleDTO> obtenerDetalle(@PathVariable Long id) {
+        return ResponseEntity.ok(clienteService.obtenerDetalle(id));
+    }
+
+    @GetMapping("/{id}/direcciones")
+    public ResponseEntity<List<DireccionClienteDTO>> obtenerDirecciones(@PathVariable Long id) {
+        return ResponseEntity.ok(clienteService.obtenerDirecciones(id));
+    }
+
     @GetMapping("/cedula/{cedula}")
     public ResponseEntity<ClienteDTO> obtenerPorCedula(@PathVariable String cedula) {
         return ResponseEntity.ok(clienteService.obtenerPorCedula(cedula));
@@ -41,6 +53,12 @@ public class ClienteController {
     @PostMapping
     public ResponseEntity<ClienteDTO> crearCliente(@Valid @RequestBody ClienteRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.crearCliente(request));
+    }
+
+    @PostMapping("/{id}/direcciones")
+    public ResponseEntity<DireccionClienteDTO> crearDireccion(@PathVariable Long id,
+                                                              @Valid @RequestBody DireccionClienteDTO request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.crearDireccion(id, request));
     }
 
     @PutMapping("/{id}")

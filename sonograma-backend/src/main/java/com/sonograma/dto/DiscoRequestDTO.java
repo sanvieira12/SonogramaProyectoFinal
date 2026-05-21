@@ -33,6 +33,12 @@ public class DiscoRequestDTO {
     @Size(max = 50)
     private String genero;
 
+    @Size(max = 120)
+    private String selloDiscografico;
+
+    @Size(max = 1000)
+    private String descripcion;
+
     @Min(value = 1900, message = "El año debe ser mayor a 1900")
     @Max(value = 2100)
     private Integer anio;

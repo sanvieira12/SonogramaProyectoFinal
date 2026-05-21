@@ -1,5 +1,6 @@
 package com.sonograma.controller;
 
+import com.sonograma.dto.ConfiguracionCostosDTO;
 import com.sonograma.dto.VentaRequestDTO;
 import com.sonograma.dto.VentaResponseDTO;
 import com.sonograma.dto.VentasPorMesDTO;
@@ -37,6 +38,11 @@ public class VentaController {
     @GetMapping("/estadisticas/por-mes")
     public ResponseEntity<List<VentasPorMesDTO>> estadisticasPorMes() {
         return ResponseEntity.ok(ventaService.obtenerEstadisticasPorMes());
+    }
+
+    @GetMapping("/configuracion-costos")
+    public ResponseEntity<ConfiguracionCostosDTO> configuracionCostos() {
+        return ResponseEntity.ok(ventaService.obtenerConfiguracionCostos());
     }
 
     @PostMapping

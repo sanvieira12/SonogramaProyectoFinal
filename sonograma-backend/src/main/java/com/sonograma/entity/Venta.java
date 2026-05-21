@@ -41,6 +41,30 @@ public class Venta {
     @Column(name = "total", precision = 10, scale = 2)
     private BigDecimal total;
 
+    @Column(name = "costo_disco", precision = 10, scale = 2)
+    private BigDecimal costoDisco;
+
+    @Column(name = "precio_venta", precision = 10, scale = 2)
+    private BigDecimal precioVenta;
+
+    @Column(name = "costo_envio", precision = 10, scale = 2)
+    private BigDecimal costoEnvio;
+
+    @Column(name = "porcentaje_impuesto", precision = 5, scale = 2)
+    private BigDecimal porcentajeImpuesto;
+
+    @Column(name = "monto_impuesto", precision = 10, scale = 2)
+    private BigDecimal montoImpuesto;
+
+    @Column(name = "otros_costos", precision = 10, scale = 2)
+    private BigDecimal otrosCostos;
+
+    @Column(name = "total_final", precision = 10, scale = 2)
+    private BigDecimal totalFinal;
+
+    @Column(name = "ganancia_estimada", precision = 10, scale = 2)
+    private BigDecimal gananciaEstimada;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "tipo_entrega")
     private TipoEntrega tipoEntrega;

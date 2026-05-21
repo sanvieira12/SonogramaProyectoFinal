@@ -37,6 +37,12 @@ public class Disco {
     @Column(name = "genero")
     private String genero;
 
+    @Column(name = "sello_discografico")
+    private String selloDiscografico;
+
+    @Column(name = "descripcion", columnDefinition = "TEXT")
+    private String descripcion;
+
     @Column(name = "anio")
     private Integer anio;
 

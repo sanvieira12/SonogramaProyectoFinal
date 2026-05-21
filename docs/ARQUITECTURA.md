@@ -46,6 +46,8 @@ Usuario → Navegador → React (Component)
 
 - **Usuario**: Operadores del sistema (integración futura con AWS Cognito).
 - **Cliente**: Clientes de la disquería.
+- **DireccionCliente**: Direcciones reutilizables asociadas a clientes para envíos.
 - **Disco**: Stock de vinilos/CDs.
 - **Venta**: Transacciones de venta.
+- **Envio**: Datos logísticos de ventas con envío, incluyendo preparación para DAC.
 - **Reserva**: Reservas de discos con seña opcional.

@@ -19,6 +19,8 @@ public class DiscoResponseDTO {
     private String artista;
     private String album;
     private String genero;
+    private String selloDiscografico;
+    private String descripcion;
     private Integer anio;
     private String condicion;
     private String tipoDisco;
