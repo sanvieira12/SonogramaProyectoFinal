@@ -1,11 +1,11 @@
 import { useState } from 'react'
 
 const CONDICIONES = ['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO']
-const TIPOS = ['VINILO', 'CD', 'DIGITAL']
-const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'DESCONTINUADO']
+const TIPOS = ['VINILO', 'CD', 'DIGITAL', 'CASSETTE', 'OTRO']
+const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
 
 const VACIO = {
-  codigoInterno: '', artista: '', album: '', genero: '', anio: '',
+  codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
   condicion: 'NUEVO', tipoDisco: 'VINILO', costo: '', precioVenta: '', estado: 'DISPONIBLE',
 }
 
@@ -18,6 +18,8 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           artista: disco.artista || '',
           album: disco.album || '',
           genero: disco.genero || '',
+          selloDiscografico: disco.selloDiscografico || '',
+          descripcion: disco.descripcion || '',
           anio: disco.anio || '',
           condicion: disco.condicion || 'NUEVO',
           tipoDisco: disco.tipoDisco || 'VINILO',
@@ -113,6 +115,17 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Año</label>
               <input value={form.anio} onChange={e => set('anio', e.target.value)} className="input" placeholder="1994" type="number" min="1900" max="2099" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Sello discográfico</label>
+              <input value={form.selloDiscografico} onChange={e => set('selloDiscografico', e.target.value)} className="input" placeholder="Warp Records" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Descripción</label>
+              <input value={form.descripcion} onChange={e => set('descripcion', e.target.value)} className="input" placeholder="Edición, notas, palabras clave..." />
             </div>
           </div>
 

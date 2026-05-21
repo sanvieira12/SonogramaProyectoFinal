@@ -5,12 +5,13 @@ import {
 } from 'recharts'
 import { api } from '../api/sonograma'
 import AddDiscoModal from '../components/AddDiscoModal'
-import { useTheme } from '../context/ThemeContext'
+import { useTheme } from '../context/useTheme'
 
 const ESTADO_COLORS = {
   DISPONIBLE:    '#5B8C7D',
   RESERVADO:     '#B8975E',
   VENDIDO:       '#6B7280',
+  FUERA_STOCK:   '#D97706',
   DESCONTINUADO: '#A66363',
 }
 
@@ -18,7 +19,16 @@ const ESTADO_STYLE = {
   DISPONIBLE:    { bg: 'bg-emerald-50 dark:bg-emerald-900/20',  text: 'text-emerald-700 dark:text-emerald-400',  dot: 'bg-[#5B8C7D]' },
   RESERVADO:     { bg: 'bg-amber-50 dark:bg-amber-900/20',      text: 'text-amber-700 dark:text-amber-400',      dot: 'bg-[#B8975E]' },
   VENDIDO:       { bg: 'bg-slate-100 dark:bg-slate-800/60',     text: 'text-slate-600 dark:text-slate-400',      dot: 'bg-[#6B7280]' },
+  FUERA_STOCK:   { bg: 'bg-orange-50 dark:bg-orange-900/20',     text: 'text-orange-700 dark:text-orange-400',    dot: 'bg-[#D97706]' },
   DESCONTINUADO: { bg: 'bg-red-50 dark:bg-red-900/20',          text: 'text-red-700 dark:text-red-400',          dot: 'bg-[#A66363]' },
+}
+
+const ESTADO_LABELS = {
+  DISPONIBLE: 'Disponible',
+  RESERVADO: 'Reservado',
+  VENDIDO: 'Vendido',
+  FUERA_STOCK: 'Fuera de stock',
+  DESCONTINUADO: 'Descontinuado',
 }
 
 function StatCard({ label, value, sublabel, color, icon }) {
@@ -32,16 +42,6 @@ function StatCard({ label, value, sublabel, color, icon }) {
         <div className="text-slate-600 dark:text-stone-400 text-sm font-medium mt-0.5">{label}</div>
         {sublabel && <div className="text-slate-400 dark:text-stone-600 text-xs mt-0.5">{sublabel}</div>}
       </div>
-    </div>
-  )
-}
-
-function CustomBarTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-lg px-3 py-2 shadow-lg text-sm">
-      <div className="font-medium text-slate-700 dark:text-stone-300">{label}</div>
-      <div className="font-bold" style={{ color: payload[0]?.payload?.fill || '#7E9FA8' }}>{payload[0].value} discos</div>
     </div>
   )
 }
@@ -60,7 +60,26 @@ function EmptyState() {
   )
 }
 
-const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'DESCONTINUADO']
+const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
+
+const GRAFICAS = [
+  { key: 'inventarioPorEstado', label: 'Inventario por estado', unidad: 'discos' },
+  { key: 'inventarioPorGenero', label: 'Inventario por género', unidad: 'discos' },
+  { key: 'inventarioPorAnio', label: 'Inventario por año', unidad: 'discos' },
+  { key: 'inventarioPorSello', label: 'Inventario por sello', unidad: 'discos' },
+  { key: 'generosMasVendidos', label: 'Géneros más vendidos', unidad: 'ventas' },
+  { key: 'aniosMusicaMasVendidos', label: 'Años de música más vendidos', unidad: 'ventas' },
+  { key: 'artistasMasVendidos', label: 'Top artistas vendidos', unidad: 'ventas' },
+  { key: 'sellosMasVendidos', label: 'Top sellos vendidos', unidad: 'ventas' },
+  { key: 'ventasPorSemana', label: 'Ventas por semana', unidad: 'ventas' },
+  { key: 'ventasPorMes', label: 'Ventas por mes', unidad: 'ventas' },
+  { key: 'ventasPorAnio', label: 'Ventas por año', unidad: 'ventas' },
+  { key: 'gananciaPorMes', label: 'Ganancia por mes', unidad: 'UYU' },
+]
+
+function unicoOrdenado(valores) {
+  return [...new Set(valores.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es'))
+}
 
 export default function Dashboard() {
   const { dark } = useTheme()
@@ -69,15 +88,30 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
+  const [filtroGenero, setFiltroGenero] = useState('TODOS')
+  const [filtroAnio, setFiltroAnio] = useState('TODOS')
+  const [filtroSello, setFiltroSello] = useState('TODOS')
   const [mostrarModal, setMostrarModal] = useState(false)
   const [qrDisco, setQrDisco] = useState(null)
   const [ventasPorMes, setVentasPorMes] = useState([])
+  const [estadisticas, setEstadisticas] = useState(null)
+  const [graficaSeleccionada, setGraficaSeleccionada] = useState('inventarioPorEstado')
 
-  useEffect(() => { cargarDiscos() }, [])
+  useEffect(() => {
+    let cancelado = false
+    api.discos.todos()
+      .then(data => { if (!cancelado) setDiscos(data) })
+      .catch(() => { if (!cancelado) setDiscos([]) })
+      .finally(() => { if (!cancelado) setLoading(false) })
+    return () => { cancelado = true }
+  }, [])
   useEffect(() => {
     api.ventas.estadisticasPorMes()
       .then(setVentasPorMes)
       .catch(() => setVentasPorMes([]))
+    api.estadisticas.catalogo()
+      .then(setEstadisticas)
+      .catch(() => setEstadisticas(null))
   }, [])
 
   async function cargarDiscos() {
@@ -117,13 +151,9 @@ export default function Dashboard() {
     disponibles: discos.filter(d => d.estado === 'DISPONIBLE').length,
     reservados: discos.filter(d => d.estado === 'RESERVADO').length,
     vendidos: discos.filter(d => d.estado === 'VENDIDO').length,
+    fueraStock: discos.filter(d => d.estado === 'FUERA_STOCK').length,
+    descontinuados: discos.filter(d => d.estado === 'DESCONTINUADO').length,
   }
-
-  const barData = Object.entries(ESTADO_COLORS).map(([estado, fill]) => ({
-    estado: estado.charAt(0) + estado.slice(1).toLowerCase(),
-    cantidad: discos.filter(d => d.estado === estado).length,
-    fill,
-  })).filter(d => d.cantidad > 0)
 
   const valorTotal = discos
     .filter(d => d.estado === 'DISPONIBLE' && d.precioVenta)
@@ -131,8 +161,23 @@ export default function Dashboard() {
 
   const discosFiltrados = discos.filter(d => {
     if (filtroEstado !== 'TODOS' && d.estado !== filtroEstado) return false
+    if (filtroGenero !== 'TODOS' && d.genero !== filtroGenero) return false
+    if (filtroAnio !== 'TODOS' && String(d.anio || '') !== filtroAnio) return false
+    if (filtroSello !== 'TODOS' && (d.selloDiscografico || 'Sin sello') !== filtroSello) return false
     return true
   })
+
+  const generos = unicoOrdenado(discos.map(d => d.genero))
+  const anios = unicoOrdenado(discos.map(d => d.anio ? String(d.anio) : null))
+  const sellos = unicoOrdenado(discos.map(d => d.selloDiscografico || 'Sin sello'))
+  const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
+  const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
+    etiqueta: item.etiqueta,
+    cantidad: graficaActual.unidad === 'UYU'
+      ? Number(item.gananciaEstimada || 0)
+      : Number(item.cantidad || 0),
+    fill: ESTADO_COLORS[item.clave] || ['#7E9FA8', '#5B8C7D', '#B8975E', '#A66363', '#6B7280'][i % 5],
+  }))
 
   const axisColor = dark ? '#78716c' : '#94a3b8'
   const gridColor = dark ? '#1c1917' : '#f1f5f9'
@@ -141,7 +186,7 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard
           label="Total inventario"
           value={stats.total}
@@ -184,6 +229,26 @@ export default function Dashboard() {
             </svg>
           }
         />
+        <StatCard
+          label="Fuera de stock"
+          value={stats.fueraStock}
+          color="bg-orange-50 dark:bg-orange-900/20"
+          icon={
+            <svg className="w-5 h-5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM3.75 4.5h16.5v15H3.75v-15Z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Descontinuados"
+          value={stats.descontinuados}
+          color="bg-red-50 dark:bg-red-900/20"
+          icon={
+            <svg className="w-5 h-5 text-[#A66363]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M4.772 5.79c.34-.059.68-.114 1.022-.165m0 0L6.16 19.673A2.25 2.25 0 0 0 8.406 21h7.188a2.25 2.25 0 0 0 2.246-1.327L18.206 5.625m-12.412 0A48.108 48.108 0 0 1 12 5.25c2.102 0 4.157.136 6.206.375" />
+            </svg>
+          }
+        />
       </div>
 
       {/* Charts */}
@@ -191,20 +256,46 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-stone-300 mb-4">Inventario por estado</h3>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={barData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-                <XAxis dataKey="estado" tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<CustomBarTooltip />} cursor={{ fill: dark ? '#1c1917' : '#f8fafc' }} />
-                <Bar dataKey="cantidad" radius={[4, 4, 0, 0]} maxBarSize={48}>
-                  {barData.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-sm font-semibold text-slate-700 dark:text-stone-300">{graficaActual.label}</h3>
+              <select
+                value={graficaSeleccionada}
+                onChange={e => setGraficaSeleccionada(e.target.value)}
+                className="input max-w-[230px] py-1.5 text-xs"
+              >
+                {GRAFICAS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+              </select>
+            </div>
+            {datosGrafica.length === 0 ? (
+              <div className="h-[180px] flex items-center justify-center text-slate-400 dark:text-stone-600 text-sm">
+                Sin datos suficientes
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={datosGrafica} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+                  <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{
+                      background: dark ? '#0c0a09' : '#fff',
+                      border: `1px solid ${dark ? '#292524' : '#e2e8f0'}`,
+                      borderRadius: '0.5rem',
+                      fontSize: '12px',
+                    }}
+                    formatter={(value) => graficaActual.unidad === 'UYU'
+                      ? [`$ ${Number(value).toLocaleString('es-UY')}`, 'Ganancia']
+                      : [`${value} ${graficaActual.unidad}`, 'Cantidad']
+                    }
+                  />
+                  <Bar dataKey="cantidad" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                    {datosGrafica.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
           <div className="card p-5">
@@ -253,12 +344,12 @@ export default function Dashboard() {
           <input
             value={busqueda}
             onChange={buscar}
-            placeholder="Buscar por artista..."
+            placeholder="Buscar por disco, artista, género, año, sello, estado, código..."
             className="input pl-9"
           />
         </div>
 
-        <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+        <div className="flex gap-2 flex-wrap">
           {ESTADOS_FILTRO.map(estado => (
             <button
               key={estado}
@@ -269,7 +360,7 @@ export default function Dashboard() {
                   : 'bg-slate-100 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-200 dark:hover:bg-stone-800'
               }`}
             >
-              {estado === 'TODOS' ? 'Todos' : estado.charAt(0) + estado.slice(1).toLowerCase()}
+              {estado === 'TODOS' ? 'Todos' : ESTADO_LABELS[estado]}
               {estado !== 'TODOS' && (
                 <span className="ml-1.5 opacity-70">
                   {discos.filter(d => d.estado === estado).length}
@@ -277,6 +368,18 @@ export default function Dashboard() {
               )}
             </button>
           ))}
+          <select value={filtroGenero} onChange={e => setFiltroGenero(e.target.value)} className="input w-auto min-w-[120px] py-2 text-xs">
+            <option value="TODOS">Género</option>
+            {generos.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="input w-auto min-w-[100px] py-2 text-xs">
+            <option value="TODOS">Año</option>
+            {anios.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <select value={filtroSello} onChange={e => setFiltroSello(e.target.value)} className="input w-auto min-w-[130px] py-2 text-xs">
+            <option value="TODOS">Sello</option>
+            {sellos.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
 
         <button
@@ -325,6 +428,8 @@ export default function Dashboard() {
                         <div className="text-slate-500 dark:text-stone-400 text-xs mt-0.5">
                           {d.album}
                           {d.genero ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.genero}</span> : null}
+                          {d.selloDiscografico ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.selloDiscografico}</span> : null}
+                          {d.codigoInterno ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.codigoInterno}</span> : null}
                         </div>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden sm:table-cell">
@@ -336,7 +441,7 @@ export default function Dashboard() {
                       <td className="px-5 py-4">
                         <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${estilo.bg} ${estilo.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${estilo.dot}`} />
-                          {d.estado.charAt(0) + d.estado.slice(1).toLowerCase()}
+                          {ESTADO_LABELS[d.estado] || d.estado}
                         </span>
                       </td>
                       <td className="px-5 py-4 hidden lg:table-cell">

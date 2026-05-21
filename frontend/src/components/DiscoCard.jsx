@@ -1,13 +1,21 @@
+import { useNavigate } from 'react-router-dom'
 import EstadoBadge from './EstadoBadge'
 
 const ESTADOS_SIGUIENTES = {
-  DISPONIBLE:    ['RESERVADO', 'VENDIDO'],
-  RESERVADO:     ['DISPONIBLE', 'VENDIDO'],
+  DISPONIBLE:    ['RESERVADO', 'FUERA_STOCK', 'VENDIDO'],
+  RESERVADO:     ['DISPONIBLE', 'FUERA_STOCK', 'VENDIDO'],
   VENDIDO:       [],
+  FUERA_STOCK:   ['DISPONIBLE', 'DESCONTINUADO'],
   DESCONTINUADO: ['DISPONIBLE'],
 }
 
+const ESTADO_LABELS = {
+  FUERA_STOCK: 'Fuera stock',
+  DESCONTINUADO: 'Descontinuado',
+}
+
 export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar }) {
+  const navigate = useNavigate()
   const precio = disco.precioVenta
     ? `$ ${Math.round(Number(disco.precioVenta)).toLocaleString('es-AR')}`
     : null
@@ -38,6 +46,9 @@ export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar
             {disco.genero && <span>{disco.genero}</span>}
           </div>
         )}
+        {disco.selloDiscografico && (
+          <div className="text-slate-400 dark:text-gray-500 text-xs mt-1 truncate">{disco.selloDiscografico}</div>
+        )}
       </div>
 
       {/* Precio */}
@@ -62,9 +73,18 @@ export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar
             onClick={() => onCambiarEstado(disco.idDisco, nuevoEstado)}
             className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-gray-600 font-medium transition-colors"
           >
-            {nuevoEstado.charAt(0) + nuevoEstado.slice(1).toLowerCase()}
+            {ESTADO_LABELS[nuevoEstado] || nuevoEstado.charAt(0) + nuevoEstado.slice(1).toLowerCase()}
           </button>
         ))}
+
+        {(disco.estado === 'DISPONIBLE' || disco.estado === 'RESERVADO') && (
+          <button
+            onClick={() => navigate(`/ventas/nueva?idDisco=${disco.idDisco}`)}
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-[#7E9FA8]/10 dark:bg-[#7E9FA8]/10 text-[#5C7D87] dark:text-[#7E9FA8] hover:bg-[#7E9FA8]/20 dark:hover:bg-[#7E9FA8]/20 font-medium transition-colors"
+          >
+            Vender
+          </button>
+        )}
 
         <button
           onClick={() => onEliminar(disco)}

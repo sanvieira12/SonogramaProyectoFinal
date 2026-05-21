@@ -14,7 +14,7 @@ function XIcon() {
 
 export default function AddDiscoModal({ onClose, onCreado }) {
   const [form, setForm] = useState({
-    artista: '', album: '', genero: '', anio: '',
+    codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
     condicion: 'NUEVO', tipoDisco: 'VINILO',
     precioVenta: '', costo: '',
   })
@@ -99,8 +99,17 @@ export default function AddDiscoModal({ onClose, onCreado }) {
             </div>
           </div>
 
-          {/* Género / Año / Tipo */}
+          {/* Código / Género / Año */}
           <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Código</label>
+              <input
+                value={form.codigoInterno}
+                onChange={e => set('codigoInterno', e.target.value)}
+                className="input"
+                placeholder="ABC001"
+              />
+            </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Género</label>
               <input
@@ -122,16 +131,37 @@ export default function AddDiscoModal({ onClose, onCreado }) {
                 max="2099"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Sello discográfico</label>
+              <input
+                value={form.selloDiscografico}
+                onChange={e => set('selloDiscografico', e.target.value)}
+                className="input"
+                placeholder="Warp Records"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Descripción</label>
+              <input
+                value={form.descripcion}
+                onChange={e => set('descripcion', e.target.value)}
+                className="input"
+                placeholder="Notas o palabras clave"
+              />
+            </div>
+          </div>
+
+          {/* Tipo / Condición / Costo / Precio */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Tipo</label>
               <select value={form.tipoDisco} onChange={e => set('tipoDisco', e.target.value)} className="input">
                 {TIPOS.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
-          </div>
-
-          {/* Condición / Costo / Precio */}
-          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Condición</label>
               <select value={form.condicion} onChange={e => set('condicion', e.target.value)} className="input">

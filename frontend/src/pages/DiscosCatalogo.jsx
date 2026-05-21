@@ -4,7 +4,18 @@ import DiscoCard from '../components/DiscoCard'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
 
-const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'DESCONTINUADO']
+const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
+const ESTADO_LABELS = {
+  DISPONIBLE: 'Disponible',
+  RESERVADO: 'Reservado',
+  VENDIDO: 'Vendido',
+  FUERA_STOCK: 'Fuera de stock',
+  DESCONTINUADO: 'Descontinuado',
+}
+
+function unicoOrdenado(valores) {
+  return [...new Set(valores.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es'))
+}
 
 function Spinner() {
   return (
@@ -42,6 +53,9 @@ export default function DiscosCatalogo() {
   const [error, setError] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
+  const [filtroGenero, setFiltroGenero] = useState('TODOS')
+  const [filtroAnio, setFiltroAnio] = useState('TODOS')
+  const [filtroSello, setFiltroSello] = useState('TODOS')
   const [discoForm, setDiscoForm] = useState(null)   // null=cerrado, false=nuevo, objeto=editar
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
@@ -113,11 +127,19 @@ export default function DiscosCatalogo() {
     }
   }
 
-  const discosFiltrados = discos.filter(d =>
-    filtroEstado === 'TODOS' || d.estado === filtroEstado
-  )
+  const discosFiltrados = discos.filter(d => {
+    if (filtroEstado !== 'TODOS' && d.estado !== filtroEstado) return false
+    if (filtroGenero !== 'TODOS' && d.genero !== filtroGenero) return false
+    if (filtroAnio !== 'TODOS' && String(d.anio || '') !== filtroAnio) return false
+    if (filtroSello !== 'TODOS' && (d.selloDiscografico || 'Sin sello') !== filtroSello) return false
+    return true
+  })
 
-  const hayFiltroActivo = filtroEstado !== 'TODOS' || busqueda.trim() !== ''
+  const generos = unicoOrdenado(discos.map(d => d.genero))
+  const anios = unicoOrdenado(discos.map(d => d.anio ? String(d.anio) : null))
+  const sellos = unicoOrdenado(discos.map(d => d.selloDiscografico || 'Sin sello'))
+
+  const hayFiltroActivo = filtroEstado !== 'TODOS' || filtroGenero !== 'TODOS' || filtroAnio !== 'TODOS' || filtroSello !== 'TODOS' || busqueda.trim() !== ''
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
@@ -150,7 +172,7 @@ export default function DiscosCatalogo() {
           <input
             value={busqueda}
             onChange={onBusquedaChange}
-            placeholder="Buscar por artista o álbum..."
+            placeholder="Buscar por disco, artista, género, año, sello, estado, código..."
             className="input pl-9"
           />
         </div>
@@ -166,7 +188,7 @@ export default function DiscosCatalogo() {
                   : 'bg-slate-100 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-200 dark:hover:bg-stone-700'
               }`}
             >
-              {estado === 'TODOS' ? 'Todos' : estado.charAt(0) + estado.slice(1).toLowerCase()}
+              {estado === 'TODOS' ? 'Todos' : ESTADO_LABELS[estado]}
               {estado !== 'TODOS' && (
                 <span className="ml-1.5 opacity-70">
                   {discos.filter(d => d.estado === estado).length}
@@ -174,6 +196,18 @@ export default function DiscosCatalogo() {
               )}
             </button>
           ))}
+          <select value={filtroGenero} onChange={e => setFiltroGenero(e.target.value)} className="input w-auto min-w-[120px] py-2 text-xs">
+            <option value="TODOS">Género</option>
+            {generos.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="input w-auto min-w-[100px] py-2 text-xs">
+            <option value="TODOS">Año</option>
+            {anios.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <select value={filtroSello} onChange={e => setFiltroSello(e.target.value)} className="input w-auto min-w-[130px] py-2 text-xs">
+            <option value="TODOS">Sello</option>
+            {sellos.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
       </div>
 
