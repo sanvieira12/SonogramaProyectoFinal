@@ -10,3 +10,8 @@ target/
 .vscode/
 *.log
 application-local.properties
+.env
+.env.local
+.env.production
+*.secret
+*.key
