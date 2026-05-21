@@ -6,7 +6,7 @@
     "buildContext": "sonograma-backend"
   },
   "deploy": {
-    "startCommand": "java -Dserver.port=$PORT -jar /app/app.jar",
+    "startCommand": "java -jar /app/app.jar",
     "healthcheckPath": "/api/actuator/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
