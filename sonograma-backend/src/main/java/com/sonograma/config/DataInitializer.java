@@ -22,12 +22,12 @@ public class DataInitializer implements CommandLineRunner {
             Usuario admin = Usuario.builder()
                     .nombreUsuario("admin")
                     .email("admin@sonograma.com")
-                    .contrasenia(passwordEncoder.encode("admin123"))
+                    .contrasenia(passwordEncoder.encode("admin"))
                     .rol("ADMIN")
                     .activo(true)
                     .build();
             usuarioRepository.save(admin);
-            log.info("Usuario admin creado: admin / admin123");
+            log.info("Usuario admin creado: admin / admin");
         }
     }
 }
