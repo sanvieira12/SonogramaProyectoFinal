@@ -87,4 +87,21 @@ export const api = {
     urlDescarga: (idDisco) => `${BASE}/qr/descargar/${idDisco}`,
     escanear: (codigoQr) => request('POST', '/qr/escanear', { codigoQr }),
   },
+
+  importar: {
+    vinylfutureCsv: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/importar/vinylfuture-csv`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: fd,
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Error procesando PDF')
+      }
+      return res.blob()
+    },
+  },
 }

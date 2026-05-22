@@ -2,3 +2,7 @@
 *.secret
 *.key
 .env
+
+# Invoice PDFs (user data, not committed)
+*.pdf
+!docs/**/*.pdf
