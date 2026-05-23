@@ -60,7 +60,7 @@ function EmptyState() {
   )
 }
 
-const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
+const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK']
 
 const GRAFICAS = [
   { key: 'inventarioPorEstado', label: 'Inventario por estado', unidad: 'discos' },
@@ -77,9 +77,6 @@ const GRAFICAS = [
   { key: 'gananciaPorMes', label: 'Ganancia por mes', unidad: 'UYU' },
 ]
 
-function unicoOrdenado(valores) {
-  return [...new Set(valores.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es'))
-}
 
 export default function Dashboard() {
   const { dark } = useTheme()
@@ -88,9 +85,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
-  const [filtroGenero, setFiltroGenero] = useState('TODOS')
-  const [filtroAnio, setFiltroAnio] = useState('TODOS')
-  const [filtroSello, setFiltroSello] = useState('TODOS')
   const [mostrarModal, setMostrarModal] = useState(false)
   const [qrDisco, setQrDisco] = useState(null)
   const [ventasPorMes, setVentasPorMes] = useState([])
@@ -152,7 +146,6 @@ export default function Dashboard() {
     reservados: discos.filter(d => d.estado === 'RESERVADO').length,
     vendidos: discos.filter(d => d.estado === 'VENDIDO').length,
     fueraStock: discos.filter(d => d.estado === 'FUERA_STOCK').length,
-    descontinuados: discos.filter(d => d.estado === 'DESCONTINUADO').length,
   }
 
   const valorTotal = discos
@@ -161,15 +154,9 @@ export default function Dashboard() {
 
   const discosFiltrados = discos.filter(d => {
     if (filtroEstado !== 'TODOS' && d.estado !== filtroEstado) return false
-    if (filtroGenero !== 'TODOS' && d.genero !== filtroGenero) return false
-    if (filtroAnio !== 'TODOS' && String(d.anio || '') !== filtroAnio) return false
-    if (filtroSello !== 'TODOS' && (d.selloDiscografico || 'Sin sello') !== filtroSello) return false
     return true
   })
 
-  const generos = unicoOrdenado(discos.map(d => d.genero))
-  const anios = unicoOrdenado(discos.map(d => d.anio ? String(d.anio) : null))
-  const sellos = unicoOrdenado(discos.map(d => d.selloDiscografico || 'Sin sello'))
   const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
   const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
     etiqueta: item.etiqueta,
@@ -186,7 +173,7 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
           label="Total inventario"
           value={stats.total}
@@ -236,16 +223,6 @@ export default function Dashboard() {
           icon={
             <svg className="w-5 h-5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM3.75 4.5h16.5v15H3.75v-15Z" />
-            </svg>
-          }
-        />
-        <StatCard
-          label="Descontinuados"
-          value={stats.descontinuados}
-          color="bg-red-50 dark:bg-red-900/20"
-          icon={
-            <svg className="w-5 h-5 text-[#A66363]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M4.772 5.79c.34-.059.68-.114 1.022-.165m0 0L6.16 19.673A2.25 2.25 0 0 0 8.406 21h7.188a2.25 2.25 0 0 0 2.246-1.327L18.206 5.625m-12.412 0A48.108 48.108 0 0 1 12 5.25c2.102 0 4.157.136 6.206.375" />
             </svg>
           }
         />
@@ -338,14 +315,20 @@ export default function Dashboard() {
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 min-w-[220px]">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg
+            className="pointer-events-none absolute inset-y-0 left-3 my-auto w-4 h-4 text-slate-400 dark:text-gray-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
           <input
             value={busqueda}
             onChange={buscar}
-            placeholder="Buscar por disco, artista, género, año, sello, estado, código..."
-            className="input pl-9"
+            placeholder="Buscar por disco, artista, género..."
+            className="input pl-9 w-full"
           />
         </div>
 
@@ -368,18 +351,6 @@ export default function Dashboard() {
               )}
             </button>
           ))}
-          <select value={filtroGenero} onChange={e => setFiltroGenero(e.target.value)} className="input w-auto min-w-[120px] py-2 text-xs">
-            <option value="TODOS">Género</option>
-            {generos.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="input w-auto min-w-[100px] py-2 text-xs">
-            <option value="TODOS">Año</option>
-            {anios.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-          <select value={filtroSello} onChange={e => setFiltroSello(e.target.value)} className="input w-auto min-w-[130px] py-2 text-xs">
-            <option value="TODOS">Sello</option>
-            {sellos.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
         </div>
 
         <button
