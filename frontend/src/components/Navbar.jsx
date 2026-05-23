@@ -51,16 +51,12 @@ export default function Navbar({ usuario }) {
       <div className="max-w-6xl mx-auto flex items-center justify-between h-14 gap-4">
 
         {/* Brand */}
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center">
           <img
-            src="/logo-sonograma.png"
+            src="/logo.png"
             alt="Sonograma"
-            className="h-9 w-9 object-contain dark:invert transition-all"
+            className="h-9 w-auto object-contain dark:invert"
           />
-          <div className="hidden sm:flex flex-col leading-tight">
-            <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Sonograma</span>
-            <span className="text-[10px] uppercase tracking-[0.18em] text-[#5C7D87] dark:text-[#7E9FA8]">Disquería</span>
-          </div>
         </div>
 
         {/* Nav links */}
