@@ -8,27 +8,24 @@ import AddDiscoModal from '../components/AddDiscoModal'
 import { useTheme } from '../context/useTheme'
 
 const ESTADO_COLORS = {
-  DISPONIBLE:    '#5B8C7D',
-  RESERVADO:     '#B8975E',
-  VENDIDO:       '#6B7280',
-  FUERA_STOCK:   '#D97706',
-  DESCONTINUADO: '#A66363',
+  DISPONIBLE: '#5B8C7D',
+  RESERVADO:  '#B8975E',
+  VENDIDO:    '#6B7280',
+  SIN_STOCK:  '#94a3b8',
 }
 
 const ESTADO_STYLE = {
-  DISPONIBLE:    { bg: 'bg-emerald-50 dark:bg-emerald-900/20',  text: 'text-emerald-700 dark:text-emerald-400',  dot: 'bg-[#5B8C7D]' },
-  RESERVADO:     { bg: 'bg-amber-50 dark:bg-amber-900/20',      text: 'text-amber-700 dark:text-amber-400',      dot: 'bg-[#B8975E]' },
-  VENDIDO:       { bg: 'bg-slate-100 dark:bg-slate-800/60',     text: 'text-slate-600 dark:text-slate-400',      dot: 'bg-[#6B7280]' },
-  FUERA_STOCK:   { bg: 'bg-orange-50 dark:bg-orange-900/20',     text: 'text-orange-700 dark:text-orange-400',    dot: 'bg-[#D97706]' },
-  DESCONTINUADO: { bg: 'bg-red-50 dark:bg-red-900/20',          text: 'text-red-700 dark:text-red-400',          dot: 'bg-[#A66363]' },
+  DISPONIBLE: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-[#5B8C7D]' },
+  RESERVADO:  { bg: 'bg-amber-50 dark:bg-amber-900/20',     text: 'text-amber-700 dark:text-amber-400',     dot: 'bg-[#B8975E]' },
+  VENDIDO:    { bg: 'bg-slate-100 dark:bg-slate-800/60',    text: 'text-slate-600 dark:text-slate-400',     dot: 'bg-[#6B7280]' },
+  SIN_STOCK:  { bg: 'bg-slate-100 dark:bg-slate-800/50',    text: 'text-slate-500 dark:text-slate-400',     dot: 'bg-slate-400' },
 }
 
 const ESTADO_LABELS = {
   DISPONIBLE: 'Disponible',
-  RESERVADO: 'Reservado',
-  VENDIDO: 'Vendido',
-  FUERA_STOCK: 'Fuera de stock',
-  DESCONTINUADO: 'Descontinuado',
+  RESERVADO:  'Reservado',
+  VENDIDO:    'Vendido',
+  SIN_STOCK:  'Sin stock',
 }
 
 function StatCard({ label, value, sublabel, color, icon }) {
@@ -60,7 +57,7 @@ function EmptyState() {
   )
 }
 
-const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK']
+const ESTADOS_FILTRO = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
 
 const GRAFICAS = [
   { key: 'inventarioPorEstado', label: 'Inventario por estado', unidad: 'discos' },
@@ -145,7 +142,7 @@ export default function Dashboard() {
     disponibles: discos.filter(d => d.estado === 'DISPONIBLE').length,
     reservados: discos.filter(d => d.estado === 'RESERVADO').length,
     vendidos: discos.filter(d => d.estado === 'VENDIDO').length,
-    fueraStock: discos.filter(d => d.estado === 'FUERA_STOCK').length,
+    sinStock: discos.filter(d => d.estado === 'SIN_STOCK').length,
   }
 
   const valorTotal = discos
@@ -217,11 +214,11 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Fuera de stock"
-          value={stats.fueraStock}
-          color="bg-orange-50 dark:bg-orange-900/20"
+          label="Sin stock"
+          value={stats.sinStock}
+          color="bg-slate-100 dark:bg-slate-800/50"
           icon={
-            <svg className="w-5 h-5 text-[#D97706]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM3.75 4.5h16.5v15H3.75v-15Z" />
             </svg>
           }
@@ -391,7 +388,7 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
                 {discosFiltrados.map(d => {
-                  const estilo = ESTADO_STYLE[d.estado] || ESTADO_STYLE.DESCONTINUADO
+                  const estilo = ESTADO_STYLE[d.estado] || ESTADO_STYLE.SIN_STOCK
                   return (
                     <tr key={d.idDisco} className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors">
                       <td className="px-5 py-4">

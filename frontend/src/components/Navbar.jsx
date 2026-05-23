@@ -56,7 +56,7 @@ export default function Navbar({ usuario }) {
             <img
               src="/logo.png"
               alt="Sonograma"
-              className="h-10 w-auto object-contain dark:invert"
+              className="h-14 w-auto max-w-[180px] object-contain dark:invert"
             />
           </div>
 

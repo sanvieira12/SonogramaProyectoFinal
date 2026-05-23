@@ -40,7 +40,7 @@
 | tipo_disco | VARCHAR | VINILO, CD, DIGITAL, CASSETTE, OTRO |
 | costo | NUMERIC(10,2) | |
 | precio_venta | NUMERIC(10,2) | |
-| estado | VARCHAR | NOT NULL, DISPONIBLE, RESERVADO, VENDIDO, FUERA_STOCK, DESCONTINUADO |
+| estado | VARCHAR | NOT NULL, DISPONIBLE, RESERVADO, VENDIDO, SIN_STOCK |
 | fecha_ingreso | TIMESTAMP | |
 | fecha_actualizacion | TIMESTAMP | |
 

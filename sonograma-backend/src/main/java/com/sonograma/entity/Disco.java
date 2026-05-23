@@ -60,6 +60,7 @@ public class Disco {
     @Column(name = "precio_venta", precision = 10, scale = 2)
     private BigDecimal precioVenta;
 
+    // DISPONIBLE, RESERVADO, VENDIDO, SIN_STOCK
     @Enumerated(EnumType.STRING)
     @Column(name = "estado", nullable = false)
     @Builder.Default
