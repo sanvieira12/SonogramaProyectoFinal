@@ -1,5 +1,13 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, Link, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/useTheme'
+
+function HomeIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+    </svg>
+  )
+}
 
 function SunIcon() {
   return (
@@ -52,16 +60,21 @@ export default function Navbar({ usuario }) {
 
         {/* Izquierda: logo + navegación */}
         <div className="flex items-center gap-6">
-          <div className="flex items-center">
+          <Link to="/" className="flex items-center">
             <img
               src="/logo.png"
               alt="Sonograma"
               className="h-14 w-auto max-w-[180px] object-contain dark:invert"
             />
-          </div>
+          </Link>
 
           <div className="flex items-center gap-1">
-            <NavLink to="/" end className={navLinkClass}>Inventario</NavLink>
+            <NavLink to="/" end className={navLinkClass}>
+              <span className="flex items-center gap-1.5">
+                <HomeIcon />
+                Home
+              </span>
+            </NavLink>
             <NavLink to="/discos" className={navLinkClass}>Catálogo</NavLink>
             <NavLink to="/clientes" className={navLinkClass}>Clientes</NavLink>
             <NavLink to="/ventas/nueva" className={navLinkClass}>Nueva venta</NavLink>

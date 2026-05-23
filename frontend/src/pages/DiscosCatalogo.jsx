@@ -1,20 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
 import { discoService } from '../services/discoService'
-import DiscoCard from '../components/DiscoCard'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
+import Paginacion from '../components/Paginacion'
 
-const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
+const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
+
 const ESTADO_LABELS = {
   DISPONIBLE: 'Disponible',
-  RESERVADO: 'Reservado',
-  VENDIDO: 'Vendido',
-  FUERA_STOCK: 'Fuera de stock',
-  DESCONTINUADO: 'Descontinuado',
+  RESERVADO:  'Reservado',
+  VENDIDO:    'Vendido',
+  SIN_STOCK:  'Sin stock',
 }
 
-function unicoOrdenado(valores) {
-  return [...new Set(valores.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es'))
+const ESTADO_STYLE = {
+  DISPONIBLE: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-[#5B8C7D]' },
+  RESERVADO:  { bg: 'bg-amber-50 dark:bg-amber-900/20',     text: 'text-amber-700 dark:text-amber-400',     dot: 'bg-[#B8975E]' },
+  VENDIDO:    { bg: 'bg-slate-100 dark:bg-slate-800/60',    text: 'text-slate-600 dark:text-slate-400',     dot: 'bg-[#6B7280]' },
+  SIN_STOCK:  { bg: 'bg-slate-100 dark:bg-slate-800/50',    text: 'text-slate-500 dark:text-slate-400',     dot: 'bg-slate-400' },
+}
+
+function EstadoBadge({ estado }) {
+  const s = ESTADO_STYLE[estado] || ESTADO_STYLE.SIN_STOCK
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${s.bg} ${s.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {ESTADO_LABELS[estado] || estado}
+    </span>
+  )
 }
 
 function Spinner() {
@@ -47,18 +60,163 @@ function EmptyState({ hayFiltro }) {
   )
 }
 
+/* Panel flotante que aparece al hacer hover sobre una fila.
+   Usa position:fixed para no ser afectado por overflow del contenedor.
+   pointer-events:none porque es solo informativo, no interactivo. */
+function HoverPanel({ disco, rect }) {
+  if (!disco || !rect) return null
+
+  // Si la fila está cerca del tope del viewport, mostrar el panel debajo
+  const panelH = 280
+  const showAbove = rect.top > panelH + 16
+  const top    = showAbove ? rect.top - 8 : rect.bottom + 8
+  const left   = Math.min(rect.left, window.innerWidth - 420)
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top,
+        left,
+        zIndex: 9999,
+        width: 400,
+        transform: showAbove ? 'translateY(-100%)' : 'translateY(0)',
+        animation: 'fadeScale 130ms ease forwards',
+        pointerEvents: 'none',
+      }}
+      className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-xl shadow-2xl p-4"
+    >
+      <div className="flex gap-4">
+        {/* Placeholder de portada */}
+        <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[10px] text-slate-400 dark:text-stone-600 text-center leading-tight px-1">
+          Tapa próximamente
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{disco.artista}</p>
+          <p className="text-slate-500 dark:text-stone-400 text-xs mt-0.5 leading-tight">{disco.album}</p>
+          <div className="mt-1.5"><EstadoBadge estado={disco.estado} /></div>
+        </div>
+      </div>
+
+      {/* Campos del disco en grilla compacta */}
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+        {[
+          ['Año',          disco.anio],
+          ['Género',       disco.genero],
+          ['Sello',        disco.selloDiscografico],
+          ['Condición',    disco.condicion],
+          ['Precio compra',  disco.precioCompra  ? `$${Number(disco.precioCompra).toLocaleString('es-AR')}` : null],
+          ['Precio venta',   disco.precioVenta   ? `$${Number(disco.precioVenta).toLocaleString('es-AR')}`  : null],
+        ].map(([label, value]) => (
+          <div key={label}>
+            <span className="text-slate-400 dark:text-stone-500">{label}: </span>
+            <span className="text-slate-700 dark:text-stone-300">{value || '—'}</span>
+          </div>
+        ))}
+      </div>
+
+      {disco.observaciones && (
+        <p className="mt-2 text-xs text-slate-500 dark:text-stone-400 italic border-t border-slate-100 dark:border-stone-800 pt-2 line-clamp-2">
+          {disco.observaciones}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/* Panel lateral derecho con el detalle completo del disco.
+   Se abre al hacer clic en una fila. */
+function SlideOver({ disco, onCerrar, onEditar }) {
+  if (!disco) return null
+
+  return (
+    <>
+      {/* Overlay oscuro */}
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onCerrar} />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-stone-900 border-l border-slate-200 dark:border-stone-800 z-50 overflow-y-auto shadow-2xl flex flex-col">
+        <div className="p-6 space-y-5 flex-1">
+
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">{disco.artista}</h2>
+              <p className="text-slate-500 dark:text-stone-400 text-sm">{disco.album}</p>
+            </div>
+            <button
+              onClick={onCerrar}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800 transition-colors flex-shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Portada placeholder */}
+          <div className="w-full aspect-square max-w-[200px] mx-auto bg-slate-100 dark:bg-stone-800 rounded-xl flex items-center justify-center">
+            <p className="text-slate-400 dark:text-stone-600 text-sm">Tapa próximamente</p>
+          </div>
+
+          {/* Estado */}
+          <EstadoBadge estado={disco.estado} />
+
+          {/* Campos en grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              ['Año',           disco.anio],
+              ['Género',        disco.genero],
+              ['Sello',         disco.selloDiscografico],
+              ['Condición',     disco.condicion],
+              ['Precio compra', disco.precioCompra ? `$${Number(disco.precioCompra).toLocaleString('es-AR')}` : null],
+              ['Precio venta',  disco.precioVenta  ? `$${Number(disco.precioVenta).toLocaleString('es-AR')}`  : null],
+              ['Código interno', disco.codigoInterno],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-slate-50 dark:bg-stone-950 border border-slate-100 dark:border-stone-800 rounded-lg px-3 py-2">
+                <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-0.5">{label}</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-stone-300">{value || '—'}</p>
+              </div>
+            ))}
+          </div>
+
+          {disco.observaciones && (
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Observaciones</p>
+              <p className="text-slate-600 dark:text-stone-400 text-sm italic">{disco.observaciones}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Acciones fijas al fondo */}
+        <div className="p-6 pt-0 space-y-2">
+          <button
+            onClick={() => { onEditar(disco); onCerrar() }}
+            className="btn-primary w-full"
+          >
+            Editar disco
+          </button>
+          {/* Espacio para acciones futuras */}
+        </div>
+      </div>
+    </>
+  )
+}
+
 export default function DiscosCatalogo() {
   const [discos, setDiscos] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
-  const [filtroGenero, setFiltroGenero] = useState('TODOS')
-  const [filtroAnio, setFiltroAnio] = useState('TODOS')
-  const [filtroSello, setFiltroSello] = useState('TODOS')
-  const [discoForm, setDiscoForm] = useState(null)   // null=cerrado, false=nuevo, objeto=editar
+  const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
+  const [hoverDisco, setHoverDisco] = useState(null)
+  const [hoverRect, setHoverRect] = useState(null)
+  const [slideOverDisco, setSlideOverDisco] = useState(null)
+  const [pagina, setPagina] = useState(1)
+  const [porPagina, setPorPagina] = useState(20)
   const debounceRef = useRef(null)
 
   useEffect(() => { cargarTodos() }, [])
@@ -79,6 +237,7 @@ export default function DiscosCatalogo() {
   function onBusquedaChange(e) {
     const q = e.target.value
     setBusqueda(q)
+    setPagina(1)
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       if (!q.trim()) { cargarTodos(); return }
@@ -94,13 +253,9 @@ export default function DiscosCatalogo() {
     }, 300)
   }
 
-  async function handleCambiarEstado(id, nuevoEstado) {
-    try {
-      const actualizado = await discoService.cambiarEstado(id, nuevoEstado)
-      setDiscos(prev => prev.map(d => d.idDisco === id ? actualizado : d))
-    } catch (err) {
-      alert(err.message)
-    }
+  function cambiarFiltro(estado) {
+    setFiltroEstado(estado)
+    setPagina(1)
   }
 
   async function handleGuardar(payload) {
@@ -127,19 +282,22 @@ export default function DiscosCatalogo() {
     }
   }
 
-  const discosFiltrados = discos.filter(d => {
-    if (filtroEstado !== 'TODOS' && d.estado !== filtroEstado) return false
-    if (filtroGenero !== 'TODOS' && d.genero !== filtroGenero) return false
-    if (filtroAnio !== 'TODOS' && String(d.anio || '') !== filtroAnio) return false
-    if (filtroSello !== 'TODOS' && (d.selloDiscografico || 'Sin sello') !== filtroSello) return false
-    return true
-  })
+  // Hover handlers: el panel se muestra mientras el mouse está sobre la fila
+  function openHover(e, disco) {
+    setHoverDisco(disco)
+    setHoverRect(e.currentTarget.getBoundingClientRect())
+  }
 
-  const generos = unicoOrdenado(discos.map(d => d.genero))
-  const anios = unicoOrdenado(discos.map(d => d.anio ? String(d.anio) : null))
-  const sellos = unicoOrdenado(discos.map(d => d.selloDiscografico || 'Sin sello'))
+  function closeHover() {
+    setHoverDisco(null)
+    setHoverRect(null)
+  }
 
-  const hayFiltroActivo = filtroEstado !== 'TODOS' || filtroGenero !== 'TODOS' || filtroAnio !== 'TODOS' || filtroSello !== 'TODOS' || busqueda.trim() !== ''
+  const discosFiltrados = discos.filter(d =>
+    filtroEstado === 'TODOS' || d.estado === filtroEstado
+  )
+  const discosPagina = discosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina)
+  const hayFiltro = filtroEstado !== 'TODOS' || busqueda.trim() !== ''
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
@@ -163,9 +321,9 @@ export default function DiscosCatalogo() {
         </button>
       </div>
 
-      {/* Barra búsqueda + filtros */}
+      {/* Barra de búsqueda (ancho completo) + filtros de estado */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+        <div className="relative w-full">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
@@ -176,12 +334,11 @@ export default function DiscosCatalogo() {
             className="input pl-9"
           />
         </div>
-
         <div className="flex gap-2 flex-wrap sm:flex-nowrap overflow-x-auto">
           {FILTROS.map(estado => (
             <button
               key={estado}
-              onClick={() => setFiltroEstado(estado)}
+              onClick={() => cambiarFiltro(estado)}
               className={`text-xs px-3 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 filtroEstado === estado
                   ? 'bg-[#7E9FA8] text-white'
@@ -196,18 +353,6 @@ export default function DiscosCatalogo() {
               )}
             </button>
           ))}
-          <select value={filtroGenero} onChange={e => setFiltroGenero(e.target.value)} className="input w-auto min-w-[120px] py-2 text-xs">
-            <option value="TODOS">Género</option>
-            {generos.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="input w-auto min-w-[100px] py-2 text-xs">
-            <option value="TODOS">Año</option>
-            {anios.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-          <select value={filtroSello} onChange={e => setFiltroSello(e.target.value)} className="input w-auto min-w-[130px] py-2 text-xs">
-            <option value="TODOS">Sello</option>
-            {sellos.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
         </div>
       </div>
 
@@ -219,26 +364,100 @@ export default function DiscosCatalogo() {
         </div>
       )}
 
-      {/* Grid de cards */}
-      {loading ? (
-        <Spinner />
-      ) : discosFiltrados.length === 0 ? (
-        <EmptyState hayFiltro={hayFiltroActivo} />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {discosFiltrados.map(d => (
-            <DiscoCard
-              key={d.idDisco}
-              disco={d}
-              onEditar={setDiscoForm}
-              onCambiarEstado={handleCambiarEstado}
-              onEliminar={setDiscoEliminar}
-            />
-          ))}
-        </div>
-      )}
+      {/* Tabla principal */}
+      <div className="card overflow-hidden">
+        {loading ? (
+          <Spinner />
+        ) : discosFiltrados.length === 0 ? (
+          <EmptyState hayFiltro={hayFiltro} />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-stone-800">
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Artista / Álbum</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Condición</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Precio</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
+                  {discosPagina.map(d => (
+                    <tr
+                      key={d.idDisco}
+                      onMouseEnter={e => openHover(e, d)}
+                      onMouseLeave={closeHover}
+                      onClick={() => setSlideOverDisco(d)}
+                      className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
+                    >
+                      <td className="px-5 py-4">
+                        <div className="font-semibold text-slate-900 dark:text-white">{d.artista}</div>
+                        <div className="text-slate-500 dark:text-stone-400 text-xs mt-0.5">
+                          {d.album}
+                          {d.anio ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.anio}</span> : null}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden sm:table-cell">
+                        {d.condicion || <span className="text-slate-300 dark:text-stone-600">—</span>}
+                      </td>
+                      <td className="px-5 py-4 font-semibold text-slate-900 dark:text-white tabular-nums">
+                        {d.precioVenta
+                          ? `$${Number(d.precioVenta).toLocaleString('es-AR')}`
+                          : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
+                      </td>
+                      <td className="px-5 py-4">
+                        <EstadoBadge estado={d.estado} />
+                      </td>
+                      {/* stopPropagation para que los botones no abran el slide-over */}
+                      <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setDiscoForm(d)}
+                            className="text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => setDiscoEliminar(d)}
+                            className="text-xs bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                          >
+                            Dar de baja
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-      {/* Modales */}
+            {/* Paginación */}
+            <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800">
+              <Paginacion
+                total={discosFiltrados.length}
+                porPagina={porPagina}
+                pagina={pagina}
+                onPagina={setPagina}
+                onPorPagina={n => { setPorPagina(n); setPagina(1) }}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Panel hover flotante (position:fixed, pointer-events:none) */}
+      <HoverPanel disco={hoverDisco} rect={hoverRect} />
+
+      {/* Slide-over de detalle al hacer clic en una fila */}
+      <SlideOver
+        disco={slideOverDisco}
+        onCerrar={() => setSlideOverDisco(null)}
+        onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
+      />
+
+      {/* Formulario de edición / creación */}
       {discoForm !== null && (
         <DiscoForm
           disco={discoForm || null}
@@ -247,10 +466,11 @@ export default function DiscosCatalogo() {
         />
       )}
 
+      {/* Confirmación de baja */}
       {discoEliminar && (
         <ConfirmModal
-          titulo="Eliminar disco"
-          mensaje={`¿Seguro que querés dar de baja "${discoEliminar.artista} – ${discoEliminar.album}"? El disco pasará a estado DESCONTINUADO.`}
+          titulo="Dar de baja disco"
+          mensaje={`¿Seguro que querés dar de baja "${discoEliminar.artista} – ${discoEliminar.album}"? El disco pasará a estado SIN_STOCK.`}
           onConfirmar={handleEliminar}
           onCancelar={() => setDiscoEliminar(null)}
           cargando={eliminando}

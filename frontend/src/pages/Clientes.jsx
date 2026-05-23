@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/sonograma'
+import Paginacion from '../components/Paginacion'
 
 function Spinner() {
   return (
@@ -41,6 +42,8 @@ export default function Clientes() {
   const [clienteDetalle, setClienteDetalle] = useState(null)
   const [detalleCliente, setDetalleCliente] = useState(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
+  const [pagina, setPagina] = useState(1)
+  const [porPagina, setPorPagina] = useState(20)
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -62,6 +65,7 @@ export default function Clientes() {
   function onBusquedaChange(e) {
     const q = e.target.value
     setBusqueda(q)
+    setPagina(1)
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       if (!q.trim()) {
@@ -130,74 +134,87 @@ export default function Clientes() {
             No se encontraron clientes
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-stone-800">
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Nombre</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Cédula</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden lg:table-cell">Instagram</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden xl:table-cell">Dirección</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Compras</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Total gastado</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Última compra</th>
-                  <th className="px-5 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
-                {clientes.map(c => {
-                  const vs = ventasPorCliente[c.idCliente] || []
-                  const totalGastado = vs.reduce((sum, v) => sum + Number(v.total || 0), 0)
-                  const ultimaCompra = vs.length > 0
-                    ? vs.reduce((latest, v) => v.fechaVenta > latest ? v.fechaVenta : latest, vs[0].fechaVenta)
-                    : null
-                  return (
-                    <tr
-                      key={c.idCliente}
-                      className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
-                      onClick={() => abrirDetalle(c)}
-                    >
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900 dark:text-white">{c.nombre} {c.apellido}</div>
-                        <div className="text-slate-400 dark:text-stone-500 text-xs mt-0.5">{c.telefono || '—'}</div>
-                      </td>
-                      <td className="px-5 py-4 text-slate-600 dark:text-stone-400 font-mono text-xs hidden md:table-cell">{c.cedula || '—'}</td>
-                      <td className="px-5 py-4 hidden lg:table-cell">
-                        {c.instagramUsuario
-                          ? <span className="text-[#5C7D87] dark:text-[#7E9FA8] text-xs">{c.instagramUsuario}</span>
-                          : <span className="text-slate-300 dark:text-stone-600">—</span>}
-                      </td>
-                      <td className="px-5 py-4 text-slate-500 dark:text-stone-400 text-xs hidden xl:table-cell max-w-[200px] truncate">
-                        {c.direccion || '—'}
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                          vs.length > 0
-                            ? 'bg-[#7E9FA8]/15 text-[#5C7D87] dark:text-[#7E9FA8]'
-                            : 'bg-slate-100 dark:bg-stone-900 text-slate-400 dark:text-stone-600'
-                        }`}>
-                          {vs.length}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-right font-semibold text-slate-900 dark:text-white tabular-nums hidden sm:table-cell">
-                        {totalGastado > 0
-                          ? `$${totalGastado.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
-                          : <span className="text-slate-300 dark:text-stone-600 font-normal">—</span>}
-                      </td>
-                      <td className="px-5 py-4 text-right text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">
-                        {formatFecha(ultimaCompra)}
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <svg className={`w-4 h-4 text-slate-300 dark:text-stone-600 transition-transform ${clienteDetalle?.idCliente === c.idCliente ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
-                        </svg>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-stone-800">
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Nombre</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Cédula</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden lg:table-cell">Instagram</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden xl:table-cell">Dirección</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Compras</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Total gastado</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Última compra</th>
+                    <th className="px-5 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
+                  {clientes.slice((pagina - 1) * porPagina, pagina * porPagina).map(c => {
+                    const vs = ventasPorCliente[c.idCliente] || []
+                    const totalGastado = vs.reduce((sum, v) => sum + Number(v.total || 0), 0)
+                    const ultimaCompra = vs.length > 0
+                      ? vs.reduce((latest, v) => v.fechaVenta > latest ? v.fechaVenta : latest, vs[0].fechaVenta)
+                      : null
+                    return (
+                      <tr
+                        key={c.idCliente}
+                        className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
+                        onClick={() => abrirDetalle(c)}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="font-semibold text-slate-900 dark:text-white">{c.nombre} {c.apellido}</div>
+                          <div className="text-slate-400 dark:text-stone-500 text-xs mt-0.5">{c.telefono || '—'}</div>
+                        </td>
+                        <td className="px-5 py-4 text-slate-600 dark:text-stone-400 font-mono text-xs hidden md:table-cell">{c.cedula || '—'}</td>
+                        <td className="px-5 py-4 hidden lg:table-cell">
+                          {c.instagramUsuario
+                            ? <span className="text-[#5C7D87] dark:text-[#7E9FA8] text-xs">{c.instagramUsuario}</span>
+                            : <span className="text-slate-300 dark:text-stone-600">—</span>}
+                        </td>
+                        <td className="px-5 py-4 text-slate-500 dark:text-stone-400 text-xs hidden xl:table-cell max-w-[200px] truncate">
+                          {c.direccion || '—'}
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                            vs.length > 0
+                              ? 'bg-[#7E9FA8]/15 text-[#5C7D87] dark:text-[#7E9FA8]'
+                              : 'bg-slate-100 dark:bg-stone-900 text-slate-400 dark:text-stone-600'
+                          }`}>
+                            {vs.length}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-right font-semibold text-slate-900 dark:text-white tabular-nums hidden sm:table-cell">
+                          {totalGastado > 0
+                            ? `$${totalGastado.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
+                            : <span className="text-slate-300 dark:text-stone-600 font-normal">—</span>}
+                        </td>
+                        <td className="px-5 py-4 text-right text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">
+                          {formatFecha(ultimaCompra)}
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <svg className={`w-4 h-4 text-slate-300 dark:text-stone-600 transition-transform ${clienteDetalle?.idCliente === c.idCliente ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
+                          </svg>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Paginación */}
+            <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800">
+              <Paginacion
+                total={clientes.length}
+                porPagina={porPagina}
+                pagina={pagina}
+                onPagina={setPagina}
+                onPorPagina={n => { setPorPagina(n); setPagina(1) }}
+              />
+            </div>
+          </>
         )}
       </div>
 

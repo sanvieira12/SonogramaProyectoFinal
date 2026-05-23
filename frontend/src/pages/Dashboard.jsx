@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../api/sonograma'
 import AddDiscoModal from '../components/AddDiscoModal'
+import Paginacion from '../components/Paginacion'
 import { useTheme } from '../context/useTheme'
 
 const ESTADO_COLORS = {
@@ -87,6 +88,8 @@ export default function Dashboard() {
   const [ventasPorMes, setVentasPorMes] = useState([])
   const [estadisticas, setEstadisticas] = useState(null)
   const [graficaSeleccionada, setGraficaSeleccionada] = useState('inventarioPorEstado')
+  const [pagina, setPagina] = useState(1)
+  const [porPagina, setPorPagina] = useState(20)
 
   useEffect(() => {
     let cancelado = false
@@ -120,12 +123,18 @@ export default function Dashboard() {
   async function buscar(e) {
     const q = e.target.value
     setBusqueda(q)
+    setPagina(1)
     if (q.length === 0) { cargarDiscos(); return }
     if (q.length < 2) return
     try {
       const data = await api.discos.buscar(q)
       setDiscos(data)
     } catch { /* ignore */ }
+  }
+
+  function cambiarFiltroEstado(estado) {
+    setFiltroEstado(estado)
+    setPagina(1)
   }
 
   async function cambiarEstado(id, estado) {
@@ -153,6 +162,8 @@ export default function Dashboard() {
     if (filtroEstado !== 'TODOS' && d.estado !== filtroEstado) return false
     return true
   })
+
+  const discosPagina = discosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina)
 
   const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
   const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
@@ -333,7 +344,7 @@ export default function Dashboard() {
           {ESTADOS_FILTRO.map(estado => (
             <button
               key={estado}
-              onClick={() => setFiltroEstado(estado)}
+              onClick={() => cambiarFiltroEstado(estado)}
               className={`text-xs px-3 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 filtroEstado === estado
                   ? 'bg-[#7E9FA8] text-white'
@@ -369,7 +380,7 @@ export default function Dashboard() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <span className="text-slate-500 dark:text-stone-400 text-sm">Cargando inventario...</span>
+            <span className="text-slate-500 dark:text-stone-400 text-sm">Cargando discos...</span>
           </div>
         ) : discosFiltrados.length === 0 ? (
           <EmptyState />
@@ -387,7 +398,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
-                {discosFiltrados.map(d => {
+                {discosPagina.map(d => {
                   const estilo = ESTADO_STYLE[d.estado] || ESTADO_STYLE.SIN_STOCK
                   return (
                     <tr key={d.idDisco} className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors">
@@ -454,9 +465,14 @@ export default function Dashboard() {
         )}
 
         {!loading && discosFiltrados.length > 0 && (
-          <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800 text-xs text-slate-400 dark:text-stone-600">
-            {discosFiltrados.length} {discosFiltrados.length === 1 ? 'disco' : 'discos'} mostrados
-            {filtroEstado !== 'TODOS' && ` · filtro: ${filtroEstado}`}
+          <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800">
+            <Paginacion
+              total={discosFiltrados.length}
+              porPagina={porPagina}
+              pagina={pagina}
+              onPagina={setPagina}
+              onPorPagina={n => { setPorPagina(n); setPagina(1) }}
+            />
           </div>
         )}
       </div>
