@@ -81,7 +81,7 @@ export default function Importar() {
       const blob = await api.importar.vinylfutureCsv(archivo)
       const url = URL.createObjectURL(blob)
       const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
-      const filename = `vinylfuture-import-${ts}.csv`
+      const filename = `vinylfuture-import-${ts}.zip`
       setBlobUrl(url)
       setCsvFilename(filename)
       setEstado(STATES.listo)
@@ -118,8 +118,8 @@ export default function Importar() {
             className="text-[#5C7D87] dark:text-[#7E9FA8] underline underline-offset-2"
           >
             vinylfuture.com
-          </a>{' '}
-          y obtener un CSV con los URLs.
+          </a>
+          {' '}y descargar portadas e MP3s de cada track. Obtenés un ZIP con todo organizado por álbum.
         </p>
       </div>
 
@@ -195,7 +195,7 @@ export default function Importar() {
       {/* Status */}
       {estado === STATES.procesando && (
         <div className="mt-6 p-4 rounded-xl bg-slate-50 dark:bg-stone-900 border border-slate-100 dark:border-stone-800">
-          <Spinner text="Buscando en vinylfuture.com… puede tardar unos segundos por ítem." />
+          <Spinner text="Buscando en vinylfuture.com y descargando portadas y MP3s… puede tardar varios segundos por ítem." />
           <p className="text-xs text-center text-slate-400 dark:text-stone-500 mt-2">
             No cierres esta página mientras se procesa.
           </p>
@@ -207,11 +207,12 @@ export default function Importar() {
           <div className="flex items-center gap-2 mb-3">
             <CheckIcon />
             <span className="font-medium text-emerald-700 dark:text-emerald-400 text-sm">
-              CSV generado correctamente
+              ZIP generado correctamente
             </span>
           </div>
           <p className="text-xs text-emerald-700/70 dark:text-emerald-300/60 mb-3">
-            La descarga debería haber comenzado automáticamente. Si no, usá el botón de abajo.
+            La descarga debería haber comenzado automáticamente. El ZIP incluye el CSV, portadas e MP3s por álbum.
+            Si algún archivo no se pudo descargar, encontrás un <code className="font-mono">missing.txt</code> en la carpeta del álbum.
           </p>
           <a
             href={blobUrl}
@@ -222,7 +223,7 @@ export default function Importar() {
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
             </svg>
-            Descargar CSV
+            Descargar ZIP
           </a>
         </div>
       )}
@@ -237,21 +238,15 @@ export default function Importar() {
       {/* Info card */}
       <div className="mt-8 p-4 rounded-xl bg-slate-50 dark:bg-stone-900 border border-slate-100 dark:border-stone-800">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">
-          Columnas del CSV
+          Contenido del ZIP
         </p>
-        <div className="flex flex-wrap gap-2">
-          {['artista', 'album', 'url_vinylfuture', 'estado_match'].map(col => (
-            <code
-              key={col}
-              className="px-2 py-0.5 rounded bg-slate-100 dark:bg-stone-800 text-[#5C7D87] dark:text-[#7E9FA8] text-xs font-mono"
-            >
-              {col}
-            </code>
-          ))}
+        <div className="flex flex-col gap-1.5 text-xs text-slate-500 dark:text-stone-400 font-mono">
+          <span>import.csv — artista, album, url_vinylfuture, estado_match</span>
+          <span>{'{artista} - {album} - {codigo}/'}</span>
+          <span className="pl-4">images/ — {'{codigo}_front.jpg'}, {'{codigo}_back.jpg'}</span>
+          <span className="pl-4">audio/ — {'{codigo}_A1.mp3'}, {'{codigo}_B1.mp3'} …</span>
+          <span className="pl-4">missing.txt — assets que no se pudieron descargar</span>
         </div>
-        <p className="text-xs text-slate-400 dark:text-stone-500 mt-3">
-          <code className="font-mono">estado_match</code>: <code className="font-mono">ENCONTRADO</code> o <code className="font-mono">NO_ENCONTRADO</code>
-        </p>
       </div>
     </main>
   )

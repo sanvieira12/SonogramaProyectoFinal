@@ -4,6 +4,11 @@ import com.sonograma.dto.InvoiceItem;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.interactive.action.PDAction;
+import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -53,9 +58,13 @@ public class PdfInvoiceParser {
     );
 
     public List<InvoiceItem> parse(MultipartFile file) throws IOException {
+        return parse(file.getBytes());
+    }
+
+    public List<InvoiceItem> parse(byte[] pdfBytes) throws IOException {
         List<InvoiceItem> items = new ArrayList<>();
 
-        try (PDDocument doc = Loader.loadPDF(file.getBytes())) {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
             String text = stripper.getText(doc);
@@ -83,6 +92,32 @@ public class PdfInvoiceParser {
 
         log.info("PDF parsing complete. Unique items found: {}", items.size());
         return items;
+    }
+
+    /**
+     * Extracts all HTTP/HTTPS hyperlinks embedded as annotation links in the PDF,
+     * in page order. One link per product line is the expected deejay.de layout.
+     */
+    public List<String> extractLinks(byte[] pdfBytes) throws IOException {
+        List<String> urls = new ArrayList<>();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            for (PDPage page : doc.getPages()) {
+                for (PDAnnotation ann : page.getAnnotations()) {
+                    if (ann instanceof PDAnnotationLink link) {
+                        PDAction action = link.getAction();
+                        if (action instanceof PDActionURI uriAction) {
+                            String url = uriAction.getURI();
+                            if (url != null && !url.isBlank()) {
+                                urls.add(url.strip());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        log.info("PDF link extraction complete. Links found: {}", urls.size());
+        urls.forEach(u -> log.debug("  PDF link: {}", u));
+        return urls;
     }
 
     private InvoiceItem tryParse(String line) {
