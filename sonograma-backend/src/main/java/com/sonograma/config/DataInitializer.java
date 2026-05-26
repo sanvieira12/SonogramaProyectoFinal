@@ -18,16 +18,25 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (usuarioRepository.findByNombreUsuario("admin").isEmpty()) {
-            Usuario admin = Usuario.builder()
-                    .nombreUsuario("admin")
-                    .email("admin@sonograma.com")
-                    .contrasenia(passwordEncoder.encode("admin"))
-                    .rol("ADMIN")
-                    .activo(true)
-                    .build();
-            usuarioRepository.save(admin);
-            log.info("Usuario admin creado: admin / admin");
-        }
+        usuarioRepository.findByNombreUsuario("admin").ifPresentOrElse(
+            existing -> {
+                if (!passwordEncoder.matches("admin123", existing.getContrasenia())) {
+                    existing.setContrasenia(passwordEncoder.encode("admin123"));
+                    usuarioRepository.save(existing);
+                    log.info("Contraseña admin actualizada a admin123");
+                }
+            },
+            () -> {
+                Usuario admin = Usuario.builder()
+                        .nombreUsuario("admin")
+                        .email("admin@sonograma.com")
+                        .contrasenia(passwordEncoder.encode("admin123"))
+                        .rol("ADMIN")
+                        .activo(true)
+                        .build();
+                usuarioRepository.save(admin);
+                log.info("Usuario admin creado: admin / admin123");
+            }
+        );
     }
 }

@@ -44,6 +44,8 @@ public class VentaRequestDTO {
     private String tipoEntrega;
 
     private String observaciones;
+    private String medioPago;
+    private BigDecimal montoPagado;
     private LocalDateTime fechaVenta;
     private Long idDireccionCliente;
     private String direccionEnvio;

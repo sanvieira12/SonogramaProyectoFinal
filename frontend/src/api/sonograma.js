@@ -83,6 +83,32 @@ export const api = {
     catalogo: () => request('GET', '/estadisticas/catalogo'),
   },
 
+  deudas: {
+    listar: (q) => request('GET', `/deudas${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    resumen: () => request('GET', '/deudas/resumen'),
+    porCliente: (id) => request('GET', `/deudas/cliente/${id}`),
+    registrarPago: (idDeuda, monto, notas) =>
+      request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas }),
+  },
+
+  libro: {
+    listar: (params = {}) => {
+      const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
+      return request('GET', `/ventas/libro${q ? `?${q}` : ''}`)
+    },
+    exportarUrl: (params = {}) => {
+      const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
+      return `${import.meta.env.VITE_API_URL || '/api'}/ventas/libro/exportar${q ? `?${q}` : ''}`
+    },
+  },
+
+  shippingOrders: {
+    listar: () => request('GET', '/shipping-orders'),
+    porId: (id) => request('GET', `/shipping-orders/${id}`),
+    crear: (dto) => request('POST', '/shipping-orders', dto),
+    exportarUrl: (id) => `${import.meta.env.VITE_API_URL || '/api'}/shipping-orders/${id}/exportar`,
+  },
+
   qr: {
     urlDescarga: (idDisco) => `${BASE}/qr/descargar/${idDisco}`,
     escanear: (codigoQr) => request('POST', '/qr/escanear', { codigoQr }),

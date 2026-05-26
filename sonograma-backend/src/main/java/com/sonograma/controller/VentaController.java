@@ -4,10 +4,13 @@ import com.sonograma.dto.ConfiguracionCostosDTO;
 import com.sonograma.dto.VentaRequestDTO;
 import com.sonograma.dto.VentaResponseDTO;
 import com.sonograma.dto.VentasPorMesDTO;
+import com.sonograma.service.ExcelExportService;
 import com.sonograma.service.VentaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +22,7 @@ import java.util.List;
 public class VentaController {
 
     private final VentaService ventaService;
+    private final ExcelExportService excelExportService;
 
     @GetMapping
     public ResponseEntity<List<VentaResponseDTO>> obtenerTodas() {
@@ -48,5 +52,29 @@ public class VentaController {
     @PostMapping
     public ResponseEntity<VentaResponseDTO> registrarVenta(@Valid @RequestBody VentaRequestDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(ventaService.registrarVenta(dto));
+    }
+
+    @GetMapping("/libro")
+    public ResponseEntity<List<VentaResponseDTO>> libro(
+            @RequestParam(required = false) String desde,
+            @RequestParam(required = false) String hasta,
+            @RequestParam(required = false) String canal,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(ventaService.obtenerLibro(desde, hasta, canal, q));
+    }
+
+    @GetMapping("/libro/exportar")
+    public ResponseEntity<byte[]> exportarLibro(
+            @RequestParam(required = false) String desde,
+            @RequestParam(required = false) String hasta,
+            @RequestParam(required = false) String canal,
+            @RequestParam(required = false) String q) {
+        byte[] bytes = excelExportService.exportarLibroVentas(
+                ventaService.obtenerVentasParaExportar(desde, hasta, canal, q));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"libro-ventas.xlsx\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(bytes);
     }
 }

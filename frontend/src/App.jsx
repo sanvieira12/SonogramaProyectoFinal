@@ -6,6 +6,8 @@ import Clientes from './pages/Clientes'
 import NuevaVenta from './pages/NuevaVenta'
 import Importar from './pages/Importar'
 import Deudas from './pages/Deudas'
+import LibroVentas from './pages/LibroVentas'
+import ShippingOrders from './pages/ShippingOrders'
 import Navbar from './components/Navbar'
 
 function PrivateRoute() {
@@ -37,6 +39,8 @@ export default function App() {
             <Route path="/ventas/nueva" element={<NuevaVenta />} />
             <Route path="/importar" element={<Importar />} />
             <Route path="/deudas" element={<Deudas />} />
+            <Route path="/libro-ventas" element={<LibroVentas />} />
+            <Route path="/shipping-orders" element={<ShippingOrders />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

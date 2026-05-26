@@ -32,4 +32,10 @@ public class VentaResponseDTO {
     private String estado;
     private String observaciones;
     private EnvioDTO envio;
+    private String numeroFactura;
+    private String clienteNombreSnapshot;
+    private String medioPago;
+    private BigDecimal montoPagado;
+    private BigDecimal montoDeuda;
+    private String estadoPago;
 }

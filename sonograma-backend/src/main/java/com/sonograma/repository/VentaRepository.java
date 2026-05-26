@@ -4,7 +4,9 @@ import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoVenta;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface VentaRepository extends JpaRepository<Venta, Long> {
@@ -26,4 +28,27 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         "ORDER BY TO_CHAR(fecha_venta, 'YYYY-MM') ASC",
         nativeQuery = true)
     List<Object[]> obtenerVentasAgrupadasPorMes();
+
+    @Query("SELECT COUNT(v) FROM Venta v WHERE YEAR(v.fechaVenta) = :anio")
+    long countByAnio(@Param("anio") int anio);
+
+    @Query("""
+        SELECT v FROM Venta v
+        WHERE v.estado <> com.sonograma.enums.EstadoVenta.CANCELADA
+          AND (:desde IS NULL OR v.fechaVenta >= :desde)
+          AND (:hasta IS NULL OR v.fechaVenta <= :hasta)
+          AND (:canal IS NULL OR v.canalVenta = :canal)
+          AND (:q IS NULL OR :q = ''
+               OR LOWER(v.clienteNombreSnapshot) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(v.disco.artista) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(v.disco.album) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(COALESCE(v.numeroFactura, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+        ORDER BY v.fechaVenta DESC
+        """)
+    List<Venta> buscarLibro(
+        @Param("desde") LocalDateTime desde,
+        @Param("hasta") LocalDateTime hasta,
+        @Param("canal") com.sonograma.enums.CanalVenta canal,
+        @Param("q") String q
+    );
 }

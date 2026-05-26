@@ -7,17 +7,21 @@ import com.sonograma.dto.VentaRequestDTO;
 import com.sonograma.dto.VentaResponseDTO;
 import com.sonograma.dto.VentasPorMesDTO;
 import com.sonograma.entity.Cliente;
+import com.sonograma.entity.Deuda;
 import com.sonograma.entity.DireccionCliente;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Envio;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.CanalVenta;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.enums.MedioPago;
 import com.sonograma.enums.TipoEntrega;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.ClienteRepository;
+import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.DireccionClienteRepository;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.EnvioRepository;
@@ -27,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,6 +46,7 @@ public class VentaService {
     private final ClienteRepository clienteRepository;
     private final DiscoRepository discoRepository;
     private final DireccionClienteRepository direccionClienteRepository;
+    private final DeudaRepository deudaRepository;
     private final ClienteService clienteService;
     private final CostosVentaService costosVentaService;
 
@@ -55,21 +61,33 @@ public class VentaService {
         if (disco.getEstado() == EstadoDisco.VENDIDO) {
             throw new NegocioException("El disco ya fue vendido");
         }
-        if (disco.getEstado() == EstadoDisco.FUERA_STOCK) {
-            throw new NegocioException("El disco está fuera de stock");
-        }
-        if (disco.getEstado() == EstadoDisco.DESCONTINUADO) {
-            throw new NegocioException("El disco está descontinuado y no puede venderse");
+        if (disco.getEstado() == EstadoDisco.SIN_STOCK) {
+            throw new NegocioException("El disco está sin stock y no puede venderse");
         }
 
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
         ResultadoCostoVentaDTO costos = costosVentaService.calcular(disco, dto);
 
+        LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : LocalDateTime.now();
+        String numeroFactura = generarNumeroFactura(fechaVenta.getYear());
+        String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
+
+        MedioPago medioPago = null;
+        if (dto.getMedioPago() != null && !dto.getMedioPago().isBlank()) {
+            try { medioPago = MedioPago.valueOf(dto.getMedioPago()); } catch (IllegalArgumentException ignored) {}
+        }
+
+        BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : costos.getTotalFinal();
+        BigDecimal montoDeuda = costos.getTotalFinal().subtract(montoPagado);
+        if (montoDeuda.compareTo(BigDecimal.ZERO) < 0) montoDeuda = BigDecimal.ZERO;
+        EstadoPago estadoPago = montoDeuda.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PAGADO
+                : montoPagado.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PENDIENTE : EstadoPago.PARCIAL;
+
         Venta venta = Venta.builder()
                 .cliente(cliente)
                 .disco(disco)
-                .fechaVenta(dto.getFechaVenta() != null ? dto.getFechaVenta() : LocalDateTime.now())
+                .fechaVenta(fechaVenta)
                 .canalVenta(canal)
                 .total(costos.getTotalFinal())
                 .costoDisco(costos.getCostoDisco())
@@ -83,9 +101,28 @@ public class VentaService {
                 .tipoEntrega(entrega)
                 .estado(EstadoVenta.COMPLETADA)
                 .observaciones(dto.getObservaciones())
+                .numeroFactura(numeroFactura)
+                .clienteNombreSnapshot(clienteSnapshot)
+                .medioPago(medioPago)
+                .montoPagado(montoPagado)
+                .montoDeuda(montoDeuda)
+                .estadoPago(estadoPago)
                 .build();
 
         venta = ventaRepository.save(venta);
+
+        if (montoDeuda.compareTo(BigDecimal.ZERO) > 0) {
+            Deuda deuda = Deuda.builder()
+                    .venta(venta)
+                    .cliente(cliente)
+                    .montoTotal(costos.getTotalFinal())
+                    .montoPagado(montoPagado)
+                    .montoPendiente(montoDeuda)
+                    .fechaVenta(fechaVenta.toLocalDate())
+                    .estadoPago(estadoPago)
+                    .build();
+            deudaRepository.save(deuda);
+        }
 
         Envio envio = null;
         if (entrega == TipoEntrega.ENVIO) {
@@ -148,6 +185,42 @@ public class VentaService {
         return costosVentaService.obtenerConfiguracion();
     }
 
+    @Transactional(readOnly = true)
+    public List<VentaResponseDTO> obtenerLibro(String desde, String hasta, String canal, String q) {
+        return obtenerVentasParaExportar(desde, hasta, canal, q).stream()
+                .map(v -> mapearADTO(v, envioRepository.findByVentaIdVenta(v.getIdVenta()).orElse(null)))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.sonograma.entity.Venta> obtenerVentasParaExportar(String desde, String hasta, String canal, String q) {
+        LocalDateTime desdeDate = desde != null && !desde.isBlank()
+                ? LocalDateTime.parse(desde + "T00:00:00") : null;
+        LocalDateTime hastaDate = hasta != null && !hasta.isBlank()
+                ? LocalDateTime.parse(hasta + "T23:59:59") : null;
+        CanalVenta canalEnum = null;
+        if (canal != null && !canal.isBlank()) {
+            try { canalEnum = CanalVenta.valueOf(canal); } catch (IllegalArgumentException ignored) {}
+        }
+        String qLower = (q != null && !q.isBlank()) ? q.toLowerCase() : null;
+        final CanalVenta finalCanal = canalEnum;
+
+        return ventaRepository.findAllByOrderByFechaVentaDesc().stream()
+                .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
+                .filter(v -> desdeDate == null || !v.getFechaVenta().isBefore(desdeDate))
+                .filter(v -> hastaDate == null || !v.getFechaVenta().isAfter(hastaDate))
+                .filter(v -> finalCanal == null || finalCanal == v.getCanalVenta())
+                .filter(v -> {
+                    if (qLower == null) return true;
+                    String snapshot = v.getClienteNombreSnapshot() != null ? v.getClienteNombreSnapshot().toLowerCase() : "";
+                    String artista = v.getDisco().getArtista() != null ? v.getDisco().getArtista().toLowerCase() : "";
+                    String album = v.getDisco().getAlbum() != null ? v.getDisco().getAlbum().toLowerCase() : "";
+                    String factura = v.getNumeroFactura() != null ? v.getNumeroFactura().toLowerCase() : "";
+                    return snapshot.contains(qLower) || artista.contains(qLower) || album.contains(qLower) || factura.contains(qLower);
+                })
+                .collect(Collectors.toList());
+    }
+
     private VentaResponseDTO mapearADTO(Venta venta, Envio envio) {
         EnvioDTO envioDTO = null;
         if (envio != null) {
@@ -188,7 +261,18 @@ public class VentaService {
                 .estado(venta.getEstado() != null ? venta.getEstado().name() : null)
                 .observaciones(venta.getObservaciones())
                 .envio(envioDTO)
+                .numeroFactura(venta.getNumeroFactura())
+                .clienteNombreSnapshot(venta.getClienteNombreSnapshot())
+                .medioPago(venta.getMedioPago() != null ? venta.getMedioPago().name() : null)
+                .montoPagado(venta.getMontoPagado())
+                .montoDeuda(venta.getMontoDeuda())
+                .estadoPago(venta.getEstadoPago() != null ? venta.getEstadoPago().name() : null)
                 .build();
+    }
+
+    private String generarNumeroFactura(int anio) {
+        long count = ventaRepository.countByAnio(anio) + 1;
+        return String.format("F-%d-%03d", anio, count);
     }
 
     private DireccionCliente resolverDireccionCliente(Cliente cliente, VentaRequestDTO dto) {

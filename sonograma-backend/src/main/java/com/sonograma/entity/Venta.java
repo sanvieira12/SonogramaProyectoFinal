@@ -1,7 +1,9 @@
 package com.sonograma.entity;
 
 import com.sonograma.enums.CanalVenta;
+import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.enums.MedioPago;
 import com.sonograma.enums.TipoEntrega;
 import jakarta.persistence.*;
 import lombok.*;
@@ -76,4 +78,25 @@ public class Venta {
 
     @Column(name = "observaciones")
     private String observaciones;
+
+    @Column(name = "numero_factura", unique = true)
+    private String numeroFactura;
+
+    @Column(name = "cliente_nombre_snapshot")
+    private String clienteNombreSnapshot;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "medio_pago")
+    private MedioPago medioPago;
+
+    @Column(name = "monto_pagado", precision = 10, scale = 2)
+    private BigDecimal montoPagado;
+
+    @Column(name = "monto_deuda", precision = 10, scale = 2)
+    private BigDecimal montoDeuda;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "estado_pago")
+    @Builder.Default
+    private EstadoPago estadoPago = EstadoPago.PAGADO;
 }
