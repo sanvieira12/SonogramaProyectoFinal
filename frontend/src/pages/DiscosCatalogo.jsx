@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import QRCode from 'react-qr-code'
 import { discoService } from '../services/discoService'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
@@ -154,10 +155,36 @@ function SlideOver({ disco, onCerrar, onEditar }) {
             </button>
           </div>
 
-          {/* Portada placeholder */}
-          <div className="w-full aspect-square max-w-[200px] mx-auto bg-slate-100 dark:bg-stone-800 rounded-xl flex items-center justify-center">
-            <p className="text-slate-400 dark:text-stone-600 text-sm">Tapa próximamente</p>
-          </div>
+          {/* Portada o imagen */}
+          {disco.imagenUrl ? (
+            <img
+              src={disco.imagenUrl}
+              alt={`${disco.artista} - ${disco.album}`}
+              className="w-full aspect-square max-w-[200px] mx-auto rounded-xl object-cover bg-slate-100 dark:bg-stone-800"
+            />
+          ) : (
+            <div className="w-full aspect-square max-w-[200px] mx-auto bg-slate-100 dark:bg-stone-800 rounded-xl flex items-center justify-center">
+              <p className="text-slate-400 dark:text-stone-600 text-sm">Sin portada</p>
+            </div>
+          )}
+
+          {/* Audio preview */}
+          {disco.previewUrl && (
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Preview</p>
+              <audio controls src={disco.previewUrl} className="w-full h-9" />
+            </div>
+          )}
+
+          {/* QR code */}
+          {disco.codigoQr && (
+            <div className="flex flex-col items-center gap-2">
+              <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Código QR</p>
+              <div className="bg-white p-2 rounded-lg inline-block">
+                <QRCode value={disco.codigoQr} size={120} />
+              </div>
+            </div>
+          )}
 
           {/* Estado */}
           <EstadoBadge estado={disco.estado} />

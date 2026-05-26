@@ -27,6 +27,14 @@ public class DiscoResponseDTO {
     private BigDecimal costo;
     private BigDecimal precioVenta;
     private String estado;
+    private String pais;
+    private String estilo;
+    private String tracklist;
+    private String notas;
+    private String procedencia;
+    private String imagenUrl;
+    private String previewUrl;
+    private String discogsUrl;
     private LocalDateTime fechaIngreso;
     private LocalDateTime fechaActualizacion;
 }

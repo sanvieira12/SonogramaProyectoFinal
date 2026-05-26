@@ -54,4 +54,24 @@ public class DiscoRequestDTO {
 
     @DecimalMin(value = "0.0", inclusive = false, message = "El precio de venta debe ser mayor a 0")
     private BigDecimal precioVenta;
+
+    @Size(max = 100)
+    private String pais;
+
+    @Size(max = 100)
+    private String estilo;
+
+    private String tracklist;
+
+    private String notas;
+
+    @Size(max = 100)
+    private String procedencia;
+
+    private String imagenUrl;
+
+    private String previewUrl;
+
+    @Size(max = 500)
+    private String discogsUrl;
 }

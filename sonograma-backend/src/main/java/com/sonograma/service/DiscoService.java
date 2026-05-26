@@ -101,7 +101,7 @@ public class DiscoService {
         if (disco.getEstado() == EstadoDisco.VENDIDO) {
             throw new NegocioException("No se puede dar de baja un disco ya vendido");
         }
-        disco.setEstado(EstadoDisco.DESCONTINUADO);
+        disco.setEstado(EstadoDisco.SIN_STOCK);
         discoRepository.save(disco);
     }
 

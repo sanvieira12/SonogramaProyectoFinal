@@ -24,6 +24,14 @@ public class DiscoMapper {
                 .costo(disco.getCosto())
                 .precioVenta(disco.getPrecioVenta())
                 .estado(disco.getEstado() != null ? disco.getEstado().name() : null)
+                .pais(disco.getPais())
+                .estilo(disco.getEstilo())
+                .tracklist(disco.getTracklist())
+                .notas(disco.getNotas())
+                .procedencia(disco.getProcedencia())
+                .imagenUrl(disco.getImagenUrl())
+                .previewUrl(disco.getPreviewUrl())
+                .discogsUrl(disco.getDiscogsUrl())
                 .fechaIngreso(disco.getFechaIngreso())
                 .fechaActualizacion(disco.getFechaActualizacion())
                 .build();
@@ -42,6 +50,14 @@ public class DiscoMapper {
                 .tipoDisco(request.getTipoDisco())
                 .costo(request.getCosto())
                 .precioVenta(request.getPrecioVenta())
+                .pais(request.getPais())
+                .estilo(request.getEstilo())
+                .tracklist(request.getTracklist())
+                .notas(request.getNotas())
+                .procedencia(request.getProcedencia())
+                .imagenUrl(request.getImagenUrl())
+                .previewUrl(request.getPreviewUrl())
+                .discogsUrl(request.getDiscogsUrl())
                 .build();
     }
 
@@ -57,5 +73,13 @@ public class DiscoMapper {
         if (request.getTipoDisco() != null) disco.setTipoDisco(request.getTipoDisco());
         if (request.getCosto() != null) disco.setCosto(request.getCosto());
         if (request.getPrecioVenta() != null) disco.setPrecioVenta(request.getPrecioVenta());
+        if (request.getPais() != null) disco.setPais(request.getPais());
+        if (request.getEstilo() != null) disco.setEstilo(request.getEstilo());
+        if (request.getTracklist() != null) disco.setTracklist(request.getTracklist());
+        if (request.getNotas() != null) disco.setNotas(request.getNotas());
+        if (request.getProcedencia() != null) disco.setProcedencia(request.getProcedencia());
+        if (request.getImagenUrl() != null) disco.setImagenUrl(request.getImagenUrl());
+        if (request.getPreviewUrl() != null) disco.setPreviewUrl(request.getPreviewUrl());
+        if (request.getDiscogsUrl() != null) disco.setDiscogsUrl(request.getDiscogsUrl());
     }
 }

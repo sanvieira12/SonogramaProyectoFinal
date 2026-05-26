@@ -104,4 +104,42 @@ export const api = {
       return res.blob()
     },
   },
+
+  importaciones: {
+    vinylfuturePreview: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/importaciones/vinylfuture/preview`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (!res.ok) throw new Error('Error al parsear el Excel')
+      return res.json()
+    },
+
+    vinylfutureConfirmar: (seleccionados) =>
+      request('POST', '/importaciones/vinylfuture/confirmar', seleccionados),
+
+    discogsDesdeLink: (url) =>
+      request('POST', '/importaciones/discogs/desde-link', { url }),
+
+    discogsGuardar: (preview) =>
+      request('POST', '/importaciones/discogs/guardar', preview),
+
+    discogsDesdeExcel: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/importaciones/discogs/desde-excel`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (!res.ok) throw new Error('Error al procesar Excel con links de Discogs')
+      return res.json()
+    },
+
+    discogsGuardarLote: (previews) =>
+      request('POST', '/importaciones/discogs/guardar-lote', previews),
+  },
 }

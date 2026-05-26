@@ -5,6 +5,7 @@ import DiscosCatalogo from './pages/DiscosCatalogo'
 import Clientes from './pages/Clientes'
 import NuevaVenta from './pages/NuevaVenta'
 import Importar from './pages/Importar'
+import Deudas from './pages/Deudas'
 import Navbar from './components/Navbar'
 
 function PrivateRoute() {
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/clientes" element={<Clientes />} />
             <Route path="/ventas/nueva" element={<NuevaVenta />} />
             <Route path="/importar" element={<Importar />} />
+            <Route path="/deudas" element={<Deudas />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

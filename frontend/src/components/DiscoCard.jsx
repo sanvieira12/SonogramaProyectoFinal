@@ -2,16 +2,14 @@ import { useNavigate } from 'react-router-dom'
 import EstadoBadge from './EstadoBadge'
 
 const ESTADOS_SIGUIENTES = {
-  DISPONIBLE:    ['RESERVADO', 'FUERA_STOCK', 'VENDIDO'],
-  RESERVADO:     ['DISPONIBLE', 'FUERA_STOCK', 'VENDIDO'],
-  VENDIDO:       [],
-  FUERA_STOCK:   ['DISPONIBLE', 'DESCONTINUADO'],
-  DESCONTINUADO: ['DISPONIBLE'],
+  DISPONIBLE: ['RESERVADO', 'SIN_STOCK', 'VENDIDO'],
+  RESERVADO:  ['DISPONIBLE', 'SIN_STOCK', 'VENDIDO'],
+  VENDIDO:    [],
+  SIN_STOCK:  ['DISPONIBLE'],
 }
 
 const ESTADO_LABELS = {
-  FUERA_STOCK: 'Fuera stock',
-  DESCONTINUADO: 'Descontinuado',
+  SIN_STOCK: 'Sin stock',
 }
 
 export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar }) {

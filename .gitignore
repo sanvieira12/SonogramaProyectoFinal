@@ -2,6 +2,17 @@
 *.secret
 *.key
 .env
+.env.local
+*.env.local
+
+# Build artifacts
+target/
+*.class
+frontend/dist/
+frontend/node_modules/
+
+# Leftover generated files
+qr.png
 
 # Invoice PDFs (user data, not committed)
 *.pdf

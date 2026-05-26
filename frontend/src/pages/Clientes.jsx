@@ -2,6 +2,168 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/sonograma'
 import Paginacion from '../components/Paginacion'
 
+const DEPARTAMENTOS_UY = [
+  '', 'Artigas', 'Canelones', 'Cerro Largo', 'Colonia', 'Durazno', 'Flores',
+  'Florida', 'Lavalleja', 'Maldonado', 'Montevideo', 'Paysandú',
+  'Río Negro', 'Rivera', 'Rocha', 'Salto', 'San José', 'Soriano',
+  'Tacuarembó', 'Treinta y Tres',
+]
+
+const EMPTY_CLIENTE = {
+  nombre: '', apellido: '', cedula: '', instagram: '',
+  telefono: '', email: '', direccion: '', departamento: '',
+  localidad: '', observaciones: '',
+}
+
+function NuevoClienteModal({ onClose, onCreado }) {
+  const [form, setForm] = useState(EMPTY_CLIENTE)
+  const [errores, setErrores] = useState({})
+  const [guardando, setGuardando] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  function set(field, value) {
+    setForm(prev => ({ ...prev, [field]: value }))
+    if (errores[field]) setErrores(prev => { const n = { ...prev }; delete n[field]; return n })
+  }
+
+  function stripAt(v) { return v.startsWith('@') ? v.slice(1) : v }
+
+  function validar() {
+    const e = {}
+    if (!form.nombre.trim()) e.nombre = 'El nombre es obligatorio'
+    return e
+  }
+
+  async function guardar(e) {
+    e.preventDefault()
+    const errs = validar()
+    if (Object.keys(errs).length) { setErrores(errs); return }
+    setGuardando(true)
+    setErrorMsg('')
+    try {
+      const payload = {
+        nombre: form.nombre.trim(),
+        apellido: form.apellido || undefined,
+        cedula: form.cedula || undefined,
+        instagramUsuario: form.instagram ? stripAt(form.instagram.trim()) : undefined,
+        telefono: form.telefono || undefined,
+        email: form.email || undefined,
+        direccion: form.departamento
+          ? [form.direccion, form.localidad, form.departamento].filter(Boolean).join(', ')
+          : form.direccion || undefined,
+        observaciones: form.observaciones || undefined,
+      }
+      const creado = await api.clientes.crear(payload)
+      onCreado(creado)
+      onClose()
+    } catch (err) {
+      setErrorMsg(err.message || 'Error al guardar el cliente')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white dark:bg-stone-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-stone-800 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Nuevo cliente</h2>
+            <button onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {errorMsg && (
+            <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>
+            </div>
+          )}
+
+          <form onSubmit={guardar} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Nombre <span className="text-red-400">*</span></label>
+                <input className={`input w-full ${errores.nombre ? 'border-red-400' : ''}`}
+                  value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Juan" />
+                {errores.nombre && <p className="text-xs text-red-500 mt-1">{errores.nombre}</p>}
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Apellido</label>
+                <input className="input w-full" value={form.apellido}
+                  onChange={e => set('apellido', e.target.value)} placeholder="García" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Cédula</label>
+                <input className="input w-full" value={form.cedula}
+                  onChange={e => set('cedula', e.target.value)} placeholder="1.234.567-8" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Instagram</label>
+                <input className="input w-full" value={form.instagram}
+                  onChange={e => set('instagram', e.target.value)} placeholder="@usuario" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Teléfono</label>
+                <input className="input w-full" value={form.telefono}
+                  onChange={e => set('telefono', e.target.value)} placeholder="098 123 456" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Email</label>
+                <input type="email" className="input w-full" value={form.email}
+                  onChange={e => set('email', e.target.value)} placeholder="juan@mail.com" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Dirección</label>
+              <input className="input w-full" value={form.direccion}
+                onChange={e => set('direccion', e.target.value)} placeholder="Calle 123 apto 4" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Departamento</label>
+                <select className="input w-full" value={form.departamento}
+                  onChange={e => set('departamento', e.target.value)}>
+                  {DEPARTAMENTOS_UY.map(d => <option key={d} value={d}>{d || '— Sin especificar —'}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Localidad</label>
+                <input className="input w-full" value={form.localidad}
+                  onChange={e => set('localidad', e.target.value)} placeholder="Ej: Pocitos" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Notas internas</label>
+              <textarea rows={2} className="input w-full resize-none" value={form.observaciones}
+                onChange={e => set('observaciones', e.target.value)}
+                placeholder="Preferencias, historial, etc." />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button type="submit" disabled={guardando}
+                className="flex-1 px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
+                {guardando ? 'Guardando…' : 'Crear cliente'}
+              </button>
+              <button type="button" onClick={onClose}
+                className="px-5 py-2.5 rounded-lg border border-slate-200 dark:border-stone-700 text-slate-600 dark:text-stone-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-stone-900 transition-colors">
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Spinner() {
   return (
     <div className="flex items-center justify-center py-24 gap-3">
@@ -44,6 +206,7 @@ export default function Clientes() {
   const [loadingDetalle, setLoadingDetalle] = useState(false)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
+  const [modalNuevo, setModalNuevo] = useState(false)
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -110,7 +273,23 @@ export default function Clientes() {
             {!loading && `${clientes.length} ${clientes.length === 1 ? 'cliente registrado' : 'clientes registrados'}`}
           </p>
         </div>
+        <button
+          onClick={() => setModalNuevo(true)}
+          className="btn-primary flex items-center gap-2 whitespace-nowrap"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Nuevo cliente
+        </button>
       </div>
+
+      {modalNuevo && (
+        <NuevoClienteModal
+          onClose={() => setModalNuevo(false)}
+          onCreado={nuevo => setClientes(prev => [nuevo, ...prev])}
+        />
+      )}
 
       {/* Búsqueda */}
       <div className="relative max-w-sm">

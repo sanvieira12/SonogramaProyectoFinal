@@ -66,6 +66,30 @@ public class Disco {
     @Builder.Default
     private EstadoDisco estado = EstadoDisco.DISPONIBLE;
 
+    @Column(name = "pais")
+    private String pais;
+
+    @Column(name = "estilo")
+    private String estilo;
+
+    @Column(name = "tracklist", columnDefinition = "TEXT")
+    private String tracklist;
+
+    @Column(name = "notas", columnDefinition = "TEXT")
+    private String notas;
+
+    @Column(name = "procedencia")
+    private String procedencia;
+
+    @Column(name = "imagen_url", columnDefinition = "TEXT")
+    private String imagenUrl;
+
+    @Column(name = "preview_url", columnDefinition = "TEXT")
+    private String previewUrl;
+
+    @Column(name = "discogs_url")
+    private String discogsUrl;
+
     @Column(name = "fecha_ingreso")
     private LocalDateTime fechaIngreso;
 
