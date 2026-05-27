@@ -17,3 +17,16 @@ qr.png
 # Invoice PDFs (user data, not committed)
 *.pdf
 !docs/**/*.pdf
+
+# Variables de entorno de producción
+*.env
+sonograma.env
+frontend/.env.production
+
+# Backups locales
+backups/
+*.sql
+*.sql.gz
+
+# Uploads locales
+uploads/

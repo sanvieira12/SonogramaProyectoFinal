@@ -1,0 +1,29 @@
+[Unit]
+Description=Sonograma Backend Spring Boot
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=sonograma
+Group=sonograma
+WorkingDirectory=/opt/sonograma/app/sonograma-backend
+EnvironmentFile=/etc/sonograma/sonograma.env
+Environment="SPRING_PROFILES_ACTIVE=prod"
+ExecStart=/usr/bin/java \
+    -Xms256m -Xmx512m \
+    -XX:+UseG1GC \
+    -Djava.security.egd=file:/dev/./urandom \
+    -jar /opt/sonograma/app/sonograma-backend/target/sonograma-backend-*.jar \
+    --spring.profiles.active=prod
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sonograma-backend
+
+[Install]
+WantedBy=multi-user.target

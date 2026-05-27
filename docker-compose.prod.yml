@@ -1,0 +1,92 @@
+###############################################################
+#  Sonograma – Docker Compose PRODUCCIÓN (Lightsail todo-en-uno)
+#  Uso: docker compose -f docker-compose.prod.yml up -d
+###############################################################
+
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sonograma-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sonograma_db
+      POSTGRES_USER: ${SPRING_DATASOURCE_USERNAME:-sonograma_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - sonograma-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SPRING_DATASOURCE_USERNAME:-sonograma_user} -d sonograma_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./sonograma-backend
+      dockerfile: Dockerfile
+    container_name: sonograma-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sonograma_db
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-sonograma_user}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      SONOGRAMA_FRONTEND_BASE_URL: ${SONOGRAMA_FRONTEND_BASE_URL:-https://tudominio.com}
+      DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
+    volumes:
+      - logs_data:/opt/sonograma/logs
+    expose:
+      - "8080"
+    networks:
+      - sonograma-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: sonograma-nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/dist:/var/www/sonograma:ro
+      - ./deploy/nginx-sonograma.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/lib/letsencrypt:/var/lib/letsencrypt:ro
+    networks:
+      - sonograma-net
+
+volumes:
+  postgres_data:
+    driver: local
+  logs_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sonograma/logs
+
+networks:
+  sonograma-net:
+    driver: bridge

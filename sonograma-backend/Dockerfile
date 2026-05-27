@@ -9,6 +9,7 @@ RUN mvn clean package -DskipTests -B
 # Stage 2: runtime con JRE liviano
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
+RUN apk add --no-cache curl
 COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 8080
