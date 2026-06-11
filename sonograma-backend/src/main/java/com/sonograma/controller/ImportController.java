@@ -15,6 +15,7 @@ import com.sonograma.service.ZipBundleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,10 +54,9 @@ public class ImportController {
      */
     @PostMapping("/vinylfuture-csv")
     @Transactional
-    public ResponseEntity<?> procesarFactura(@RequestParam MultipartFile file) {
+    public ResponseEntity<StreamingResponseBody> procesarFactura(@RequestParam MultipartFile file) {
         if (file.isEmpty()) {
-            return ResponseEntity.badRequest()
-                .body("Archivo vacío".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return errorResponse(HttpStatus.BAD_REQUEST, "Archivo vacío");
         }
 
         log.info("Recibido PDF '{}' ({} bytes). Iniciando procesamiento.", file.getOriginalFilename(), file.getSize());
@@ -66,8 +66,7 @@ public class ImportController {
         try {
             pdfBytes = file.getBytes();
         } catch (IOException e) {
-            return ResponseEntity.badRequest()
-                .body(("No se pudo leer el PDF: " + e.getMessage()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
         List<InvoiceItem> items;
@@ -77,8 +76,7 @@ public class ImportController {
             pdfLinks = pdfParser.extractLinks(pdfBytes);
         } catch (IOException e) {
             log.warn("No se pudo parsear el PDF: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                .body(("No se pudo leer el PDF: " + e.getMessage()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
         if (items.isEmpty()) {
@@ -149,17 +147,29 @@ public class ImportController {
             zipPath = zipBundle.buildZip(csv, pageDataMap);
         } catch (Exception e) {
             log.error("Error al construir el ZIP: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                .body(("Error al generar el archivo: " + e.getMessage()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return errorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Error al generar el archivo: " + e.getMessage()
+            );
         }
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         String filename = "vinylfuture-import-" + timestamp + ".zip";
 
+        long zipSize;
         try {
-            log.info("ZIP generado: {} bytes.", Files.size(zipPath));
+            zipSize = Files.size(zipPath);
+            log.info("ZIP generado: {} bytes.", zipSize);
         } catch (IOException e) {
-            log.warn("No se pudo determinar el tamaño del ZIP: {}", e.getMessage());
+            try {
+                Files.deleteIfExists(zipPath);
+            } catch (IOException cleanupError) {
+                log.warn("No se pudo limpiar el ZIP temporal: {}", cleanupError.getMessage());
+            }
+            return errorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "No se pudo preparar el archivo generado"
+            );
         }
 
         StreamingResponseBody body = outputStream -> {
@@ -173,6 +183,16 @@ public class ImportController {
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
             .contentType(MediaType.parseMediaType("application/zip"))
+            .contentLength(zipSize)
+            .body(body);
+    }
+
+    private ResponseEntity<StreamingResponseBody> errorResponse(HttpStatus status, String message) {
+        byte[] payload = message.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        StreamingResponseBody body = outputStream -> outputStream.write(payload);
+        return ResponseEntity.status(status)
+            .contentType(MediaType.TEXT_PLAIN)
+            .contentLength(payload.length)
             .body(body);
     }
 }
