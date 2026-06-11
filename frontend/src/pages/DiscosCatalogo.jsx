@@ -61,69 +61,6 @@ function EmptyState({ hayFiltro }) {
   )
 }
 
-/* Panel flotante que aparece al hacer hover sobre una fila.
-   Usa position:fixed para no ser afectado por overflow del contenedor.
-   pointer-events:none porque es solo informativo, no interactivo. */
-function HoverPanel({ disco, rect }) {
-  if (!disco || !rect) return null
-
-  // Si la fila está cerca del tope del viewport, mostrar el panel debajo
-  const panelH = 280
-  const showAbove = rect.top > panelH + 16
-  const top    = showAbove ? rect.top - 8 : rect.bottom + 8
-  const left   = Math.min(rect.left, window.innerWidth - 420)
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top,
-        left,
-        zIndex: 9999,
-        width: 400,
-        transform: showAbove ? 'translateY(-100%)' : 'translateY(0)',
-        animation: 'fadeScale 130ms ease forwards',
-        pointerEvents: 'none',
-      }}
-      className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-xl shadow-2xl p-4"
-    >
-      <div className="flex gap-4">
-        {/* Placeholder de portada */}
-        <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[10px] text-slate-400 dark:text-stone-600 text-center leading-tight px-1">
-          Tapa próximamente
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{disco.artista}</p>
-          <p className="text-slate-500 dark:text-stone-400 text-xs mt-0.5 leading-tight">{disco.album}</p>
-          <div className="mt-1.5"><EstadoBadge estado={disco.estado} /></div>
-        </div>
-      </div>
-
-      {/* Campos del disco en grilla compacta */}
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-        {[
-          ['Año',          disco.anio],
-          ['Género',       disco.genero],
-          ['Sello',        disco.selloDiscografico],
-          ['Condición',    disco.condicion],
-          ['Precio compra',  disco.precioCompra  ? `$${Number(disco.precioCompra).toLocaleString('es-AR')}` : null],
-          ['Precio venta',   disco.precioVenta   ? `$${Number(disco.precioVenta).toLocaleString('es-AR')}`  : null],
-        ].map(([label, value]) => (
-          <div key={label}>
-            <span className="text-slate-400 dark:text-stone-500">{label}: </span>
-            <span className="text-slate-700 dark:text-stone-300">{value || '—'}</span>
-          </div>
-        ))}
-      </div>
-
-      {disco.observaciones && (
-        <p className="mt-2 text-xs text-slate-500 dark:text-stone-400 italic border-t border-slate-100 dark:border-stone-800 pt-2 line-clamp-2">
-          {disco.observaciones}
-        </p>
-      )}
-    </div>
-  )
-}
 
 /* Panel lateral derecho con el detalle completo del disco.
    Se abre al hacer clic en una fila. */
@@ -239,8 +176,6 @@ export default function DiscosCatalogo() {
   const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
-  const [hoverDisco, setHoverDisco] = useState(null)
-  const [hoverRect, setHoverRect] = useState(null)
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
@@ -307,17 +242,6 @@ export default function DiscosCatalogo() {
     } finally {
       setEliminando(false)
     }
-  }
-
-  // Hover handlers: el panel se muestra mientras el mouse está sobre la fila
-  function openHover(e, disco) {
-    setHoverDisco(disco)
-    setHoverRect(e.currentTarget.getBoundingClientRect())
-  }
-
-  function closeHover() {
-    setHoverDisco(null)
-    setHoverRect(null)
   }
 
   const discosFiltrados = discos.filter(d =>
@@ -414,16 +338,27 @@ export default function DiscosCatalogo() {
                   {discosPagina.map(d => (
                     <tr
                       key={d.idDisco}
-                      onMouseEnter={e => openHover(e, d)}
-                      onMouseLeave={closeHover}
                       onClick={() => setSlideOverDisco(d)}
                       className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
                     >
                       <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900 dark:text-white">{d.artista}</div>
-                        <div className="text-slate-500 dark:text-stone-400 text-xs mt-0.5">
-                          {d.album}
-                          {d.anio ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.anio}</span> : null}
+                        <div className="flex items-center gap-3">
+                          {d.imagenUrl ? (
+                            <img
+                              src={d.imagenUrl}
+                              alt={`${d.artista} - ${d.album}`}
+                              className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-slate-100 dark:bg-stone-800"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
+                          )}
+                          <div>
+                            <div className="font-semibold text-slate-900 dark:text-white">{d.artista}</div>
+                            <div className="text-slate-500 dark:text-stone-400 text-xs mt-0.5">
+                              {d.album}
+                              {d.anio ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.anio}</span> : null}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden sm:table-cell">
@@ -515,9 +450,6 @@ export default function DiscosCatalogo() {
           </>
         )}
       </div>
-
-      {/* Panel hover flotante (position:fixed, pointer-events:none) */}
-      <HoverPanel disco={hoverDisco} rect={hoverRect} />
 
       {/* Slide-over de detalle al hacer clic en una fila */}
       <SlideOver

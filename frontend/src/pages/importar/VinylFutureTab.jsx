@@ -267,9 +267,9 @@ function PdfExport() {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-semibold text-slate-800 dark:text-stone-200 text-sm mb-1">Procesar factura deejay.de → ZIP</h3>
+        <h3 className="font-semibold text-slate-800 dark:text-stone-200 text-sm mb-1">Importar desde factura de Vinyl Future</h3>
         <p className="text-xs text-slate-500 dark:text-stone-400">
-          Subí una factura PDF de deejay.de para buscar cada ítem en vinylfuture.com y descargar portadas e M3U.
+          Subí una factura PDF de Vinyl Future para buscar cada ítem, descargar portadas y guardar los discos en el catálogo.
         </p>
       </div>
       {estado === 'idle' && (
@@ -306,8 +306,6 @@ function PdfExport() {
 export default function VinylFutureTab() {
   return (
     <div className="space-y-8">
-      <ExcelImport />
-      <hr className="border-slate-200 dark:border-stone-800" />
       <PdfExport />
     </div>
   )
