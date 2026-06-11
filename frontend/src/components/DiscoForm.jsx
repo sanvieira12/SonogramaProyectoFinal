@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 const CONDICIONES = ['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO']
 const TIPOS = ['VINILO', 'CD', 'DIGITAL', 'CASSETTE', 'OTRO']
@@ -6,7 +6,73 @@ const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTIN
 
 const VACIO = {
   codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
-  condicion: 'NUEVO', tipoDisco: 'VINILO', costo: '', precioVenta: '', estado: 'DISPONIBLE',
+  condicion: 'NUEVO', tipoDisco: 'VINILO', costo: '', precioVenta: '', estado: 'DISPONIBLE', imagenUrl: '',
+}
+
+function resizarBase64(file, maxPx = 400) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      }
+      img.src = ev.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function CoverUpload({ value, onChange }) {
+  const fileRef = useRef(null)
+  const isBase64 = value?.startsWith('data:')
+
+  async function handleFile(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    const b64 = await resizarBase64(file)
+    onChange(b64)
+    e.target.value = ''
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="url"
+          className="input flex-1"
+          value={isBase64 ? '' : (value || '')}
+          onChange={e => onChange(e.target.value)}
+          placeholder="https://... o subí un archivo →"
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="px-3 py-2 rounded-lg text-xs bg-slate-100 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-200 dark:hover:bg-stone-700 transition-colors whitespace-nowrap"
+        >
+          {isBase64 ? 'Cambiar' : 'Subir'}
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="px-2 py-2 rounded-lg text-xs text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            ✕
+          </button>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      </div>
+      {value && (
+        <img src={value} alt="Portada" className="h-16 w-16 object-cover rounded-lg border border-slate-200 dark:border-stone-700" />
+      )}
+    </div>
+  )
 }
 
 export default function DiscoForm({ disco, onGuardar, onCancelar }) {
@@ -26,6 +92,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           costo: disco.costo || '',
           precioVenta: disco.precioVenta || '',
           estado: disco.estado || 'DISPONIBLE',
+          imagenUrl: disco.imagenUrl || '',
         }
       : VACIO
   )
@@ -159,6 +226,11 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Precio venta (UYU)</label>
               <input value={form.precioVenta} onChange={e => set('precioVenta', e.target.value)} className="input" placeholder="0.00" type="number" step="0.01" min="0" />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Portada</label>
+            <CoverUpload value={form.imagenUrl} onChange={v => set('imagenUrl', v)} />
           </div>
 
           {error && (

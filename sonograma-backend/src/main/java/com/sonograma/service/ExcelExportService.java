@@ -58,8 +58,12 @@ public class ExcelExportService {
                 String cliente = v.getClienteNombreSnapshot() != null ? v.getClienteNombreSnapshot()
                         : v.getCliente().getNombre() + " " + orEmpty(v.getCliente().getApellido());
                 row.createCell(2).setCellValue(cliente);
-                row.createCell(3).setCellValue(orEmpty(v.getDisco().getArtista()));
-                row.createCell(4).setCellValue(orEmpty(v.getDisco().getAlbum()));
+                String artistaXls = v.getDisco() != null ? v.getDisco().getArtista()
+                        : (v.getDetalles() != null && !v.getDetalles().isEmpty() ? v.getDetalles().get(0).getArtistaSnap() : null);
+                String albumXls = v.getDisco() != null ? v.getDisco().getAlbum()
+                        : (v.getDetalles() != null && !v.getDetalles().isEmpty() ? v.getDetalles().get(0).getAlbumSnap() : null);
+                row.createCell(3).setCellValue(orEmpty(artistaXls));
+                row.createCell(4).setCellValue(orEmpty(albumXls));
                 row.createCell(5).setCellValue(v.getCanalVenta() != null ? v.getCanalVenta().name() : "");
                 row.createCell(6).setCellValue(v.getMedioPago() != null ? v.getMedioPago().name() : "");
 

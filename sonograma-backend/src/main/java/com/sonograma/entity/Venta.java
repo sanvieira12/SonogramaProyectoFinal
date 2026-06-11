@@ -10,6 +10,8 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "venta")
@@ -29,8 +31,14 @@ public class Venta {
     private Cliente cliente;
 
     @ManyToOne
-    @JoinColumn(name = "id_disco", nullable = false)
+    @JoinColumn(name = "id_disco")
     private Disco disco;
+
+    @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL, orphanRemoval = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @Builder.Default
+    private List<DetalleVenta> detalles = new ArrayList<>();
 
     @Column(name = "fecha_venta", nullable = false)
     @Builder.Default
@@ -66,6 +74,12 @@ public class Venta {
 
     @Column(name = "ganancia_estimada", precision = 10, scale = 2)
     private BigDecimal gananciaEstimada;
+
+    @Column(name = "subtotal", precision = 10, scale = 2)
+    private BigDecimal subtotal;
+
+    @Column(name = "descuento_porcentaje", precision = 5, scale = 2)
+    private BigDecimal descuentoPorcentaje;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "tipo_entrega")

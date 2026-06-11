@@ -4,6 +4,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -38,4 +39,7 @@ public class VentaResponseDTO {
     private BigDecimal montoPagado;
     private BigDecimal montoDeuda;
     private String estadoPago;
+    private BigDecimal subtotal;
+    private BigDecimal descuentoPorcentaje;
+    private List<DetalleVentaResponseDTO> detalles;
 }

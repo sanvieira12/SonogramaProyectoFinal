@@ -31,11 +31,19 @@ public class CostosVentaService {
                 .build();
     }
 
+    public ResultadoCostoVentaDTO calcular(BigDecimal costoDisco, BigDecimal precioVenta, VentaRequestDTO dto) {
+        return calcularInterno(moneda(nvl(costoDisco)), precioVenta, dto);
+    }
+
     public ResultadoCostoVentaDTO calcular(Disco disco, VentaRequestDTO dto) {
         BigDecimal costoDisco = moneda(nvl(disco.getCosto()));
         BigDecimal precioVenta = dto.getPrecioVenta() != null
                 ? dto.getPrecioVenta()
                 : (dto.getTotal() != null ? dto.getTotal() : disco.getPrecioVenta());
+        return calcularInterno(costoDisco, precioVenta, dto);
+    }
+
+    private ResultadoCostoVentaDTO calcularInterno(BigDecimal costoDisco, BigDecimal precioVenta, VentaRequestDTO dto) {
 
         if (precioVenta == null || precioVenta.compareTo(BigDecimal.ZERO) <= 0) {
             throw new NegocioException("Ingresá un precio de venta válido");

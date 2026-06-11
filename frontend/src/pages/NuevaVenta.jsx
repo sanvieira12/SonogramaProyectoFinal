@@ -16,6 +16,8 @@ const ESTADO_LABELS = {
   DESCONTINUADO: 'Descontinuado',
 }
 
+const DESCUENTOS = [0, 5, 10, 15, 20]
+
 function money(valor) {
   return `$${Number(valor || 0).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
 }
@@ -25,39 +27,11 @@ function toNumber(valor) {
   return Number.isFinite(n) ? n : 0
 }
 
-function DiscoResumen({ disco }) {
-  return (
-    <div className="rounded-lg border border-slate-200 dark:border-stone-700 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white">{disco.artista}</div>
-          <div className="text-slate-600 dark:text-stone-300 text-sm">{disco.album}</div>
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400 dark:text-stone-500 flex-wrap">
-            {disco.codigoInterno && <span>{disco.codigoInterno}</span>}
-            {disco.genero && <span>· {disco.genero}</span>}
-            {disco.anio && <span>· {disco.anio}</span>}
-            {disco.selloDiscografico && <span>· {disco.selloDiscografico}</span>}
-          </div>
-        </div>
-        <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-stone-800 text-slate-600 dark:text-stone-300 whitespace-nowrap">
-          {ESTADO_LABELS[disco.estado] || disco.estado}
-        </span>
-      </div>
-      {disco.precioVenta && (
-        <div className="mt-3 font-bold text-slate-900 dark:text-white tabular-nums">
-          {money(disco.precioVenta)}
-          <span className="text-xs font-normal text-slate-400 dark:text-stone-500 ml-1">precio sugerido</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ResumenLinea({ label, value, strong }) {
+function ResumenLinea({ label, value, strong, muted }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-slate-500 dark:text-stone-400">{label}</span>
-      <span className={`${strong ? 'text-base font-bold text-slate-900 dark:text-white' : 'font-semibold text-slate-700 dark:text-stone-200'} tabular-nums`}>
+      <span className={muted ? 'text-slate-400 dark:text-stone-500 line-through' : 'text-slate-500 dark:text-stone-400'}>{label}</span>
+      <span className={`${strong ? 'text-base font-bold text-slate-900 dark:text-white' : muted ? 'text-slate-400 dark:text-stone-500 line-through' : 'font-semibold text-slate-700 dark:text-stone-200'} tabular-nums`}>
         {value}
       </span>
     </div>
@@ -72,9 +46,9 @@ export default function NuevaVenta() {
   const idDiscoParam = searchParams.get('idDisco')
 
   const [departamentos, setDepartamentos] = useState(DEPARTAMENTOS_FALLBACK)
-  const [disco, setDisco] = useState(null)
   const [discosDisponibles, setDiscosDisponibles] = useState([])
   const [busquedaDisco, setBusquedaDisco] = useState('')
+  const [carrito, setCarrito] = useState([]) // [{disco, precioUnitario}]
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [busquedaCliente, setBusquedaCliente] = useState('')
@@ -93,11 +67,12 @@ export default function NuevaVenta() {
   const [sucursalDacNombre, setSucursalDacNombre] = useState('')
   const [cargandoSucursales, setCargandoSucursales] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState('')
+  const [descuentoPct, setDescuentoPct] = useState(0)
 
-  const [precioVenta, setPrecioVenta] = useState('')
   const [porcentajeImpuesto, setPorcentajeImpuesto] = useState('0')
   const [otrosCostos, setOtrosCostos] = useState('0')
   const [observaciones, setObservaciones] = useState('')
+  const [montoPagado, setMontoPagado] = useState('')
 
   const [errores, setErrores] = useState({})
   const [enviando, setEnviando] = useState(false)
@@ -120,8 +95,7 @@ export default function NuevaVenta() {
     if (idDiscoParam) {
       api.discos.porId(idDiscoParam)
         .then(d => {
-          setDisco(d)
-          setPrecioVenta(d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '')
+          setCarrito([{ disco: d, precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '' }])
         })
         .catch(() => setErrores({ disco: 'No se pudo cargar el disco del link' }))
     } else {
@@ -133,7 +107,6 @@ export default function NuevaVenta() {
 
   useEffect(() => {
     if (tipoEntrega !== 'ENVIO' || !departamento) return
-
     let cancelado = false
     api.envios.sucursalesDac(departamento)
       .then(data => { if (!cancelado) setSucursalesDac(data) })
@@ -143,58 +116,58 @@ export default function NuevaVenta() {
   }, [departamento, tipoEntrega])
 
   const totales = useMemo(() => {
-    const base = toNumber(precioVenta)
+    const subtotal = carrito.reduce((s, item) => s + toNumber(item.precioUnitario), 0)
+    const descuento = subtotal * descuentoPct / 100
+    const base = subtotal - descuento
     const envio = tipoEntrega === 'ENVIO' ? toNumber(costoEnvio) : 0
     const otros = toNumber(otrosCostos)
     const impuestoPct = toNumber(porcentajeImpuesto)
     const impuesto = (base + envio + otros) * impuestoPct / 100
     const totalFinal = base + envio + otros + impuesto
-    const ganancia = totalFinal - toNumber(disco?.costo) - envio - otros - impuesto
-    return { base, envio, otros, impuestoPct, impuesto, totalFinal, ganancia }
-  }, [precioVenta, costoEnvio, tipoEntrega, otrosCostos, porcentajeImpuesto, disco])
+    const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo), 0)
+    const ganancia = totalFinal - costoDisco - envio - otros - impuesto
+    return { subtotal, descuento, base, envio, otros, impuestoPct, impuesto, totalFinal, ganancia }
+  }, [carrito, descuentoPct, costoEnvio, tipoEntrega, otrosCostos, porcentajeImpuesto])
 
   async function cargarDiscosVendibles() {
     const ds = await api.discos.todos()
     setDiscosDisponibles(ds.filter(d => d.estado === 'DISPONIBLE' || d.estado === 'RESERVADO'))
   }
 
-  function cambiarTipoEntrega(valor) {
-    setTipoEntrega(valor)
-    if (valor !== 'ENVIO') {
-      setSucursalesDac([])
-      setSucursalDacCodigo('')
-      setSucursalDacNombre('')
-      setCostoEnvio('')
-    } else if (departamento) {
-      setCargandoSucursales(true)
-    }
+  function agregarAlCarrito(d) {
+    if (carrito.some(item => item.disco.idDisco === d.idDisco)) return
+    setCarrito(prev => [...prev, { disco: d, precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '' }])
+    setBusquedaDisco('')
   }
 
-  function cambiarDepartamento(valor) {
-    setDepartamento(valor)
-    setSucursalesDac([])
-    setSucursalDacCodigo('')
-    setSucursalDacNombre('')
-    setCostoEnvio('')
-    setCargandoSucursales(Boolean(valor && tipoEntrega === 'ENVIO'))
+  function quitarDelCarrito(idDisco) {
+    setCarrito(prev => prev.filter(item => item.disco.idDisco !== idDisco))
+  }
+
+  function setPrecioItem(idDisco, valor) {
+    setCarrito(prev => prev.map(item => item.disco.idDisco === idDisco ? { ...item, precioUnitario: valor } : item))
   }
 
   function onBusquedaDiscoChange(e) {
     const q = e.target.value
     setBusquedaDisco(q)
-    if (!q.trim()) {
-      cargarDiscosVendibles()
-      return
-    }
+    if (!q.trim()) { cargarDiscosVendibles(); return }
     api.discos.buscar(q).then(ds =>
       setDiscosDisponibles(ds.filter(d => d.estado === 'DISPONIBLE' || d.estado === 'RESERVADO'))
     )
   }
 
-  function seleccionarDisco(d) {
-    setDisco(d)
-    setPrecioVenta(d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '')
-    setBusquedaDisco('')
+  function cambiarTipoEntrega(valor) {
+    setTipoEntrega(valor)
+    if (valor !== 'ENVIO') {
+      setSucursalesDac([]); setSucursalDacCodigo(''); setSucursalDacNombre(''); setCostoEnvio('')
+    } else if (departamento) setCargandoSucursales(true)
+  }
+
+  function cambiarDepartamento(valor) {
+    setDepartamento(valor)
+    setSucursalesDac([]); setSucursalDacCodigo(''); setSucursalDacNombre(''); setCostoEnvio('')
+    setCargandoSucursales(Boolean(valor && tipoEntrega === 'ENVIO'))
   }
 
   function onBusquedaClienteChange(e) {
@@ -204,30 +177,20 @@ export default function NuevaVenta() {
     clearTimeout(debounceRef.current)
     if (!q.trim()) { setSugerenciasCliente([]); return }
     debounceRef.current = setTimeout(async () => {
-      try {
-        const data = await api.clientes.buscar(q.trim())
-        setSugerenciasCliente(data)
-      } catch { setSugerenciasCliente([]) }
+      try { setSugerenciasCliente(await api.clientes.buscar(q.trim())) }
+      catch { setSugerenciasCliente([]) }
     }, 300)
   }
 
   async function seleccionarCliente(c) {
     setClienteSeleccionado(c)
-    setBusquedaCliente('')
-    setSugerenciasCliente([])
-    setMostrarSugerencias(false)
-    setDireccionesCliente([])
-    setDireccionSeleccionadaId('')
-    setDireccionEnvio('')
-    setDireccionModo('NUEVA')
-
+    setBusquedaCliente(''); setSugerenciasCliente([]); setMostrarSugerencias(false)
+    setDireccionesCliente([]); setDireccionSeleccionadaId(''); setDireccionEnvio(''); setDireccionModo('NUEVA')
     try {
-      const direcciones = await api.clientes.direcciones(c.idCliente)
-      setDireccionesCliente(direcciones)
-      if (direcciones.length > 0) aplicarDireccion(direcciones[0])
-    } catch {
-      setDireccionesCliente([])
-    }
+      const dirs = await api.clientes.direcciones(c.idCliente)
+      setDireccionesCliente(dirs)
+      if (dirs.length > 0) aplicarDireccion(dirs[0])
+    } catch { setDireccionesCliente([]) }
   }
 
   function aplicarDireccion(direccion) {
@@ -238,9 +201,7 @@ export default function NuevaVenta() {
   }
 
   function nuevaDireccion() {
-    setDireccionModo('NUEVA')
-    setDireccionSeleccionadaId('')
-    setDireccionEnvio('')
+    setDireccionModo('NUEVA'); setDireccionSeleccionadaId(''); setDireccionEnvio('')
   }
 
   async function seleccionarSucursal(codigo) {
@@ -249,22 +210,20 @@ export default function NuevaVenta() {
     setSucursalDacNombre(sucursal?.nombre || '')
     setCostoEnvio('')
     if (!codigo || !departamento) return
-
     try {
       const cotizacion = await api.envios.cotizarDac(departamento, codigo)
       setCostoEnvio(String(cotizacion.costoEstimado ?? ''))
       if (cotizacion.sucursalNombre) setSucursalDacNombre(cotizacion.sucursalNombre)
-    } catch {
-      setCostoEnvio('')
-    }
+    } catch { setCostoEnvio('') }
   }
 
   function validar() {
     const e = {}
-    if (!disco) e.disco = 'Seleccioná un disco'
-    if (disco && !['DISPONIBLE', 'RESERVADO'].includes(disco.estado)) {
-      e.disco = `El disco está ${ESTADO_LABELS[disco.estado]?.toLowerCase() || disco.estado} y no puede venderse`
-    }
+    if (carrito.length === 0) e.disco = 'Agregá al menos un disco'
+    carrito.forEach(item => {
+      if (!['DISPONIBLE', 'RESERVADO'].includes(item.disco.estado))
+        e.disco = `"${item.disco.artista}" está ${ESTADO_LABELS[item.disco.estado]?.toLowerCase() || item.disco.estado}`
+    })
     if (!clienteSeleccionado) e.cliente = 'Seleccioná o registrá un cliente'
     if (totales.base <= 0) e.total = 'Ingresá un precio de venta válido'
     if (tipoEntrega === 'ENVIO') {
@@ -282,26 +241,53 @@ export default function NuevaVenta() {
     setErrores({})
     setEnviando(true)
     try {
-      await api.ventas.registrar({
-        idCliente: clienteSeleccionado.idCliente,
-        idDisco: disco.idDisco,
-        canalVenta,
-        total: Number(totales.totalFinal.toFixed(2)),
-        precioVenta: Number(totales.base.toFixed(2)),
-        costoEnvio: Number(totales.envio.toFixed(2)),
-        porcentajeImpuesto: Number(totales.impuestoPct.toFixed(2)),
-        otrosCostos: Number(totales.otros.toFixed(2)),
-        tipoEntrega,
-        observaciones: observaciones || null,
-        ...(tipoEntrega === 'ENVIO' && {
-          idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
-          direccionEnvio,
-          departamento,
-          guardarNuevaDireccion: direccionModo === 'NUEVA' || !direccionSeleccionadaId,
-          sucursalDacCodigo: sucursalDacCodigo || null,
-          sucursalDacNombre: sucursalDacNombre || null,
-        }),
-      })
+      const montoP = montoPagado !== '' ? Number(montoPagado) : undefined
+      if (carrito.length === 1 && descuentoPct === 0) {
+        await api.ventas.registrar({
+          idCliente: clienteSeleccionado.idCliente,
+          idDisco: carrito[0].disco.idDisco,
+          canalVenta,
+          total: Number(totales.totalFinal.toFixed(2)),
+          precioVenta: Number(totales.base.toFixed(2)),
+          costoEnvio: Number(totales.envio.toFixed(2)),
+          porcentajeImpuesto: Number(totales.impuestoPct.toFixed(2)),
+          otrosCostos: Number(totales.otros.toFixed(2)),
+          tipoEntrega,
+          observaciones: observaciones || null,
+          montoPagado: montoP,
+          ...(tipoEntrega === 'ENVIO' && {
+            idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
+            direccionEnvio, departamento,
+            guardarNuevaDireccion: direccionModo === 'NUEVA' || !direccionSeleccionadaId,
+            sucursalDacCodigo: sucursalDacCodigo || null,
+            sucursalDacNombre: sucursalDacNombre || null,
+          }),
+        })
+      } else {
+        await api.ventas.registrar({
+          idCliente: clienteSeleccionado.idCliente,
+          detalles: carrito.map(item => ({
+            idDisco: item.disco.idDisco,
+            precioUnitario: Number(toNumber(item.precioUnitario).toFixed(2)),
+          })),
+          descuentoPorcentaje: descuentoPct,
+          canalVenta,
+          total: Number(totales.totalFinal.toFixed(2)),
+          costoEnvio: Number(totales.envio.toFixed(2)),
+          porcentajeImpuesto: Number(totales.impuestoPct.toFixed(2)),
+          otrosCostos: Number(totales.otros.toFixed(2)),
+          tipoEntrega,
+          observaciones: observaciones || null,
+          montoPagado: montoP,
+          ...(tipoEntrega === 'ENVIO' && {
+            idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
+            direccionEnvio, departamento,
+            guardarNuevaDireccion: direccionModo === 'NUEVA' || !direccionSeleccionadaId,
+            sucursalDacCodigo: sucursalDacCodigo || null,
+            sucursalDacNombre: sucursalDacNombre || null,
+          }),
+        })
+      }
       navigate('/')
     } catch (err) {
       setErrores({ general: err.message })
@@ -310,27 +296,57 @@ export default function NuevaVenta() {
     }
   }
 
+  const carritoIds = new Set(carrito.map(i => i.disco.idDisco))
+  const discosParaMostrar = discosDisponibles.filter(d => !carritoIds.has(d.idDisco))
+
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div>
         <h1 className="text-xl font-bold text-slate-900 dark:text-white">Registrar nueva venta</h1>
-        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">QR/link de disco, cliente, envío DAC y total final</p>
+        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Agregá uno o más discos, elegí cliente y confirmá</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+
+        {/* ── Discos ── */}
         <div className="card p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Disco</h2>
-          {disco ? (
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Discos</h2>
+
+          {carrito.length > 0 && (
             <div className="space-y-2">
-              <DiscoResumen disco={disco} />
-              {!idDiscoParam && (
-                <button type="button" onClick={() => setDisco(null)} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
-                  Cambiar disco
-                </button>
-              )}
+              {carrito.map(item => (
+                <div key={item.disco.idDisco} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-stone-700 px-3 py-2.5">
+                  {item.disco.imagenUrl && (
+                    <img src={item.disco.imagenUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">{item.disco.artista} — {item.disco.album}</div>
+                    <div className="text-xs text-slate-400 dark:text-stone-500 truncate">{item.disco.codigoInterno || ''}</div>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={item.precioUnitario}
+                    onChange={e => setPrecioItem(item.disco.idDisco, e.target.value)}
+                    className="input w-28 text-right tabular-nums"
+                    placeholder="Precio"
+                  />
+                  {!idDiscoParam && (
+                    <button type="button" onClick={() => quitarDelCarrito(item.disco.idDisco)}
+                      className="p-1 rounded text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          ) : (
-            <div className="space-y-3">
+          )}
+
+          {!idDiscoParam && (
+            <div className="space-y-2">
               <div className="relative">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -338,43 +354,41 @@ export default function NuevaVenta() {
                 <input
                   value={busquedaDisco}
                   onChange={onBusquedaDiscoChange}
-                  placeholder="Buscar disco disponible..."
+                  placeholder="Buscar disco disponible para agregar…"
                   className="input pl-9"
                 />
               </div>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {discosDisponibles.map(d => (
-                  <button
-                    key={d.idDisco}
-                    type="button"
-                    onClick={() => seleccionarDisco(d)}
-                    className="w-full text-left px-4 py-3 rounded-lg bg-slate-50 dark:bg-stone-950 hover:bg-[#7E9FA8]/10 dark:hover:bg-[#7E9FA8]/10 border border-transparent hover:border-[#7E9FA8]/30 transition-all"
-                  >
-                    <div className="font-medium text-slate-800 dark:text-stone-200 text-sm">{d.artista} — {d.album}</div>
-                    <div className="text-xs text-slate-400 dark:text-stone-500 mt-0.5">
-                      {d.codigoInterno && <span>{d.codigoInterno} · </span>}
-                      {d.genero && <span>{d.genero} · </span>}
-                      {ESTADO_LABELS[d.estado] || d.estado} · {d.precioVenta ? money(d.precioVenta) : '—'}
-                    </div>
-                  </button>
-                ))}
-                {discosDisponibles.length === 0 && (
-                  <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-4">Sin discos disponibles</p>
-                )}
-              </div>
+              {(busquedaDisco || carrito.length === 0) && (
+                <div className="space-y-1 max-h-52 overflow-y-auto">
+                  {discosParaMostrar.map(d => (
+                    <button key={d.idDisco} type="button" onClick={() => agregarAlCarrito(d)}
+                      className="w-full text-left px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-stone-950 hover:bg-[#7E9FA8]/10 border border-transparent hover:border-[#7E9FA8]/30 transition-all flex items-center gap-3">
+                      {d.imagenUrl && <img src={d.imagenUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-slate-800 dark:text-stone-200 text-sm truncate">{d.artista} — {d.album}</div>
+                        <div className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno && `${d.codigoInterno} · `}{ESTADO_LABELS[d.estado] || d.estado} · {d.precioVenta ? money(d.precioVenta) : '—'}</div>
+                      </div>
+                      <span className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">+ Agregar</span>
+                    </button>
+                  ))}
+                  {discosParaMostrar.length === 0 && (
+                    <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Sin discos disponibles</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
+
           {errores.disco && <p className="text-red-500 text-xs mt-1">{errores.disco}</p>}
         </div>
 
+        {/* ── Cliente ── */}
         <div className="card p-5 space-y-3">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Cliente</h2>
           {clienteSeleccionado ? (
             <div className="flex items-center justify-between bg-slate-50 dark:bg-stone-950 border border-slate-200 dark:border-stone-700 rounded-lg px-4 py-3">
               <div>
-                <div className="font-semibold text-slate-900 dark:text-white text-sm">
-                  {clienteSeleccionado.nombre} {clienteSeleccionado.apellido}
-                </div>
+                <div className="font-semibold text-slate-900 dark:text-white text-sm">{clienteSeleccionado.nombre} {clienteSeleccionado.apellido}</div>
                 <div className="text-xs text-slate-400 dark:text-stone-500 mt-0.5">
                   {[clienteSeleccionado.cedula && `CI ${clienteSeleccionado.cedula}`, clienteSeleccionado.telefono, clienteSeleccionado.instagramUsuario].filter(Boolean).join(' · ') || 'Cliente seleccionado'}
                 </div>
@@ -384,23 +398,13 @@ export default function NuevaVenta() {
           ) : (
             <div className="space-y-2">
               <div className="relative">
-                <input
-                  value={busquedaCliente}
-                  onChange={onBusquedaClienteChange}
-                  onFocus={() => setMostrarSugerencias(true)}
-                  placeholder="Buscar por nombre, cédula, Instagram, teléfono o dirección..."
-                  className="input"
-                  autoComplete="off"
-                />
+                <input value={busquedaCliente} onChange={onBusquedaClienteChange} onFocus={() => setMostrarSugerencias(true)}
+                  placeholder="Buscar por nombre, cédula, Instagram, teléfono o dirección…" className="input" autoComplete="off" />
                 {mostrarSugerencias && sugerenciasCliente.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-xl shadow-lg overflow-hidden">
                     {sugerenciasCliente.map(c => (
-                      <button
-                        key={c.idCliente}
-                        type="button"
-                        onClick={() => seleccionarCliente(c)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-stone-800 transition-colors"
-                      >
+                      <button key={c.idCliente} type="button" onClick={() => seleccionarCliente(c)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-stone-800 transition-colors">
                         <div className="font-medium text-slate-800 dark:text-stone-200 text-sm">{c.nombre} {c.apellido}</div>
                         <div className="text-xs text-slate-400 dark:text-stone-500">
                           {[c.cedula && `CI ${c.cedula}`, c.instagramUsuario, c.direccion].filter(Boolean).join(' · ') || 'Sin datos adicionales'}
@@ -410,11 +414,7 @@ export default function NuevaVenta() {
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setMostrarModalCliente(true)}
-                className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] hover:underline"
-              >
+              <button type="button" onClick={() => setMostrarModalCliente(true)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">
                 + Nuevo cliente
               </button>
             </div>
@@ -422,6 +422,7 @@ export default function NuevaVenta() {
           {errores.cliente && <p className="text-red-500 text-xs mt-1">{errores.cliente}</p>}
         </div>
 
+        {/* ── Entrega y costos ── */}
         <div className="card p-5 space-y-4">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Entrega y costos</h2>
 
@@ -449,16 +450,12 @@ export default function NuevaVenta() {
                   <p className="text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-2">Direcciones anteriores</p>
                   <div className="flex flex-wrap gap-2">
                     {direccionesCliente.map((d, i) => (
-                      <button
-                        key={d.idDireccion || i}
-                        type="button"
-                        onClick={() => aplicarDireccion(d)}
+                      <button key={d.idDireccion || i} type="button" onClick={() => aplicarDireccion(d)}
                         className={`text-xs px-3 py-2 rounded-lg border transition-colors ${
                           direccionSeleccionadaId === (d.idDireccion || '')
                             ? 'border-[#7E9FA8] bg-[#7E9FA8]/10 text-[#5C7D87] dark:text-[#7E9FA8]'
                             : 'border-slate-200 dark:border-stone-700 text-slate-500 dark:text-stone-400 hover:bg-slate-50 dark:hover:bg-stone-800'
-                        }`}
-                      >
+                        }`}>
                         {d.direccion}{d.departamento ? `, ${d.departamento}` : ''}
                       </button>
                     ))}
@@ -478,12 +475,9 @@ export default function NuevaVenta() {
                   <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">
                     Dirección {direccionModo === 'NUEVA' ? 'nueva' : 'seleccionada'}
                   </label>
-                  <input
-                    value={direccionEnvio}
+                  <input value={direccionEnvio}
                     onChange={e => { setDireccionEnvio(e.target.value); setDireccionModo('NUEVA'); setDireccionSeleccionadaId('') }}
-                    placeholder="Calle y número..."
-                    className="input"
-                  />
+                    placeholder="Calle y número..." className="input" />
                   {errores.direccionEnvio && <p className="text-red-500 text-xs mt-1">{errores.direccionEnvio}</p>}
                 </div>
                 <div>
@@ -498,12 +492,8 @@ export default function NuevaVenta() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Sucursal DAC</label>
-                <select
-                  value={sucursalDacCodigo}
-                  onChange={e => seleccionarSucursal(e.target.value)}
-                  className="input"
-                  disabled={!departamento || cargandoSucursales || sucursalesDac.length === 0}
-                >
+                <select value={sucursalDacCodigo} onChange={e => seleccionarSucursal(e.target.value)} className="input"
+                  disabled={!departamento || cargandoSucursales || sucursalesDac.length === 0}>
                   <option value="">{cargandoSucursales ? 'Cargando sucursales...' : 'Seleccioná sucursal...'}</option>
                   {sucursalesDac.map(s => <option key={s.codigo} value={s.codigo}>{s.nombre} · {s.direccion}</option>)}
                 </select>
@@ -515,11 +505,12 @@ export default function NuevaVenta() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Precio disco (UYU)</label>
-              <input type="number" step="0.01" min="0" value={precioVenta} onChange={e => setPrecioVenta(e.target.value)} className="input" />
-              {errores.total && <p className="text-red-500 text-xs mt-1">{errores.total}</p>}
+              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Descuento</label>
+              <select value={descuentoPct} onChange={e => setDescuentoPct(Number(e.target.value))} className="input">
+                {DESCUENTOS.map(d => <option key={d} value={d}>{d}%</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Impuesto %</label>
@@ -529,28 +520,31 @@ export default function NuevaVenta() {
               <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Otros costos</label>
               <input type="number" step="0.01" min="0" value={otrosCostos} onChange={e => setOtrosCostos(e.target.value)} className="input" />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Monto pagado</label>
+              <input type="number" step="0.01" min="0" value={montoPagado} onChange={e => setMontoPagado(e.target.value)}
+                placeholder={money(totales.totalFinal)} className="input" />
+            </div>
           </div>
 
           <div className="rounded-lg bg-slate-50 dark:bg-stone-950 border border-slate-100 dark:border-stone-800 p-4 space-y-2">
-            <ResumenLinea label="Precio de venta" value={money(totales.base)} />
-            <ResumenLinea label="Costo de envío" value={money(totales.envio)} />
-            <ResumenLinea label="Impuestos" value={money(totales.impuesto)} />
-            <ResumenLinea label="Otros costos" value={money(totales.otros)} />
+            {carrito.length > 1 && <ResumenLinea label="Subtotal discos" value={money(totales.subtotal)} />}
+            {descuentoPct > 0 && <ResumenLinea label={`Descuento ${descuentoPct}%`} value={`-${money(totales.descuento)}`} />}
+            <ResumenLinea label="Precio neto" value={money(totales.base)} />
+            {tipoEntrega === 'ENVIO' && <ResumenLinea label="Costo de envío" value={money(totales.envio)} />}
+            {totales.impuesto > 0 && <ResumenLinea label="Impuestos" value={money(totales.impuesto)} />}
+            {totales.otros > 0 && <ResumenLinea label="Otros costos" value={money(totales.otros)} />}
             <div className="border-t border-slate-200 dark:border-stone-800 pt-2">
               <ResumenLinea label="Total a cobrar" value={money(totales.totalFinal)} strong />
             </div>
-            {disco && <ResumenLinea label="Ganancia estimada" value={money(totales.ganancia)} />}
+            {carrito.length > 0 && <ResumenLinea label="Ganancia estimada" value={money(totales.ganancia)} />}
           </div>
+          {errores.total && <p className="text-red-500 text-xs">{errores.total}</p>}
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Observaciones</label>
-            <textarea
-              value={observaciones}
-              onChange={e => setObservaciones(e.target.value)}
-              placeholder="Notas opcionales..."
-              rows={2}
-              className="input resize-none"
-            />
+            <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
+              placeholder="Notas opcionales..." rows={2} className="input resize-none" />
           </div>
         </div>
 
@@ -586,23 +580,16 @@ function NuevoClienteModal({ onCerrar, onCreado }) {
   const [error, setError] = useState('')
   const [cargando, setCargando] = useState(false)
 
-  function set(field, value) {
-    setForm(f => ({ ...f, [field]: value }))
-  }
+  function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.nombre.trim()) { setError('El nombre es obligatorio'); return }
     setError('')
     setCargando(true)
-    try {
-      const nuevo = await api.clientes.crear(form)
-      onCreado(nuevo)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setCargando(false)
-    }
+    try { onCreado(await api.clientes.crear(form)) }
+    catch (err) { setError(err.message) }
+    finally { setCargando(false) }
   }
 
   return (
@@ -655,9 +642,7 @@ function NuevoClienteModal({ onCerrar, onCreado }) {
             <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Observaciones</label>
             <input value={form.observaciones} onChange={e => set('observaciones', e.target.value)} className="input" placeholder="Notas opcionales..." />
           </div>
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-sm rounded-lg px-4 py-3">{error}</div>
-          )}
+          {error && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-sm rounded-lg px-4 py-3">{error}</div>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onCerrar} className="btn-secondary flex-1">Cancelar</button>
             <button type="submit" disabled={cargando} className="btn-primary flex-1">{cargando ? 'Guardando...' : 'Crear cliente'}</button>

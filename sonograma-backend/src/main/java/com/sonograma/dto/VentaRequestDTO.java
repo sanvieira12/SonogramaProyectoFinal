@@ -8,6 +8,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -18,8 +19,12 @@ public class VentaRequestDTO {
     @NotNull(message = "El cliente es obligatorio")
     private Long idCliente;
 
-    @NotNull(message = "El disco es obligatorio")
     private Long idDisco;
+
+    private List<DetalleVentaDTO> detalles;
+
+    @DecimalMin(value = "0.0", message = "El descuento no puede ser negativo")
+    private BigDecimal descuentoPorcentaje;
 
     @NotBlank(message = "El canal de venta es obligatorio")
     private String canalVenta;

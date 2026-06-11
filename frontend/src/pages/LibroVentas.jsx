@@ -211,8 +211,17 @@ export default function LibroVentas() {
                     {v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">{v.artista}</div>
-                    <div className="text-slate-500 dark:text-stone-500 text-xs">{v.album}</div>
+                    {v.detalles && v.detalles.length > 1 ? (
+                      <div>
+                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">Varios ({v.detalles.length} discos)</div>
+                        <div className="text-slate-400 dark:text-stone-500 text-xs truncate max-w-[160px]">{v.detalles.map(d => d.artista).join(', ')}</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">{v.artista}</div>
+                        <div className="text-slate-500 dark:text-stone-500 text-xs">{v.album}</div>
+                      </>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">
                     {CANAL_LABELS[v.canalVenta] || v.canalVenta || '—'}
