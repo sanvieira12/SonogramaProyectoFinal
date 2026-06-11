@@ -9,6 +9,7 @@ import com.sonograma.enums.TipoDisco;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CsvExportService;
 import com.sonograma.service.PdfInvoiceParser;
+import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.ZipBundleService;
@@ -28,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,7 @@ public class ImportController {
     private final CsvExportService csvExport;
     private final ZipBundleService zipBundle;
     private final DiscoRepository discoRepository;
+    private final ShippingOrderService shippingOrderService;
 
     /**
      * Parses a deejay.de invoice PDF, searches each item on vinylfuture.com,
@@ -101,6 +104,7 @@ public class ImportController {
         }
 
         // 3. Persist to DB
+        List<Disco> discosGuardados = new ArrayList<>();
         for (Map.Entry<InvoiceItem, Optional<VinylPageData>> entry : pageDataMap.entrySet()) {
             InvoiceItem item = entry.getKey();
             Optional<VinylPageData> pageData = entry.getValue();
@@ -132,10 +136,20 @@ public class ImportController {
                         disco.setTracklist(tracklist);
                     }
                 }
-                discoRepository.save(disco);
+                discosGuardados.add(discoRepository.save(disco));
                 log.info("Disco guardado en BD: {} - {}", item.artista(), item.album());
             } catch (Exception e) {
                 log.warn("No se pudo guardar en BD: {} - {}: {}", item.artista(), item.album(), e.getMessage());
+            }
+        }
+
+        // 3b. Auto-create ShippingOrder for imported discos
+        if (!discosGuardados.isEmpty()) {
+            try {
+                shippingOrderService.crearDesdeImport(discosGuardados);
+                log.info("ShippingOrder creada con {} ítems.", discosGuardados.size());
+            } catch (Exception e) {
+                log.warn("No se pudo crear ShippingOrder: {}", e.getMessage());
             }
         }
 

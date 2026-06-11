@@ -207,6 +207,9 @@ export default function Clientes() {
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
   const [modalNuevo, setModalNuevo] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const importRef = useRef(null)
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -273,16 +276,52 @@ export default function Clientes() {
             {!loading && `${clientes.length} ${clientes.length === 1 ? 'cliente registrado' : 'clientes registrados'}`}
           </p>
         </div>
-        <button
-          onClick={() => setModalNuevo(true)}
-          className="btn-primary flex items-center gap-2 whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Nuevo cliente
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={importRef} type="file" accept=".xlsx,.xls" className="hidden"
+            onChange={async e => {
+              const file = e.target.files[0]; if (!file) return
+              setImporting(true); setImportResult(null)
+              try {
+                const r = await api.clientes.importarExcel(file)
+                setImportResult(r)
+                if (r.creados > 0) {
+                  const cs = await api.clientes.todos()
+                  setClientes(cs)
+                }
+              } catch (err) { setImportResult({ error: err.message }) }
+              finally { setImporting(false); e.target.value = '' }
+            }} />
+          <button onClick={() => importRef.current?.click()} disabled={importing}
+            className="btn-secondary flex items-center gap-2 whitespace-nowrap text-sm disabled:opacity-40">
+            {importing ? 'Importando…' : 'Importar Excel'}
+          </button>
+          <button
+            onClick={() => setModalNuevo(true)}
+            className="btn-primary flex items-center gap-2 whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Nuevo cliente
+          </button>
+        </div>
       </div>
+
+      {importResult && !importResult.error && (
+        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm flex items-center justify-between gap-4">
+          <span className="text-emerald-700 dark:text-emerald-400">
+            ✓ {importResult.creados} creados · {importResult.omitidos} omitidos
+            {importResult.errores?.length > 0 && ` · ${importResult.errores.length} errores`}
+          </span>
+          <button onClick={() => setImportResult(null)} className="text-emerald-600 text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
+      {importResult?.error && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400 flex items-center justify-between gap-4">
+          <span>Error: {importResult.error}</span>
+          <button onClick={() => setImportResult(null)} className="text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
 
       {modalNuevo && (
         <NuevoClienteModal

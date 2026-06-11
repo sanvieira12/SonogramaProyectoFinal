@@ -63,6 +63,18 @@ export const api = {
     crear: (cliente) => request('POST', '/clientes', cliente),
     crearDireccion: (id, direccion) => request('POST', `/clientes/${id}/direcciones`, direccion),
     actualizar: (id, cliente) => request('PUT', `/clientes/${id}`, cliente),
+    importarExcel: async (file) => {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${BASE}/clientes/importar-excel`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Sesión vencida')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Error al importar')
+      return data
+    },
   },
 
   ventas: {
@@ -90,6 +102,18 @@ export const api = {
     listar: (q) => request('GET', `/deudas${q ? `?q=${encodeURIComponent(q)}` : ''}`),
     resumen: () => request('GET', '/deudas/resumen'),
     porCliente: (id) => request('GET', `/deudas/cliente/${id}`),
+    importarExcel: async (file) => {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`${BASE}/deudas/importar-excel`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Sesión vencida')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Error al importar')
+      return data
+    },
     registrarPago: (idDeuda, monto, notas) =>
       request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas }),
   },

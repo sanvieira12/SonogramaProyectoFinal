@@ -41,6 +41,18 @@ public class ShippingOrder {
     @Column(name = "costo_total", precision = 10, scale = 2)
     private BigDecimal costoTotal;
 
+    @Column(name = "subtotal", precision = 10, scale = 2)
+    private BigDecimal subtotal;
+
+    @Column(name = "impuestos", precision = 10, scale = 2)
+    private BigDecimal impuestos;
+
+    @Column(name = "otros_costos", precision = 10, scale = 2)
+    private BigDecimal otrosCostos;
+
+    @Column(name = "total_estimado", precision = 10, scale = 2)
+    private BigDecimal totalEstimado;
+
     @Column(name = "notas", columnDefinition = "TEXT")
     private String notas;
 

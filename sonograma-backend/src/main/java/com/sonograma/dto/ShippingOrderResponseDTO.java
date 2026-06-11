@@ -18,6 +18,10 @@ public class ShippingOrderResponseDTO {
     private LocalDate fechaOrden;
     private String estado;
     private BigDecimal costoTotal;
+    private BigDecimal subtotal;
+    private BigDecimal impuestos;
+    private BigDecimal otrosCostos;
+    private BigDecimal totalEstimado;
     private String notas;
     private LocalDateTime fechaCreacion;
     private List<ShippingOrderItemDTO> items;

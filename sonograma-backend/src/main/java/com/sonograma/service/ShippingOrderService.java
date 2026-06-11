@@ -73,6 +73,37 @@ public class ShippingOrderService {
         return toDTO(shippingOrderRepository.save(order));
     }
 
+    public ShippingOrder crearDesdeImport(List<com.sonograma.entity.Disco> discos) {
+        int anio = LocalDate.now().getYear();
+        long count = shippingOrderRepository.countByAnio(anio) + 1;
+        String numero = String.format("SO-%d-%03d", anio, count);
+
+        ShippingOrder order = ShippingOrder.builder()
+                .numero(numero)
+                .proveedor("Vinyl Future")
+                .fechaOrden(LocalDate.now())
+                .estado(EstadoShippingOrder.PENDIENTE)
+                .fechaCreacion(LocalDateTime.now())
+                .items(new ArrayList<>())
+                .build();
+
+        for (com.sonograma.entity.Disco disco : discos) {
+            ShippingOrderItem item = ShippingOrderItem.builder()
+                    .shippingOrder(order)
+                    .disco(disco)
+                    .artista(disco.getArtista())
+                    .album(disco.getAlbum())
+                    .cantidad(1)
+                    .precioUnitario(BigDecimal.ZERO)
+                    .subtotal(BigDecimal.ZERO)
+                    .build();
+            order.getItems().add(item);
+        }
+
+        order.setCostoTotal(BigDecimal.ZERO);
+        return shippingOrderRepository.save(order);
+    }
+
     public byte[] exportarExcel(Long id) {
         ShippingOrder order = shippingOrderRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("ShippingOrder", id));
@@ -130,6 +161,10 @@ public class ShippingOrderService {
                 .fechaOrden(o.getFechaOrden())
                 .estado(o.getEstado().name())
                 .costoTotal(o.getCostoTotal())
+                .subtotal(o.getSubtotal())
+                .impuestos(o.getImpuestos())
+                .otrosCostos(o.getOtrosCostos())
+                .totalEstimado(o.getTotalEstimado())
                 .notas(o.getNotas())
                 .fechaCreacion(o.getFechaCreacion())
                 .items(items)

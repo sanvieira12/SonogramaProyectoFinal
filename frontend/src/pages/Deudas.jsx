@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { api } from '../api/sonograma'
 
 const ESTADO_STYLES = {
@@ -89,6 +89,9 @@ export default function Deudas() {
   const [q, setQ] = useState('')
   const [search, setSearch] = useState('')
   const [pagoDeuda, setPagoDeuda] = useState(null)
+  const [importResult, setImportResult] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const importRef = useRef(null)
 
   const cargar = useCallback(async (query) => {
     setLoading(true)
@@ -122,10 +125,45 @@ export default function Deudas() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Deudas</h1>
-        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Cuentas corrientes y pagos pendientes</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Deudas</h1>
+          <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Cuentas corrientes y pagos pendientes</p>
+        </div>
+        <div className="flex-shrink-0">
+          <input ref={importRef} type="file" accept=".xlsx,.xls" className="hidden"
+            onChange={async e => {
+              const file = e.target.files[0]; if (!file) return
+              setImporting(true); setImportResult(null)
+              try {
+                const r = await api.deudas.importarExcel(file)
+                setImportResult(r)
+                if (r.creados > 0) cargar(search)
+              } catch (err) { setImportResult({ error: err.message }) }
+              finally { setImporting(false); e.target.value = '' }
+            }} />
+          <button onClick={() => importRef.current?.click()} disabled={importing}
+            className="btn-secondary text-sm disabled:opacity-40">
+            {importing ? 'Importando…' : 'Importar deudores Excel'}
+          </button>
+        </div>
       </div>
+
+      {importResult && !importResult.error && (
+        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm flex items-center justify-between gap-4">
+          <span className="text-emerald-700 dark:text-emerald-400">
+            ✓ {importResult.creados} deudas creadas · {importResult.omitidos} omitidas
+            {importResult.errores?.length > 0 && ` · ${importResult.errores.length} errores`}
+          </span>
+          <button onClick={() => setImportResult(null)} className="text-emerald-600 text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
+      {importResult?.error && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400 flex items-center justify-between gap-4">
+          <span>Error: {importResult.error}</span>
+          <button onClick={() => setImportResult(null)} className="text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
