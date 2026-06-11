@@ -65,7 +65,8 @@ docker compose -f docker-compose.prod.yml --env-file "$ENV_FILE" up -d --remove-
 # 6. Healthcheck
 step "6/7 – Esperando que el backend esté saludable..."
 MAX_WAIT=120; WAIT=0
-until curl -sf http://localhost:8080/api/actuator/health > /dev/null 2>&1; do
+until docker exec sonograma-backend \
+    curl -sf http://localhost:8080/api/actuator/health > /dev/null 2>&1; do
     sleep 5; WAIT=$((WAIT + 5))
     if [ $WAIT -ge $MAX_WAIT ]; then
         docker logs sonograma-backend --tail 50
@@ -79,8 +80,9 @@ log "Backend saludable ✓"
 step "7/7 – Verificación final..."
 docker compose -f docker-compose.prod.yml ps
 echo ""
-curl -s http://localhost:8080/api/actuator/health | python3 -m json.tool 2>/dev/null \
-    || curl -s http://localhost:8080/api/actuator/health
+docker exec sonograma-backend \
+    curl -s http://localhost:8080/api/actuator/health | python3 -m json.tool 2>/dev/null \
+    || docker exec sonograma-backend curl -s http://localhost:8080/api/actuator/health
 echo ""
 log "=== Deploy completado ==="
 log "Frontend:  http://localhost"
