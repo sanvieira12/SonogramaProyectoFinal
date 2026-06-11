@@ -1,3 +1,5 @@
+import { redirectIfUnauthorized } from './session'
+
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
 function token() {
@@ -18,6 +20,7 @@ async function request(method, path, body) {
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
   if (res.status === 204) return null
   const text = await res.text()
   let data
@@ -123,6 +126,7 @@ export const api = {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         body: fd,
       })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Error procesando PDF')
@@ -140,6 +144,7 @@ export const api = {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
         body: fd,
       })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       if (!res.ok) throw new Error('Error al parsear el Excel')
       return res.json()
     },
@@ -161,6 +166,7 @@ export const api = {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
         body: fd,
       })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       if (!res.ok) throw new Error('Error al procesar Excel con links de Discogs')
       return res.json()
     },

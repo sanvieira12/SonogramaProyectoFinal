@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/sonograma'
+import { redirectIfUnauthorized } from '../api/session'
 
 const ESTADO_STYLES = {
   PENDIENTE: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
@@ -135,7 +136,11 @@ function DetalleModal({ order, onClose }) {
     const token = localStorage.getItem('token')
     const url = api.shippingOrders.exportarUrl(order.idShippingOrder)
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
+      .then(r => {
+        if (redirectIfUnauthorized(r)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+        if (!r.ok) throw new Error('No se pudo exportar la orden')
+        return r.blob()
+      })
       .then(blob => {
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
@@ -143,6 +148,7 @@ function DetalleModal({ order, onClose }) {
         a.click()
         URL.revokeObjectURL(a.href)
       })
+      .catch(e => alert(e.message))
   }
 
   return (

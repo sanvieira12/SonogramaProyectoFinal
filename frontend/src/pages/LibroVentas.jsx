@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/sonograma'
+import { redirectIfUnauthorized } from '../api/session'
 
 const CANAL_LABELS = {
   INSTAGRAM: 'Instagram',
@@ -72,7 +73,11 @@ export default function LibroVentas() {
     a.setAttribute('download', 'libro-ventas.xlsx')
     // attach token via fetch + blob since we can't set headers on anchor
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
+      .then(r => {
+        if (redirectIfUnauthorized(r)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+        if (!r.ok) throw new Error('No se pudo exportar el libro de ventas')
+        return r.blob()
+      })
       .then(blob => {
         const blobUrl = URL.createObjectURL(blob)
         a.href = blobUrl
@@ -81,6 +86,7 @@ export default function LibroVentas() {
         document.body.removeChild(a)
         URL.revokeObjectURL(blobUrl)
       })
+      .catch(e => setError(e.message))
   }
 
   const totalFinal = ventas.reduce((s, v) => s + (v.totalFinal || 0), 0)

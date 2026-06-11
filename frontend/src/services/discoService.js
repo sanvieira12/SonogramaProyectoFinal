@@ -1,3 +1,5 @@
+import { redirectIfUnauthorized } from '../api/session'
+
 const BASE = import.meta.env.VITE_API_URL || '/api'
 
 function token() {
@@ -17,6 +19,7 @@ async function request(method, path, body) {
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
   if (res.status === 204) return null
   const data = await res.json()
   if (!res.ok) throw new Error(data.message || data.error || 'Error en la solicitud')
