@@ -3,6 +3,7 @@ package com.sonograma.config;
 import com.sonograma.security.JwtAuthenticationFilter;
 import com.sonograma.security.JwtTokenProvider;
 import com.sonograma.security.UserDetailsServiceImpl;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,6 +42,7 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                 .requestMatchers("/auth/**", "/health", "/actuator/**", "/qr/descargar/**", "/error").permitAll()
                 .anyRequest().authenticated()
             )
