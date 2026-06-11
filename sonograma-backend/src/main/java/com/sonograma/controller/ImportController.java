@@ -20,8 +20,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -50,7 +53,7 @@ public class ImportController {
      */
     @PostMapping("/vinylfuture-csv")
     @Transactional
-    public ResponseEntity<byte[]> procesarFactura(@RequestParam MultipartFile file) {
+    public ResponseEntity<?> procesarFactura(@RequestParam MultipartFile file) {
         if (file.isEmpty()) {
             return ResponseEntity.badRequest()
                 .body("Archivo vacío".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -104,6 +107,13 @@ public class ImportController {
             InvoiceItem item = entry.getKey();
             Optional<VinylPageData> pageData = entry.getValue();
             try {
+                if (item.codigoCatalogo() != null
+                        && !item.codigoCatalogo().isBlank()
+                        && discoRepository.findByCodigoInterno(item.codigoCatalogo()).isPresent()) {
+                    log.info("Disco ya importado, se omite: {} / {}", item.codigoCatalogo(), item.album());
+                    continue;
+                }
+
                 Disco disco = new Disco();
                 disco.setArtista(item.artista());
                 disco.setAlbum(item.album());
@@ -134,9 +144,9 @@ public class ImportController {
         // 4. Build CSV + ZIP
         String csv = csvExport.buildCsv(searchResults);
 
-        byte[] zip;
+        Path zipPath;
         try {
-            zip = zipBundle.buildZip(csv, pageDataMap);
+            zipPath = zipBundle.buildZip(csv, pageDataMap);
         } catch (Exception e) {
             log.error("Error al construir el ZIP: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError()
@@ -146,11 +156,23 @@ public class ImportController {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         String filename = "vinylfuture-import-" + timestamp + ".zip";
 
-        log.info("ZIP generado: {} bytes.", zip.length);
+        try {
+            log.info("ZIP generado: {} bytes.", Files.size(zipPath));
+        } catch (IOException e) {
+            log.warn("No se pudo determinar el tamaño del ZIP: {}", e.getMessage());
+        }
+
+        StreamingResponseBody body = outputStream -> {
+            try {
+                Files.copy(zipPath, outputStream);
+            } finally {
+                Files.deleteIfExists(zipPath);
+            }
+        };
 
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
             .contentType(MediaType.parseMediaType("application/zip"))
-            .body(zip);
+            .body(body);
     }
 }
