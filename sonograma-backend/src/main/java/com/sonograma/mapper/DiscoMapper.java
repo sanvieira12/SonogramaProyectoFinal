@@ -32,6 +32,7 @@ public class DiscoMapper {
                 .imagenUrl(disco.getImagenUrl())
                 .previewUrl(disco.getPreviewUrl())
                 .discogsUrl(disco.getDiscogsUrl())
+                .cantidadCopias(disco.getCantidadCopias())
                 .fechaIngreso(disco.getFechaIngreso())
                 .fechaActualizacion(disco.getFechaActualizacion())
                 .build();
@@ -58,6 +59,7 @@ public class DiscoMapper {
                 .imagenUrl(request.getImagenUrl())
                 .previewUrl(request.getPreviewUrl())
                 .discogsUrl(request.getDiscogsUrl())
+                .cantidadCopias(request.getCantidadCopias() != null ? request.getCantidadCopias() : 1)
                 .build();
     }
 
@@ -81,5 +83,6 @@ public class DiscoMapper {
         if (request.getImagenUrl() != null) disco.setImagenUrl(request.getImagenUrl());
         if (request.getPreviewUrl() != null) disco.setPreviewUrl(request.getPreviewUrl());
         if (request.getDiscogsUrl() != null) disco.setDiscogsUrl(request.getDiscogsUrl());
+        if (request.getCantidadCopias() != null) disco.setCantidadCopias(request.getCantidadCopias());
     }
 }

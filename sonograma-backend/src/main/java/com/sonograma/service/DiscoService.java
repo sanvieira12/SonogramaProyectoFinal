@@ -92,6 +92,25 @@ public class DiscoService {
             throw new NegocioException("No se puede cambiar el estado de un disco ya vendido");
         }
         disco.setEstado(nuevoEstado);
+        if (nuevoEstado == EstadoDisco.SIN_STOCK || nuevoEstado == EstadoDisco.VENDIDO) {
+            disco.setCantidadCopias(0);
+        }
+        return DiscoMapper.toDTO(discoRepository.save(disco));
+    }
+
+    public DiscoResponseDTO actualizarCopias(Long id, Integer cantidad) {
+        if (cantidad < 0) {
+            throw new NegocioException("La cantidad de copias no puede ser negativa");
+        }
+        Disco disco = discoRepository.findById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+        disco.setCantidadCopias(cantidad);
+        if (cantidad == 0 && disco.getEstado() == EstadoDisco.DISPONIBLE) {
+            disco.setEstado(EstadoDisco.SIN_STOCK);
+        }
+        if (cantidad > 0 && disco.getEstado() == EstadoDisco.SIN_STOCK) {
+            disco.setEstado(EstadoDisco.DISPONIBLE);
+        }
         return DiscoMapper.toDTO(discoRepository.save(disco));
     }
 

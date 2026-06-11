@@ -66,6 +66,10 @@ public class Disco {
     @Builder.Default
     private EstadoDisco estado = EstadoDisco.DISPONIBLE;
 
+    @Column(name = "cantidad_copias")
+    @Builder.Default
+    private Integer cantidadCopias = 1;
+
     @Column(name = "pais")
     private String pais;
 

@@ -61,6 +61,13 @@ public class DiscoController {
         return ResponseEntity.ok(discoService.cambiarEstado(id, nuevoEstado));
     }
 
+    @PatchMapping("/{id}/copias")
+    public ResponseEntity<DiscoResponseDTO> actualizarCopias(
+            @PathVariable Long id,
+            @RequestParam("cantidad") Integer cantidad) {
+        return ResponseEntity.ok(discoService.actualizarCopias(id, cantidad));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> eliminarDisco(@PathVariable Long id) {
         discoService.eliminarDisco(id);

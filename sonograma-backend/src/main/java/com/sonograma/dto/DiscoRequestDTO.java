@@ -74,4 +74,7 @@ public class DiscoRequestDTO {
 
     @Size(max = 500)
     private String discogsUrl;
+
+    @Min(value = 0)
+    private Integer cantidadCopias;
 }

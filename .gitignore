@@ -27,6 +27,7 @@ frontend/.env.production
 backups/
 *.sql
 *.sql.gz
+!docs/migraciones/*.sql
 
 # Uploads locales
 uploads/

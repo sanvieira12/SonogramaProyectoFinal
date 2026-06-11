@@ -35,6 +35,7 @@ public class DiscoResponseDTO {
     private String imagenUrl;
     private String previewUrl;
     private String discogsUrl;
+    private Integer cantidadCopias;
     private LocalDateTime fechaIngreso;
     private LocalDateTime fechaActualizacion;
 }

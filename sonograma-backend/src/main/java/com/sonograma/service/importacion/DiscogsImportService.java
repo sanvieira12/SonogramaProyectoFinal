@@ -79,6 +79,7 @@ public class DiscogsImportService {
         com.sonograma.entity.Disco disco = DiscoMapper.toEntity(req);
         disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
+        disco.setCantidadCopias(1);
         return DiscoMapper.toDTO(discoRepository.save(disco));
     }
 

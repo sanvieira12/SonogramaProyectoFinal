@@ -38,6 +38,24 @@ chmod +x start.sh
 ./start.sh
 ```
 
+### Entorno local (recomendado para desarrollo)
+
+1. Copiar el archivo de entorno local del frontend:
+   ```bash
+   echo "VITE_API_URL=" > frontend/.env.local
+   ```
+2. Instalar dependencias del frontend (primera vez):
+   ```bash
+   cd frontend && npm install
+   ```
+3. Levantar todo:
+   ```bash
+   chmod +x dev.sh && ./dev.sh
+   ```
+
+> **Importante:** `.env.local` no se sube a Git. El frontend apunta automáticamente
+> a `localhost:8080` via Vite proxy. La BD de producción en AWS no se ve afectada.
+
 ## pgAdmin
 - URL: http://localhost:5050
 - Email: `admin@sonograma.com`

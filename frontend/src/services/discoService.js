@@ -32,5 +32,7 @@ export const discoService = {
   actualizar: (id, data) => request('PUT', `/discos/${id}`, data),
   cambiarEstado: (id, estado) =>
     request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
+  actualizarCopias: (id, cantidad) =>
+    request('PATCH', `/discos/${id}/copias?cantidad=${cantidad}`),
   eliminar: (id) => request('DELETE', `/discos/${id}`),
 }

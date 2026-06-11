@@ -2,6 +2,11 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.InvoiceItem;
 import com.sonograma.dto.VinylPageData;
+import com.sonograma.entity.Disco;
+import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.TipoDisco;
+import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CsvExportService;
 import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.VinylFutureScraperService;
@@ -12,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/importar")
@@ -34,6 +41,7 @@ public class ImportController {
     private final VinylFutureScraperService vinylFutureScraper;
     private final CsvExportService csvExport;
     private final ZipBundleService zipBundle;
+    private final DiscoRepository discoRepository;
 
     /**
      * Parses a deejay.de invoice PDF, searches each item on vinylfuture.com,
@@ -41,6 +49,7 @@ public class ImportController {
      * Returns a ZIP containing import.csv plus one folder per album with images/ and audio/.
      */
     @PostMapping("/vinylfuture-csv")
+    @Transactional
     public ResponseEntity<byte[]> procesarFactura(@RequestParam MultipartFile file) {
         if (file.isEmpty()) {
             return ResponseEntity.badRequest()
@@ -90,7 +99,39 @@ public class ImportController {
             pageDataMap.put(entry.getKey(), pageData);
         }
 
-        // 3. Build CSV + ZIP
+        // 3. Persist to DB
+        for (Map.Entry<InvoiceItem, Optional<VinylPageData>> entry : pageDataMap.entrySet()) {
+            InvoiceItem item = entry.getKey();
+            Optional<VinylPageData> pageData = entry.getValue();
+            try {
+                Disco disco = new Disco();
+                disco.setArtista(item.artista());
+                disco.setAlbum(item.album());
+                disco.setCodigoInterno(item.codigoCatalogo());
+                disco.setEstado(EstadoDisco.DISPONIBLE);
+                disco.setCodigoQr(UUID.randomUUID().toString());
+                disco.setProcedencia("IMPORTADO");
+                disco.setTipoDisco(TipoDisco.VINILO);
+                disco.setCondicion(CondicionDisco.NUEVO);
+                disco.setCantidadCopias(1);
+                if (pageData.isPresent()) {
+                    VinylPageData page = pageData.get();
+                    disco.setImagenUrl(page.frontImageUrl());
+                    if (!page.tracks().isEmpty()) {
+                        String tracklist = page.tracks().stream()
+                            .map(t -> t.label() + ". " + t.name())
+                            .collect(java.util.stream.Collectors.joining("\n"));
+                        disco.setTracklist(tracklist);
+                    }
+                }
+                discoRepository.save(disco);
+                log.info("Disco guardado en BD: {} - {}", item.artista(), item.album());
+            } catch (Exception e) {
+                log.warn("No se pudo guardar en BD: {} - {}: {}", item.artista(), item.album(), e.getMessage());
+            }
+        }
+
+        // 4. Build CSV + ZIP
         String csv = csvExport.buildCsv(searchResults);
 
         byte[] zip;

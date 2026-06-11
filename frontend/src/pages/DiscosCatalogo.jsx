@@ -434,12 +434,54 @@ export default function DiscosCatalogo() {
                           ? `$${Number(d.precioVenta).toLocaleString('es-AR')}`
                           : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
                       </td>
-                      <td className="px-5 py-4">
-                        <EstadoBadge estado={d.estado} />
+                      <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
+                        <select
+                          value={d.estado}
+                          onChange={async (e) => {
+                            const nuevoEstado = e.target.value
+                            try {
+                              const actualizado = await discoService.cambiarEstado(d.idDisco, nuevoEstado)
+                              setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                            } catch (err) {
+                              alert('Error al cambiar estado: ' + err.message)
+                            }
+                          }}
+                          className="text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-slate-700 dark:text-stone-300 px-2 py-1 cursor-pointer"
+                        >
+                          <option value="DISPONIBLE">Disponible</option>
+                          <option value="RESERVADO">Reservado</option>
+                          <option value="SIN_STOCK">Sin stock</option>
+                          <option value="VENDIDO">Vendido</option>
+                        </select>
                       </td>
                       {/* stopPropagation para que los botones no abran el slide-over */}
                       <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center gap-1 text-xs">
+                            <button
+                              onClick={async () => {
+                                const nuevaCantidad = Math.max(0, (d.cantidadCopias ?? 1) - 1)
+                                try {
+                                  const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
+                                  setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                                } catch (err) { alert(err.message) }
+                              }}
+                              className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
+                            >−</button>
+                            <span className="w-6 text-center font-mono text-slate-700 dark:text-stone-300">
+                              {d.cantidadCopias ?? 1}
+                            </span>
+                            <button
+                              onClick={async () => {
+                                const nuevaCantidad = (d.cantidadCopias ?? 1) + 1
+                                try {
+                                  const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
+                                  setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                                } catch (err) { alert(err.message) }
+                              }}
+                              className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
+                            >+</button>
+                          </div>
                           <button
                             onClick={() => setDiscoForm(d)}
                             className="text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
