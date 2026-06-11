@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,18 +60,79 @@ public class DiscogsImportService {
     }
 
     public List<DiscoImportPreviewDTO> fetchDesdeExcel(MultipartFile file) throws IOException {
-        List<String> urls = extraerUrlsDeExcel(file);
+        List<Map<String, String>> filas = extraerFilasDeExcel(file);
         List<DiscoImportPreviewDTO> resultados = new ArrayList<>();
+        int apiCalls = 0;
 
-        for (int i = 0; i < urls.size(); i++) {
-            String url = urls.get(i);
-            log.info("Discogs fetch {}/{}: {}", i + 1, urls.size(), url);
-            resultados.add(fetchDesdeLink(url));
-            if (i < urls.size() - 1) {
+        for (Map<String, String> fila : filas) {
+            String url = fila.get("url");
+            String releaseIdRaw = fila.get("codigo");
+
+            DiscoImportPreviewDTO preview;
+            if (url != null && url.contains("discogs.com")) {
+                log.info("Discogs fetch por link: {}", url);
+                preview = fetchDesdeLink(url);
+                apiCalls++;
+            } else if (releaseIdRaw != null && releaseIdRaw.matches("\\d+")) {
+                log.info("Discogs fetch por código: {}", releaseIdRaw);
+                preview = fetchRelease(releaseIdRaw, null);
+                apiCalls++;
+            } else {
+                // Case 3: no discogs info — import from row data as-is
+                preview = buildPreviewDesdeRowData(fila);
+            }
+
+            // Patch in row data for fields that the API may not have filled
+            if (preview.getErrores().isEmpty()) {
+                if (preview.getArtista() == null && fila.get("artista") != null) preview.setArtista(fila.get("artista"));
+                if (preview.getAlbum() == null && fila.get("album") != null) preview.setAlbum(fila.get("album"));
+                if (preview.getAnio() == null && fila.get("anio") != null) {
+                    try { preview.setAnio(Integer.parseInt(fila.get("anio"))); } catch (NumberFormatException ignored) {}
+                }
+                if (fila.get("precio") != null) {
+                    try { preview.setPrecioVenta(new BigDecimal(fila.get("precio"))); } catch (NumberFormatException ignored) {}
+                }
+            }
+
+            resultados.add(preview);
+            if (apiCalls > 0 && apiCalls < filas.size()) {
                 try { Thread.sleep(REQUEST_DELAY_MS); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             }
         }
         return resultados;
+    }
+
+    private DiscoImportPreviewDTO buildPreviewDesdeRowData(Map<String, String> fila) {
+        String artista = fila.get("artista");
+        String album = fila.get("album");
+        if ((artista == null || artista.isBlank()) && (album == null || album.isBlank())) {
+            return errorPreview("Fila sin artista ni álbum y sin link Discogs");
+        }
+        Integer anio = null;
+        if (fila.get("anio") != null) {
+            try { anio = Integer.parseInt(fila.get("anio")); } catch (NumberFormatException ignored) {}
+        }
+        BigDecimal precio = null;
+        if (fila.get("precio") != null) {
+            try { precio = new BigDecimal(fila.get("precio")); } catch (NumberFormatException ignored) {}
+        }
+        String codigo = fila.get("codigo");
+        if (codigo == null || codigo.isBlank()) {
+            codigo = generarCodigo(artista, anio, String.valueOf((int)(Math.random() * 900 + 100)));
+        }
+        return DiscoImportPreviewDTO.builder()
+                .artista(artista)
+                .album(album)
+                .sello(fila.get("sello"))
+                .anio(anio)
+                .genero(fila.get("genero"))
+                .codigoInterno(codigo)
+                .precioVenta(precio)
+                .estado("DISPONIBLE")
+                .condicion(CondicionDisco.USADO.name())
+                .formato(TipoDisco.VINILO.name())
+                .errores(new ArrayList<>())
+                .build();
     }
 
     @Transactional
@@ -250,34 +312,46 @@ public class DiscogsImportService {
         return m.find() ? m.group(1) : null;
     }
 
-    private List<String> extraerUrlsDeExcel(MultipartFile file) throws IOException {
-        List<String> urls = new ArrayList<>();
+    private List<Map<String, String>> extraerFilasDeExcel(MultipartFile file) throws IOException {
+        List<Map<String, String>> filas = new ArrayList<>();
         try (Workbook workbook = openWorkbook(file)) {
             Sheet sheet = workbook.getSheetAt(0);
             Row header = sheet.getRow(0);
-            if (header == null) return urls;
+            if (header == null) return filas;
 
-            int urlCol = -1;
+            Map<String, Integer> colIdx = new HashMap<>();
             for (Cell cell : header) {
-                String text = getCellString(cell).toLowerCase(Locale.ROOT).trim();
-                if (text.contains("link") || text.contains("url") || text.contains("discogs")) {
-                    urlCol = cell.getColumnIndex();
-                    break;
-                }
+                String h = normalizarHeader(getCellString(cell));
+                if (h.contains("link") || h.contains("url") || h.contains("discogs")) colIdx.putIfAbsent("url", cell.getColumnIndex());
+                else if (h.contains("artista") || h.contains("artist") || h.contains("autor")) colIdx.putIfAbsent("artista", cell.getColumnIndex());
+                else if (h.contains("album") || h.contains("titulo") || h.contains("title")) colIdx.putIfAbsent("album", cell.getColumnIndex());
+                else if (h.contains("anio") || h.contains("year") || h.contains("ano")) colIdx.putIfAbsent("anio", cell.getColumnIndex());
+                else if (h.contains("codigo") || h.contains("code") || h.startsWith("id") || h.contains("cat")) colIdx.putIfAbsent("codigo", cell.getColumnIndex());
+                else if (h.contains("precio") || h.contains("price") || h.contains("valor")) colIdx.putIfAbsent("precio", cell.getColumnIndex());
+                else if (h.contains("sello") || h.contains("label")) colIdx.putIfAbsent("sello", cell.getColumnIndex());
+                else if (h.contains("genero") || h.contains("genre")) colIdx.putIfAbsent("genero", cell.getColumnIndex());
             }
-            if (urlCol == -1) return urls;
 
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
-                Cell cell = row.getCell(urlCol);
-                String val = getCellString(cell).trim();
-                if (!val.isBlank() && val.contains("discogs.com")) {
-                    urls.add(val);
+                Map<String, String> fila = new HashMap<>();
+                for (Map.Entry<String, Integer> e : colIdx.entrySet()) {
+                    String val = getCellString(row.getCell(e.getValue())).trim();
+                    if (!val.isBlank()) fila.put(e.getKey(), val);
                 }
+                if (!fila.isEmpty()) filas.add(fila);
             }
         }
-        return urls;
+        return filas;
+    }
+
+    private String normalizarHeader(String s) {
+        if (s == null) return "";
+        return s.trim().toLowerCase(Locale.ROOT)
+                .replace("ó", "o").replace("é", "e").replace("á", "a")
+                .replace("í", "i").replace("ú", "u").replace("ñ", "n")
+                .replaceAll("[^a-z0-9]", "");
     }
 
     private DiscoRequestDTO mapearARequest(DiscoImportPreviewDTO preview) {
