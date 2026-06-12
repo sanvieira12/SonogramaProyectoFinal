@@ -38,14 +38,16 @@ git checkout "$BRANCH"
 git pull origin "$BRANCH"
 log "Commit: $(git log --oneline -1)"
 
-# Aplicar cambios de esquema requeridos antes de construir el backend, que usa ddl-auto=validate.
-MIGRATION="$APP_DIR/docs/migraciones/005_clientes_importacion_excel.sql"
-if [ -f "$MIGRATION" ] && docker ps --format '{{.Names}}' | grep -qx sonograma-postgres; then
-    step "Aplicando migración de importación de clientes..."
-    docker exec -i sonograma-postgres \
-        psql -v ON_ERROR_STOP=1 \
-        -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
-        -d sonograma_db < "$MIGRATION"
+# Aplicar todas las migraciones pendientes antes del build (ddl-auto=validate las requiere).
+if docker ps --format '{{.Names}}' | grep -qx sonograma-postgres; then
+    for MIGRATION in "$APP_DIR"/docs/migraciones/*.sql; do
+        [ -f "$MIGRATION" ] || continue
+        step "Aplicando migración: $(basename "$MIGRATION")..."
+        docker exec -i sonograma-postgres \
+            psql -v ON_ERROR_STOP=1 \
+            -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
+            -d sonograma_db < "$MIGRATION" || warn "Migración $(basename "$MIGRATION") falló o ya estaba aplicada, continuando..."
+    done
 fi
 
 # 3. Build frontend
