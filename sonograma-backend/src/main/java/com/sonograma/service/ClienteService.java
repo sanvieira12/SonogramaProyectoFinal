@@ -157,11 +157,11 @@ public class ClienteService {
                 .generoMasComprado(masFrecuente(ventas, v -> texto(v.getDisco().getGenero(), "Sin género")))
                 .decadaMusicalMasComprada(masFrecuente(ventas, v -> decada(v.getDisco().getAnio())))
                 .mesMasCompras(masFrecuente(ventas, v -> mes(v.getFechaVenta() != null ? v.getFechaVenta().getMonth() : null)))
-                .ultimaCompra(ventas.stream()
+                .ultimaCompra(fechaMasReciente(cliente.getUltimaCompra(), ventas.stream()
                         .map(Venta::getFechaVenta)
                         .filter(Objects::nonNull)
                         .max(Comparator.naturalOrder())
-                        .orElse(null))
+                        .orElse(null)))
                 .build();
     }
 
@@ -243,6 +243,7 @@ public class ClienteService {
                 || contiene(cliente.getCedula(), query)
                 || contiene(cliente.getInstagramUsuario(), query)
                 || contiene(cliente.getDireccion(), query)
+                || contiene(cliente.getLocalidad(), query)
                 || contiene(cliente.getTelefono(), query)
                 || contiene(cliente.getEmail(), query);
         if (coincideDatos) return true;
@@ -341,12 +342,23 @@ public class ClienteService {
         return month.getDisplayName(TextStyle.FULL, new Locale("es", "UY"));
     }
 
+    private java.time.LocalDateTime fechaMasReciente(
+            java.time.LocalDate importada,
+            java.time.LocalDateTime registrada
+    ) {
+        if (importada == null) return registrada;
+        java.time.LocalDateTime importadaInicioDia = importada.atStartOfDay();
+        if (registrada == null) return importadaInicioDia;
+        return importadaInicioDia.isAfter(registrada) ? importadaInicioDia : registrada;
+    }
+
     private void limpiarCamposVacios(ClienteRequest request) {
         request.setCedula(textoNulo(request.getCedula()));
         request.setTelefono(textoNulo(request.getTelefono()));
         request.setEmail(textoNulo(request.getEmail()));
         request.setInstagramUsuario(textoNulo(request.getInstagramUsuario()));
         request.setDireccion(textoNulo(request.getDireccion()));
+        request.setLocalidad(textoNulo(request.getLocalidad()));
     }
 
     private boolean contiene(String valor, String query) {

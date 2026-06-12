@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 public class DiscogsLinkParser {
 
     private static final Pattern DISCOGS_URL = Pattern.compile(
-            "(?i)(?:https?://)?(?:www\\.)?discogs\\.com/(?:[a-z]{2}/)?(release|master)/(\\d+)(?:[^\\s]*)"
+            "(?i)(?:https?://)?(?:www\\.)?discogs\\.com/(?:[a-z]{2}/)?(release|master)/(\\d+)(?:[^\\s<>\"]*)"
     );
 
     public Optional<DiscogsLink> parse(String value) {
@@ -24,12 +24,17 @@ public class DiscogsLinkParser {
         }
         String type = matcher.group(1).toLowerCase(Locale.ROOT);
         long id = Long.parseLong(matcher.group(2));
+        String original = trimTrailingPunctuation(matcher.group());
         return Optional.of(new DiscogsLink(
                 type,
                 id,
-                matcher.group(),
+                original,
                 "https://www.discogs.com/" + type + "/" + id
         ));
+    }
+
+    private String trimTrailingPunctuation(String value) {
+        return value.replaceFirst("[),.;]+$", "");
     }
 
     public record DiscogsLink(String type, long id, String originalUrl, String normalizedUrl) {}

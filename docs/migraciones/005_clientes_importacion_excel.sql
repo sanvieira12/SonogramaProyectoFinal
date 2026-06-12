@@ -1,0 +1,5 @@
+ALTER TABLE cliente
+    ADD COLUMN IF NOT EXISTS localidad VARCHAR(150);
+
+ALTER TABLE cliente
+    ADD COLUMN IF NOT EXISTS ultima_compra DATE;

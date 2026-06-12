@@ -51,9 +51,8 @@ public class PdfInvoiceParser {
 
     private static final Pattern MONEY_TOKEN = Pattern.compile("\\d+[,.]\\d{2}");
 
-    // Detects Double format: space/paren/start followed by 2x (optionally LP, 12, or digits)
     private static final Pattern FORMAT_DOUBLE = Pattern.compile(
-        "(?i)(^|[\\s(\"])2x(lp|12|\\d+)?"
+        "(?i)(?<!\\w)(2x(?:\\s*[\\p{L}\\p{N}]+)?(?:[\"”″])?(?:\\s+Box)?)"
     );
 
     // Header field patterns (best-effort)
@@ -63,8 +62,8 @@ public class PdfInvoiceParser {
     private static final Pattern INVOICE_DATE_LABEL = Pattern.compile(
         "(?i)(?:invoice\\s+)?date[:\\s]+([\\d]{1,2}[./\\-][\\d]{1,2}[./\\-][\\d]{2,4})"
     );
-    private static final Pattern PESO_KG = Pattern.compile(
-        "(?i)(?:total\\s+)?weight[:\\s]+([\\d.,]+)\\s*kg"
+    private static final Pattern PESO = Pattern.compile(
+        "(?i)(?:total\\s+)?weight[:\\s]+([\\d.,]+)\\s*([a-zA-Z]+)"
     );
     private static final Pattern CUSTOMS_TARIFF = Pattern.compile(
         "(?i)customs\\s+tariff[\\s\\w]*:[\\s]+([\\d.]+)"
@@ -75,8 +74,14 @@ public class PdfInvoiceParser {
     private static final Pattern PAYMENT_METHOD = Pattern.compile(
         "(?i)payment[\\s\\w]*:[\\s]+(.+)"
     );
+    private static final Pattern SHIPPING_METHOD = Pattern.compile(
+        "(?im)^(?:shipping|shipment)(?:\\s+method)?\\s*:\\s*(.+)$|^delivery\\s+method\\s*:\\s*(.+)$"
+    );
     private static final Pattern TERMS_OF_SALE = Pattern.compile(
         "(?i)terms\\s+of\\s+(?:sale|delivery)[:\\s]+(.+)"
+    );
+    private static final Pattern CURRENCY = Pattern.compile(
+        "(?i)currency\\s*:\\s*([A-Z]{3})"
     );
 
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
@@ -96,7 +101,7 @@ public class PdfInvoiceParser {
     }
 
     public ParsedInvoice parseInvoice(byte[] pdfBytes) throws IOException {
-        Map<String, InvoiceItem> itemsByKey = new LinkedHashMap<>();
+        List<InvoiceItem> items = new ArrayList<>();
         Set<String> urls = new LinkedHashSet<>();
 
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
@@ -114,7 +119,7 @@ public class PdfInvoiceParser {
                 if (line.isEmpty()) continue;
                 InvoiceItem item = tryParse(line);
                 if (item != null) {
-                    mergeItem(itemsByKey, item);
+                    items.add(item);
                 }
             }
 
@@ -133,7 +138,6 @@ public class PdfInvoiceParser {
                 }
             }
 
-            List<InvoiceItem> items = new ArrayList<>(itemsByKey.values());
             BigDecimal total = summary != null ? summary.total() : parseSummaryTotal(lines);
 
             log.info("PDF parsed: {} items, links={}, total={}, qty={}",
@@ -151,12 +155,15 @@ public class PdfInvoiceParser {
                 header.numeroFactura(),
                 header.fechaFactura(),
                 header.proveedor(),
+                header.envio(),
                 header.pago(),
-                "EUR",
-                header.pesoTotalKg(),
+                header.unidadPeso(),
+                header.moneda(),
+                header.pesoTotal(),
                 header.terminosVenta(),
                 header.codigoArancel(),
                 header.eoriNo(),
+                summary != null ? summary.iva() : null,
                 text
             );
         }
@@ -177,8 +184,9 @@ public class PdfInvoiceParser {
     }
 
     private InvoiceItem buildItem(Matcher matcher) {
-        String album = clean(matcher.group(3));
-        String formato = detectFormato(album);
+        String descripcion = clean(matcher.group(3));
+        String formato = detectFormato(descripcion);
+        String album = removeFormato(descripcion, formato);
         return new InvoiceItem(
             clean(matcher.group(1)),
             clean(matcher.group(2)),
@@ -191,38 +199,21 @@ public class PdfInvoiceParser {
     }
 
     private String detectFormato(String album) {
-        if (album == null) return "Single";
-        return FORMAT_DOUBLE.matcher(album).find() ? "Double" : "Single";
+        if (album == null) return "";
+        Matcher matcher = FORMAT_DOUBLE.matcher(album);
+        return matcher.find() ? clean(matcher.group(1)) : "";
     }
 
-    private void mergeItem(Map<String, InvoiceItem> itemsByKey, InvoiceItem item) {
-        String key = itemKey(item);
-        InvoiceItem existing = itemsByKey.get(key);
-        if (existing == null) {
-            itemsByKey.put(key, item);
-            return;
-        }
-        itemsByKey.put(key, new InvoiceItem(
-            existing.codigoCatalogo(),
-            existing.artista(),
-            existing.album(),
-            existing.formato(),
-            firstNonNull(existing.precioUnitario(), item.precioUnitario()),
-            sum(existing.cantidad(), item.cantidad()),
-            sum(existing.subtotal(), item.subtotal())
-        ));
-    }
-
-    private String itemKey(InvoiceItem item) {
-        return normalizeKey(item.codigoCatalogo()) + "|"
-            + normalizeKey(item.artista()) + "|"
-            + normalizeKey(item.album());
+    private String removeFormato(String descripcion, String formato) {
+        if (descripcion == null || formato == null || formato.isBlank()) return descripcion;
+        return clean(descripcion.replaceFirst("(?i)\\Q" + formato + "\\E", ""));
     }
 
     // ── Summary row extraction ────────────────────────────────────────────────
 
     private record SummaryData(Integer cantidadTotal, BigDecimal franqueo,
-                               BigDecimal tarifas, BigDecimal neto, BigDecimal total) {}
+                               BigDecimal tarifas, BigDecimal neto, BigDecimal iva,
+                               BigDecimal total) {}
 
     /**
      * Finds a row with labels "Quantity … Postage … Fees … Net … Total"
@@ -245,10 +236,15 @@ public class PdfInvoiceParser {
                             BigDecimal franqueo = parseMoney(parts[1]);
                             BigDecimal tarifas  = parseMoney(parts[2]);
                             BigDecimal neto     = parseMoney(parts[3]);
+                            BigDecimal iva = BigDecimal.ZERO;
+                            for (int k = 4; k < parts.length - 1; k++) {
+                                BigDecimal value = parseMoney(parts[k]);
+                                if (value != null) iva = iva.add(value);
+                            }
                             BigDecimal total    = parts.length >= 7
                                 ? parseMoney(parts[6])
                                 : parseMoney(parts[parts.length - 1]);
-                            return new SummaryData(qty, franqueo, tarifas, neto, total);
+                            return new SummaryData(qty, franqueo, tarifas, neto, iva, total);
                         } catch (NumberFormatException e) {
                             log.debug("Línea de summary no parseable: {}", val);
                         }
@@ -263,20 +259,30 @@ public class PdfInvoiceParser {
     // ── Header extraction (best-effort) ──────────────────────────────────────
 
     private record HeaderData(String numeroFactura, LocalDate fechaFactura,
-                              String proveedor, String pago, BigDecimal pesoTotalKg,
+                              String proveedor, String envio, String pago,
+                              BigDecimal pesoTotal, String unidadPeso, String moneda,
                               String terminosVenta, String codigoArancel, String eoriNo) {}
 
     private HeaderData extractHeader(String text) {
         String numeroFactura = firstMatch(INVOICE_NO, text);
         LocalDate fechaFactura = parseDate(firstMatch(INVOICE_DATE_LABEL, text));
         String proveedor = detectProveedor(text);
+        String envio = firstMatchTrimmed(SHIPPING_METHOD, text);
         String pago = firstMatchTrimmed(PAYMENT_METHOD, text);
-        BigDecimal pesoTotalKg = parseKg(firstMatch(PESO_KG, text));
+        Matcher pesoMatcher = PESO.matcher(text);
+        BigDecimal pesoTotal = null;
+        String unidadPeso = null;
+        if (pesoMatcher.find()) {
+            pesoTotal = parseDecimal(pesoMatcher.group(1));
+            unidadPeso = pesoMatcher.group(2).strip();
+        }
+        String moneda = firstMatch(CURRENCY, text);
+        if (moneda == null && (text.contains(" EUR") || text.contains("EUR "))) moneda = "EUR";
         String terminosVenta = firstMatchTrimmed(TERMS_OF_SALE, text);
         String codigoArancel = firstMatch(CUSTOMS_TARIFF, text);
         String eoriNo = firstMatch(EORI, text);
-        return new HeaderData(numeroFactura, fechaFactura, proveedor, pago,
-            pesoTotalKg, terminosVenta, codigoArancel, eoriNo);
+        return new HeaderData(numeroFactura, fechaFactura, proveedor, envio, pago,
+            pesoTotal, unidadPeso, moneda, terminosVenta, codigoArancel, eoriNo);
     }
 
     private String detectProveedor(String text) {
@@ -288,7 +294,11 @@ public class PdfInvoiceParser {
 
     private String firstMatch(Pattern pattern, String text) {
         Matcher m = pattern.matcher(text);
-        return m.find() ? m.group(1).strip() : null;
+        if (!m.find()) return null;
+        for (int group = 1; group <= m.groupCount(); group++) {
+            if (m.group(group) != null) return m.group(group).strip();
+        }
+        return null;
     }
 
     private String firstMatchTrimmed(Pattern pattern, String text) {
@@ -309,7 +319,7 @@ public class PdfInvoiceParser {
         return null;
     }
 
-    private BigDecimal parseKg(String raw) {
+    private BigDecimal parseDecimal(String raw) {
         if (raw == null) return null;
         try {
             return new BigDecimal(raw.strip().replace(",", "."));
@@ -339,26 +349,6 @@ public class PdfInvoiceParser {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private String normalizeKey(String value) {
-        return value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
-    }
-
-    private Integer sum(Integer left, Integer right) {
-        if (left == null) return right;
-        if (right == null) return left;
-        return left + right;
-    }
-
-    private BigDecimal sum(BigDecimal left, BigDecimal right) {
-        if (left == null) return right;
-        if (right == null) return left;
-        return left.add(right);
-    }
-
-    private <T> T firstNonNull(T left, T right) {
-        return left != null ? left : right;
-    }
 
     private BigDecimal parseMoney(String raw) {
         if (raw == null || raw.isBlank()) return null;

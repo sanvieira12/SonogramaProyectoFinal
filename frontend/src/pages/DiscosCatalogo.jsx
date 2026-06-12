@@ -176,12 +176,12 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
 }
 
 function CatalogPreview({ disco, onEditar, onDarBaja }) {
-  const [previews, setPreviews] = useState([])
+  const [previews, setPreviews] = useState(disco?.audioPreviews || [])
 
   useEffect(() => {
     // Stop audio when selected disco changes
     stopAllPreviews()
-    setPreviews([])
+    setPreviews(disco?.audioPreviews || [])
 
     if (!disco?.idDisco) return
     let cancelled = false
@@ -210,7 +210,7 @@ function CatalogPreview({ disco, onEditar, onDarBaja }) {
 
   const fields = [
     ['Código', disco.codigoInterno],
-    ['Compra', disco.costo != null ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
+    ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
     ['Venta', disco.precioVenta != null ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
     ['Stock', disco.cantidadCopias ?? 0],
     ['Condición', disco.condicion],
@@ -257,7 +257,7 @@ function CatalogPreview({ disco, onEditar, onDarBaja }) {
         {previews.length > 0 && (
           <div>
             <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">Audio previews</p>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
               {previews.map(p => (
                 <CompactPlayer
                   key={p.id}

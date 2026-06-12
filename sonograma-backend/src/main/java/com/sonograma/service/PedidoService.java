@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -35,6 +34,7 @@ public class PedidoService {
     private final PedidoEnrichmentService enrichmentService;
     private final DiscoRepository discoRepository;
     private final AudioPreviewService audioPreviewService;
+    private final CatalogPricingService catalogPricingService;
 
     private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
 
@@ -59,7 +59,9 @@ public class PedidoService {
             .numeroFactura(invoice.numeroFactura())
             .fechaFactura(invoice.fechaFactura())
             .proveedor(invoice.proveedor() != null ? invoice.proveedor() : "Vinyl Future")
+            .envio(invoice.envio())
             .pago(invoice.pago())
+            .unidadPeso(invoice.unidadPeso())
             .moneda(invoice.moneda() != null ? invoice.moneda() : "EUR")
             .pesoTotalKg(invoice.pesoTotalKg())
             .terminosVenta(invoice.terminosVenta())
@@ -70,6 +72,7 @@ public class PedidoService {
             .franqueo(invoice.franqueo())
             .tarifas(invoice.tarifas())
             .neto(invoice.neto())
+            .iva(invoice.iva())
             .total(invoice.total())
             .cantidadTotalPdf(invoice.cantidadTotalPdf())
             .importStatus(ImportStatus.PARSED)
@@ -90,6 +93,7 @@ public class PedidoService {
                 .totalLineaEur(calcLineTotal(inv))
                 .enrichStatus(EnrichStatus.PENDING)
                 .build();
+            calcularItem(item);
             items.add(item);
         }
         pedidoItemRepository.saveAll(items);
@@ -137,11 +141,11 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(id)
             .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
 
-        if (cfg.tipoCambio() != null)       pedido.setTipoCambio(cfg.tipoCambio());
-        if (cfg.extraCostoSimple() != null)  pedido.setExtraCostoSimple(cfg.extraCostoSimple());
-        if (cfg.extraCostoDoble() != null)   pedido.setExtraCostoDoble(cfg.extraCostoDoble());
-        if (cfg.markupSimple() != null)      pedido.setMarkupSimple(cfg.markupSimple());
-        if (cfg.markupDoble() != null)       pedido.setMarkupDoble(cfg.markupDoble());
+        pedido.setTipoCambio(CatalogPricingService.TIPO_CAMBIO);
+        pedido.setExtraCostoSimple(CatalogPricingService.EXTRA_SIMPLE);
+        pedido.setExtraCostoDoble(CatalogPricingService.EXTRA_DOBLE);
+        pedido.setMarkupSimple(CatalogPricingService.MARKUP_SIMPLE);
+        pedido.setMarkupDoble(CatalogPricingService.MARKUP_DOBLE);
 
         pedidoRepository.save(pedido);
         recalcularItems(pedido);
@@ -150,37 +154,24 @@ public class PedidoService {
 
     private void recalcularItems(Pedido pedido) {
         for (PedidoItem item : pedido.getItems()) {
-            calcularItem(item, pedido);
+            calcularItem(item);
             pedidoItemRepository.save(item);
         }
     }
 
-    private void calcularItem(PedidoItem item, Pedido pedido) {
-        boolean esDoble = "Double".equalsIgnoreCase(item.getFormato());
+    private void calcularItem(PedidoItem item) {
+        CatalogPricingService.PricingResult result =
+            catalogPricingService.calcular(item.getPrecioUnitarioEur(), item.getFormato());
+        if (result == null) return;
+        item.setExtraCostoEur(result.extraCostEur());
+        item.setCostoRealEur(result.realCostEur());
+        item.setCostoRealUyu(result.realCostUyu());
+        item.setMarkup(result.markup());
+        item.setPrecioFinalUyu(result.salePriceUyu());
+    }
 
-        BigDecimal extraCosto = esDoble ? pedido.getExtraCostoDoble() : pedido.getExtraCostoSimple();
-        BigDecimal markup    = esDoble ? pedido.getMarkupDoble()     : pedido.getMarkupSimple();
-
-        item.setExtraCostoEur(extraCosto);
-
-        BigDecimal unitPrice = item.getPrecioUnitarioEur();
-        if (unitPrice != null && extraCosto != null) {
-            BigDecimal costoRealEur = unitPrice.add(extraCosto);
-            item.setCostoRealEur(costoRealEur);
-
-            if (pedido.getTipoCambio() != null) {
-                BigDecimal costoRealUyu = costoRealEur.multiply(pedido.getTipoCambio())
-                    .setScale(2, RoundingMode.HALF_UP);
-                item.setCostoRealUyu(costoRealUyu);
-
-                if (markup != null) {
-                    item.setMarkup(markup);
-                    BigDecimal precioFinal = costoRealUyu.multiply(markup)
-                        .setScale(2, RoundingMode.HALF_UP);
-                    item.setPrecioFinalUyu(precioFinal);
-                }
-            }
-        }
+    private boolean esDoble(String formato) {
+        return catalogPricingService.esDoble(formato);
     }
 
     // ── Enrichment ────────────────────────────────────────────────────────────
@@ -273,6 +264,12 @@ public class PedidoService {
     }
 
     private Disco upsertDisco(PedidoItem item, Pedido pedido) {
+        if (item.getPrecioFinalUyu() == null || item.getPrecioFinalUyu().compareTo(BigDecimal.ZERO) <= 0) {
+            calcularItem(item);
+            pedidoItemRepository.save(item);
+        }
+
+        VinylPageData scraped = enrichmentService.deserializarPageData(item.getPageDataJson()).orElse(null);
         Disco disco = item.getCodigo() != null && !item.getCodigo().isBlank()
             ? discoRepository.findByCodigoInterno(item.getCodigo()).orElse(null)
             : null;
@@ -282,19 +279,93 @@ public class PedidoService {
             disco.setCodigoQr(UUID.randomUUID().toString());
         }
 
-        disco.setCodigoInterno(item.getCodigo());
-        disco.setArtista(item.getArtista() != null ? item.getArtista() : "Desconocido");
-        disco.setAlbum(item.getTitulo() != null ? item.getTitulo() : "Sin título");
+        setIfPresent(disco::setCodigoInterno, firstNonBlank(item.getCodigo(), scraped != null ? scraped.code() : null));
+        setIfPresent(disco::setArtista, firstNonBlank(item.getArtista(), scraped != null ? scraped.artist() : null));
+        setIfPresent(disco::setAlbum, firstNonBlank(item.getTitulo(), scraped != null ? scraped.title() : null));
+        if (isBlank(disco.getArtista())) disco.setArtista("Desconocido");
+        if (isBlank(disco.getAlbum())) disco.setAlbum("Sin título");
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setProcedencia("IMPORTADO");
-        disco.setTipoDisco(TipoDisco.VINILO);
-        disco.setCondicion(CondicionDisco.NUEVO);
+        disco.setTipoDisco(mapTipo(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null),
+            disco.getTipoDisco()));
+        disco.setCondicion(mapCondicion(scraped != null ? scraped.condition() : null, disco.getCondicion()));
         disco.setCantidadCopias(item.getCantidad() != null ? item.getCantidad() : 1);
-        disco.setCosto(item.getCostoRealEur() != null ? item.getCostoRealEur() : item.getPrecioUnitarioEur());
+        BigDecimal purchasePrice = item.getCostoRealEur() != null
+            ? item.getCostoRealEur()
+            : firstNonNull(item.getPrecioUnitarioEur(), scraped != null ? scraped.purchasePrice() : null);
+        if (purchasePrice != null) disco.setCosto(purchasePrice);
         if (item.getPrecioFinalUyu() != null) disco.setPrecioVenta(item.getPrecioFinalUyu());
-        if (item.getPortadaUrl() != null)     disco.setImagenUrl(item.getPortadaUrl());
+        setIfPresent(disco::setImagenUrl, firstNonBlank(item.getPortadaUrl(),
+            scraped != null ? scraped.frontImageUrl() : null));
+
+        if (scraped != null) {
+            setIfMissing(disco.getSelloDiscografico(), disco::setSelloDiscografico, scraped.label());
+            setIfMissing(disco.getGenero(), disco::setGenero, scraped.genre());
+            setIfMissing(disco.getPais(), disco::setPais, scraped.country());
+            setIfMissing(disco.getDescripcion(), disco::setDescripcion, scraped.description());
+            if (disco.getAnio() == null && scraped.year() != null) disco.setAnio(scraped.year());
+            if (scraped.tracks() != null && !scraped.tracks().isEmpty()) {
+                if (isBlank(disco.getTracklist())) {
+                    disco.setTracklist(scraped.tracks().stream()
+                        .map(t -> String.join(" ", nonBlank(t.label(), t.name())))
+                        .filter(s -> !s.isBlank())
+                        .reduce((a, b) -> a + "\n" + b)
+                        .orElse(null));
+                }
+            }
+        }
 
         return discoRepository.save(disco);
+    }
+
+    private TipoDisco mapTipo(String value, TipoDisco existing) {
+        if (existing != null) return existing;
+        if (isBlank(value)) return existing != null ? existing : TipoDisco.VINILO;
+        String normalized = value.toUpperCase();
+        if (normalized.contains("CD")) return TipoDisco.CD;
+        if (normalized.contains("CASSETTE")) return TipoDisco.CASSETTE;
+        if (normalized.contains("DIGITAL")) return TipoDisco.DIGITAL;
+        return TipoDisco.VINILO;
+    }
+
+    private CondicionDisco mapCondicion(String value, CondicionDisco existing) {
+        if (existing != null) return existing;
+        if (isBlank(value)) return existing != null ? existing : CondicionDisco.NUEVO;
+        String normalized = value.toUpperCase();
+        if (normalized.contains("USED") || normalized.contains("USADO") || normalized.startsWith("VG")) {
+            return CondicionDisco.USADO;
+        }
+        return CondicionDisco.NUEVO;
+    }
+
+    private void setIfPresent(java.util.function.Consumer<String> setter, String value) {
+        if (!isBlank(value)) setter.accept(value.strip());
+    }
+
+    private void setIfMissing(String current, java.util.function.Consumer<String> setter, String fallback) {
+        if (isBlank(current)) setIfPresent(setter, fallback);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) return value;
+        }
+        return null;
+    }
+
+    private BigDecimal firstNonNull(BigDecimal... values) {
+        for (BigDecimal value : values) {
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String[] nonBlank(String... values) {
+        return java.util.Arrays.stream(values).filter(v -> !isBlank(v)).toArray(String[]::new);
     }
 
     // ── Mapping ───────────────────────────────────────────────────────────────
@@ -316,7 +387,9 @@ public class PedidoService {
             p.getNumeroFactura(),
             p.getFechaFactura(),
             p.getProveedor(),
+            p.getEnvio(),
             p.getPago(),
+            p.getUnidadPeso(),
             p.getMoneda(),
             p.getPesoTotalKg(),
             p.getTerminosVenta(),
@@ -327,14 +400,15 @@ public class PedidoService {
             p.getFranqueo(),
             p.getTarifas(),
             p.getNeto(),
+            p.getIva(),
             p.getTotal(),
             p.getCantidadTotalPdf(),
             p.getImportStatus().name(),
-            p.getTipoCambio(),
-            p.getExtraCostoSimple(),
-            p.getExtraCostoDoble(),
-            p.getMarkupSimple(),
-            p.getMarkupDoble(),
+            CatalogPricingService.TIPO_CAMBIO,
+            CatalogPricingService.EXTRA_SIMPLE,
+            CatalogPricingService.EXTRA_DOBLE,
+            CatalogPricingService.MARKUP_SIMPLE,
+            CatalogPricingService.MARKUP_DOBLE,
             p.getCreatedAt(),
             itemDTOs,
             merchandiseTotal,
@@ -354,6 +428,7 @@ public class PedidoService {
             i.getPrecioUnitarioEur(),
             i.getCantidad(),
             i.getTotalLineaEur(),
+            esDoble(i.getFormato()) ? "Double" : "Single",
             i.getExtraCostoEur(),
             i.getCostoRealEur(),
             i.getCostoRealUyu(),

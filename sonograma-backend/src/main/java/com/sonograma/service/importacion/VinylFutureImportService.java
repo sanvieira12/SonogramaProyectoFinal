@@ -7,6 +7,7 @@ import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.service.CatalogPricingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -26,6 +27,7 @@ import java.util.*;
 public class VinylFutureImportService {
 
     private final DiscoRepository discoRepository;
+    private final CatalogPricingService catalogPricingService;
 
     private static final Map<String, String> COLUMN_ALIASES = new HashMap<>();
 
@@ -43,6 +45,10 @@ public class VinylFutureImportService {
         COLUMN_ALIASES.put("precio", "precio");
         COLUMN_ALIASES.put("price", "precio");
         COLUMN_ALIASES.put("precio venta", "precio");
+        COLUMN_ALIASES.put("costo", "costo");
+        COLUMN_ALIASES.put("cost", "costo");
+        COLUMN_ALIASES.put("precio compra", "costo");
+        COLUMN_ALIASES.put("purchase price", "costo");
         COLUMN_ALIASES.put("condición", "condicion");
         COLUMN_ALIASES.put("condicion", "condicion");
         COLUMN_ALIASES.put("condition", "condicion");
@@ -100,6 +106,11 @@ public class VinylFutureImportService {
             if (!preview.getErrores().isEmpty() && tieneErroresCriticos(preview)) continue;
             try {
                 DiscoRequestDTO req = mapearARequest(preview);
+                if (req.getPrecioVenta() == null && req.getCosto() != null) {
+                    CatalogPricingService.PricingResult pricing =
+                        catalogPricingService.calcular(req.getCosto(), preview.getFormato());
+                    if (pricing != null) req.setPrecioVenta(pricing.salePriceUyu());
+                }
                 com.sonograma.entity.Disco disco = DiscoMapper.toEntity(req);
                 disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
                 disco.setCodigoQr(UUID.randomUUID().toString());
@@ -169,6 +180,16 @@ public class VinylFutureImportService {
                 builder.precioVenta(new BigDecimal(limpio));
             } catch (NumberFormatException e) {
                 errores.add("Precio inválido: " + precioStr);
+            }
+        }
+
+        String costoStr = valores.get("costo");
+        if (costoStr != null && !costoStr.isBlank()) {
+            String limpio = costoStr.replaceAll("[^0-9.,]", "").replace(",", ".");
+            try {
+                builder.costo(new BigDecimal(limpio));
+            } catch (NumberFormatException e) {
+                errores.add("Costo inválido: " + costoStr);
             }
         }
 

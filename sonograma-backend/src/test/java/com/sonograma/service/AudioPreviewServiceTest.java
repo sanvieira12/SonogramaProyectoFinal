@@ -83,6 +83,22 @@ class AudioPreviewServiceTest {
         verify(previewRepository, times(1)).save(any(CatalogAudioPreview.class));
     }
 
+    @Test
+    void guardarDesdeTracks_deduplicatesSameAudioUrl() {
+        Long idDisco = 8L;
+        List<TrackInfo> tracks = List.of(
+            new TrackInfo("A1", "Track", "https://deejay.de/stream/same.mp3"),
+            new TrackInfo(null, null, "https://deejay.de/stream/same.mp3")
+        );
+
+        when(previewRepository.findByIdDiscoOrderByTrackPosition(idDisco)).thenReturn(List.of());
+        when(previewRepository.save(any(CatalogAudioPreview.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.guardarDesdeTracks(idDisco, tracks);
+
+        verify(previewRepository, times(1)).save(any(CatalogAudioPreview.class));
+    }
+
     // ── Test 3: listarPorDisco returns mapped DTOs ───────────────────────────
 
     @Test

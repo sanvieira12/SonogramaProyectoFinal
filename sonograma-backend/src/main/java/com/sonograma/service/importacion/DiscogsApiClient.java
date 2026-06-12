@@ -28,8 +28,7 @@ public class DiscogsApiClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Semaphore concurrency;
-    private final Map<String, FetchResult> cache = new ConcurrentHashMap<>();
-    private final Map<String, Object> keyLocks = new ConcurrentHashMap<>();
+    private final ImportSession defaultSession = new ImportSession();
     private final Object throttleLock = new Object();
 
     @Value("${discogs.api.base-url:https://api.discogs.com}")
@@ -40,6 +39,9 @@ public class DiscogsApiClient {
 
     @Value("${discogs.api.request-delay-ms:350}")
     private long requestDelayMs;
+
+    @Value("${discogs.api.max-retries:3}")
+    private int maxRetries;
 
     private long nextRequestAt;
 
@@ -55,42 +57,52 @@ public class DiscogsApiClient {
     }
 
     public FetchResult fetch(String type, long id) {
+        return fetch(defaultSession, type, id);
+    }
+
+    public FetchResult fetch(ImportSession session, String type, long id) {
         String key = type.toLowerCase(Locale.ROOT) + ":" + id;
-        Object keyLock = keyLocks.computeIfAbsent(key, ignored -> new Object());
+        Object keyLock = session.keyLocks.computeIfAbsent(key, ignored -> new Object());
         try {
             synchronized (keyLock) {
-                FetchResult cached = cache.get(key);
+                FetchResult cached = session.cache.get(key);
                 if (cached != null) {
+                    log.debug("Discogs cache hit {}", key);
                     return cached.withCacheHit();
                 }
                 FetchResult result = "master".equalsIgnoreCase(type)
-                        ? fetchMaster(id)
-                        : fetchRelease(id, null);
+                        ? fetchMaster(session, id)
+                        : fetchRelease(session, id, null);
                 if (result.success()) {
-                    cache.putIfAbsent(key, result);
+                    session.cache.putIfAbsent(key, result);
                 }
                 return result;
             }
         } finally {
-            keyLocks.remove(key, keyLock);
+            session.keyLocks.remove(key, keyLock);
         }
     }
 
+    public ImportSession newSession() {
+        return new ImportSession();
+    }
+
     public int cacheSize() {
-        return cache.size();
+        return defaultSession.cache.size();
     }
 
     void clearCache() {
-        cache.clear();
+        defaultSession.cache.clear();
     }
 
-    void configureForTest(String apiBaseUrl, String token, long delayMs) {
+    void configureForTest(String apiBaseUrl, String token, long delayMs, int retries) {
         this.baseUrl = apiBaseUrl;
         this.discogsToken = token;
         this.requestDelayMs = delayMs;
+        this.maxRetries = retries;
     }
 
-    private FetchResult fetchMaster(long masterId) {
+    private FetchResult fetchMaster(ImportSession session, long masterId) {
         HttpResult masterResponse = request("/masters/" + masterId);
         if (!masterResponse.success()) {
             return FetchResult.failure(masterResponse.rateLimited(), masterResponse.retryAfterMs(),
@@ -103,9 +115,9 @@ public class DiscogsApiClient {
                 return FetchResult.failure(false, 0,
                         "El master " + masterId + " no informa main_release");
             }
-            FetchResult release = fetchRelease(mainRelease, masterId);
+            FetchResult release = fetchRelease(session, mainRelease, masterId);
             if (release.success()) {
-                cache.putIfAbsent("release:" + mainRelease, release);
+                session.cache.putIfAbsent("release:" + mainRelease, release);
             }
             return release;
         } catch (Exception ex) {
@@ -113,8 +125,8 @@ public class DiscogsApiClient {
         }
     }
 
-    private FetchResult fetchRelease(long releaseId, Long masterId) {
-        FetchResult cached = cache.get("release:" + releaseId);
+    private FetchResult fetchRelease(ImportSession session, long releaseId, Long masterId) {
+        FetchResult cached = session.cache.get("release:" + releaseId);
         if (cached != null) {
             return masterId == null ? cached.withCacheHit() : cached.withMaster(masterId).withCacheHit();
         }
@@ -137,11 +149,12 @@ public class DiscogsApiClient {
                     positiveInt(json, "year"),
                     firstText(json.path("genres")),
                     firstLabel(json),
+                    firstCatalogNumber(json),
                     text(json, "country"),
                     firstText(json.path("styles")),
                     format(json),
                     image(json),
-                    preview(json),
+                    null,
                     tracklist(json)
             );
         } catch (Exception ex) {
@@ -150,6 +163,21 @@ public class DiscogsApiClient {
     }
 
     private HttpResult request(String path) {
+        HttpResult last = null;
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            last = requestOnce(path);
+            if (!last.rateLimited() || attempt == maxRetries) {
+                return last;
+            }
+            long delay = retryDelay(last.retryAfterMs(), attempt + 1);
+            log.warn("Discogs HTTP 429 en {}. Reintento {}/{} en {} ms",
+                    path, attempt + 1, maxRetries, delay);
+            sleep(delay);
+        }
+        return last == null ? HttpResult.failure("No se pudo consultar Discogs") : last;
+    }
+
+    private HttpResult requestOnce(String path) {
         boolean acquired = false;
         try {
             concurrency.acquire();
@@ -188,6 +216,19 @@ public class DiscogsApiClient {
             if (acquired) {
                 concurrency.release();
             }
+        }
+    }
+
+    private long retryDelay(long headerDelay, int retryCount) {
+        long exponential = 1_000L * (1L << Math.max(0, retryCount - 1));
+        return Math.min(30_000, Math.max(headerDelay, exponential));
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -255,6 +296,13 @@ public class DiscogsApiClient {
                 : null;
     }
 
+    private String firstCatalogNumber(JsonNode json) {
+        JsonNode labels = json.path("labels");
+        return labels.isArray() && !labels.isEmpty()
+                ? text(labels.get(0), "catno")
+                : null;
+    }
+
     private String firstText(JsonNode array) {
         return array.isArray() && !array.isEmpty() ? array.get(0).asText(null) : null;
     }
@@ -287,13 +335,6 @@ public class DiscogsApiClient {
             }
         }
         return images.isEmpty() ? null : images.get(0).path("uri").asText(null);
-    }
-
-    private String preview(JsonNode json) {
-        JsonNode videos = json.path("videos");
-        return videos.isArray() && !videos.isEmpty()
-                ? videos.get(0).path("uri").asText(null)
-                : null;
     }
 
     private String tracklist(JsonNode json) {
@@ -342,6 +383,7 @@ public class DiscogsApiClient {
             Integer year,
             String genre,
             String label,
+            String catalogNumber,
             String country,
             String style,
             String format,
@@ -351,19 +393,24 @@ public class DiscogsApiClient {
     ) {
         static FetchResult failure(boolean rateLimited, long retryAfterMs, String message) {
             return new FetchResult(false, rateLimited, false, retryAfterMs, message,
-                    null, null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         FetchResult withCacheHit() {
             return new FetchResult(success, rateLimited, true, retryAfterMs, errorMessage,
                     masterId, resolvedReleaseId, artist, title, year, genre, label, country,
-                    style, format, imageUrl, previewUrl, tracklist);
+                    catalogNumber, style, format, imageUrl, previewUrl, tracklist);
         }
 
         FetchResult withMaster(Long newMasterId) {
             return new FetchResult(success, rateLimited, cacheHit, retryAfterMs, errorMessage,
                     newMasterId, resolvedReleaseId, artist, title, year, genre, label, country,
-                    style, format, imageUrl, previewUrl, tracklist);
+                    catalogNumber, style, format, imageUrl, previewUrl, tracklist);
         }
+    }
+
+    public static final class ImportSession {
+        private final Map<String, FetchResult> cache = new ConcurrentHashMap<>();
+        private final Map<String, Object> keyLocks = new ConcurrentHashMap<>();
     }
 }

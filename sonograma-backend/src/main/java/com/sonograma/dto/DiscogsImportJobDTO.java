@@ -26,6 +26,7 @@ public class DiscogsImportJobDTO {
     private int failed;
     private int rateLimited;
     private int imported;
+    private int coversDownloaded;
     private int pending;
     private List<DiscogsImportRowDTO> rows;
 }

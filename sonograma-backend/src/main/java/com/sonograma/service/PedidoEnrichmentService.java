@@ -41,6 +41,7 @@ public class PedidoEnrichmentService {
                         item.setPortadaUrl(d.frontImageUrl());
                     }
                     serializarTracks(item, d.tracks());
+                    serializarPageData(item, d);
                 });
             }
             item.setEnrichStatus(EnrichStatus.ENRICHED);
@@ -50,6 +51,14 @@ public class PedidoEnrichmentService {
             log.warn("Error enriqueciendo item {}: {}", itemId, e.getMessage());
         }
         itemRepository.save(item);
+    }
+
+    private void serializarPageData(PedidoItem item, VinylPageData pageData) {
+        try {
+            item.setPageDataJson(objectMapper.writeValueAsString(pageData));
+        } catch (JsonProcessingException e) {
+            log.warn("No se pudo serializar metadata para item {}: {}", item.getIdPedidoItem(), e.getMessage());
+        }
     }
 
     private void serializarTracks(PedidoItem item, List<TrackInfo> tracks) {
@@ -72,6 +81,16 @@ public class PedidoEnrichmentService {
         } catch (JsonProcessingException e) {
             log.warn("No se pudo deserializar tracks JSON: {}", e.getMessage());
             return List.of();
+        }
+    }
+
+    public Optional<VinylPageData> deserializarPageData(String pageDataJson) {
+        if (pageDataJson == null || pageDataJson.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(objectMapper.readValue(pageDataJson, VinylPageData.class));
+        } catch (JsonProcessingException e) {
+            log.warn("No se pudo deserializar metadata de producto: {}", e.getMessage());
+            return Optional.empty();
         }
     }
 

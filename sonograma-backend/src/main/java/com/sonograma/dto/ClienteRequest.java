@@ -35,5 +35,10 @@ public class ClienteRequest {
     @Size(max = 255)
     private String direccion;
 
+    @Size(max = 150)
+    private String localidad;
+
     private String observaciones;
+
+    private java.time.LocalDate ultimaCompra;
 }

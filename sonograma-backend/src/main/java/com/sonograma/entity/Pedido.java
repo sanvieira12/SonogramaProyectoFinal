@@ -32,6 +32,9 @@ public class Pedido {
     @Column(name = "proveedor")
     private String proveedor;
 
+    @Column(name = "envio")
+    private String envio;
+
     @Column(name = "pago")
     private String pago;
 
@@ -41,6 +44,9 @@ public class Pedido {
 
     @Column(name = "peso_total_kg", precision = 8, scale = 3)
     private BigDecimal pesoTotalKg;
+
+    @Column(name = "unidad_peso")
+    private String unidadPeso;
 
     @Column(name = "terminos_venta")
     private String terminosVenta;
@@ -69,6 +75,9 @@ public class Pedido {
     @Column(name = "total", precision = 10, scale = 2)
     private BigDecimal total;
 
+    @Column(name = "iva", precision = 10, scale = 2)
+    private BigDecimal iva;
+
     @Column(name = "cantidad_total_pdf")
     private Integer cantidadTotalPdf;
 
@@ -78,19 +87,24 @@ public class Pedido {
     private ImportStatus importStatus = ImportStatus.PARSED;
 
     @Column(name = "tipo_cambio", precision = 10, scale = 4)
-    private BigDecimal tipoCambio;
+    @Builder.Default
+    private BigDecimal tipoCambio = new BigDecimal("49");
 
     @Column(name = "extra_costo_simple", precision = 10, scale = 2)
-    private BigDecimal extraCostoSimple;
+    @Builder.Default
+    private BigDecimal extraCostoSimple = new BigDecimal("5");
 
     @Column(name = "extra_costo_doble", precision = 10, scale = 2)
-    private BigDecimal extraCostoDoble;
+    @Builder.Default
+    private BigDecimal extraCostoDoble = new BigDecimal("8");
 
     @Column(name = "markup_simple", precision = 8, scale = 4)
-    private BigDecimal markupSimple;
+    @Builder.Default
+    private BigDecimal markupSimple = new BigDecimal("1.6");
 
     @Column(name = "markup_doble", precision = 8, scale = 4)
-    private BigDecimal markupDoble;
+    @Builder.Default
+    private BigDecimal markupDoble = new BigDecimal("1.4");
 
     @Column(name = "created_at", nullable = false)
     @Builder.Default

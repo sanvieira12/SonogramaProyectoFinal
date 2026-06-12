@@ -77,8 +77,8 @@ function CoverUpload({ value, onChange }) {
   )
 }
 
-function AudioPreviewsSection({ discoId }) {
-  const [previews, setPreviews] = useState([])
+function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
+  const [previews, setPreviews] = useState(initialPreviews)
   const [newUrl, setNewUrl] = useState('')
   const [newName, setNewName] = useState('')
   const [newPos, setNewPos] = useState('')
@@ -89,7 +89,7 @@ function AudioPreviewsSection({ discoId }) {
     let cancelled = false
     api.discos.previews.listar(discoId)
       .then(d => { if (!cancelled) setPreviews(d) })
-      .catch(() => {})
+      .catch(ex => { if (!cancelled) setErr(ex.message) })
     return () => {
       cancelled = true
       stopAllPreviews()
@@ -135,7 +135,7 @@ function AudioPreviewsSection({ discoId }) {
         <p className="text-xs text-slate-400 dark:text-stone-600">Sin previews de audio.</p>
       )}
 
-      <div className="space-y-1.5">
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
         {previews.map(p => (
           <div key={p.id} className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
@@ -349,7 +349,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           </div>
 
           {esEdicion && disco.idDisco && (
-            <AudioPreviewsSection discoId={disco.idDisco} />
+            <AudioPreviewsSection discoId={disco.idDisco} initialPreviews={disco.audioPreviews || []} />
           )}
 
           {error && (

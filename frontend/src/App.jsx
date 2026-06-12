@@ -10,6 +10,7 @@ import LibroVentas from './pages/LibroVentas'
 import ShippingOrders from './pages/ShippingOrders'
 import Pedidos from './pages/Pedidos'
 import PedidoDetalle from './pages/PedidoDetalle'
+import Deudores from './pages/Deudores'
 import Navbar from './components/Navbar'
 
 function PrivateRoute() {
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/shipping-orders" element={<ShippingOrders />} />
             <Route path="/pedidos" element={<Pedidos />} />
             <Route path="/pedidos/:id" element={<PedidoDetalle />} />
+            <Route path="/deudores" element={<Deudores />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

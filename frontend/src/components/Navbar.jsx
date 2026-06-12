@@ -83,6 +83,7 @@ export default function Navbar({ usuario }) {
             <NavLink to="/libro-ventas" className={navLinkClass}>Libro de ventas</NavLink>
             <NavLink to="/shipping-orders" className={navLinkClass}>Órdenes</NavLink>
             <NavLink to="/pedidos" className={navLinkClass}>Pedidos</NavLink>
+            <NavLink to="/deudores" className={navLinkClass}>Deudores</NavLink>
           </div>
         </div>
 

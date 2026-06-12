@@ -176,6 +176,31 @@ export const api = {
   pedidos: {
     listar: () => request('GET', '/pedidos'),
     porId: (id) => request('GET', `/pedidos/${id}`),
+    uploadControl: async (pdf, template) => {
+      const fd = new FormData()
+      fd.append('pdf', pdf)
+      fd.append('template', template)
+      const res = await fetch(`${BASE}/pedidos/upload-control`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) {
+        const text = await res.text()
+        let data
+        try { data = text ? JSON.parse(text) : null } catch { data = null }
+        throw new Error(data?.message || data?.error || text || 'Error al generar el Excel')
+      }
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+      const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+      return {
+        blob: await res.blob(),
+        pedidoId: res.headers.get('X-Pedido-Id'),
+        filename: encodedName ? decodeURIComponent(encodedName) : (plainName || 'invoice_control.xlsx'),
+      }
+    },
     uploadPdf: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
@@ -193,6 +218,25 @@ export const api = {
     enriquecer: (id) => request('POST', `/pedidos/${id}/enriquecer`),
     importarCatalogo: (id) => request('POST', `/pedidos/${id}/importar-catalogo`),
     retryItem: (pedidoId, itemId) => request('POST', `/pedidos/${pedidoId}/items/${itemId}/retry-enrich`),
+  },
+
+  deudores: {
+    todos: () => request('GET', '/deudores'),
+    importarExcel: async (formData) => {
+      const res = await fetch(`${BASE}/deudores/importar-excel`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: formData,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Sesión vencida')
+      const text = await res.text()
+      let data
+      try { data = text ? JSON.parse(text) : null } catch { data = { message: text } }
+      if (!res.ok) throw new Error(data?.message || data?.error || 'Error al importar')
+      return data
+    },
+    actualizar: (id, data) => request('PUT', `/deudores/${id}`, data),
+    eliminar: (id) => request('DELETE', `/deudores/${id}`),
   },
 
   importaciones: {

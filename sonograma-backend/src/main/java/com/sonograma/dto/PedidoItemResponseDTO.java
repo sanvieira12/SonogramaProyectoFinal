@@ -11,6 +11,7 @@ public record PedidoItemResponseDTO(
     BigDecimal precioUnitarioEur,
     Integer cantidad,
     BigDecimal totalLineaEur,
+    String tipo,
     BigDecimal extraCostoEur,
     BigDecimal costoRealEur,
     BigDecimal costoRealUyu,

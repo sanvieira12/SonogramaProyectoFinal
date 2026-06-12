@@ -17,11 +17,14 @@ public record ParsedInvoice(
     String numeroFactura,
     LocalDate fechaFactura,
     String proveedor,
+    String envio,
     String pago,
+    String unidadPeso,
     String moneda,
     BigDecimal pesoTotalKg,
     String terminosVenta,
     String codigoArancel,
     String eoriNo,
+    BigDecimal iva,
     String rawExtractText
 ) {}

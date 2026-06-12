@@ -38,6 +38,16 @@ git checkout "$BRANCH"
 git pull origin "$BRANCH"
 log "Commit: $(git log --oneline -1)"
 
+# Aplicar cambios de esquema requeridos antes de construir el backend, que usa ddl-auto=validate.
+MIGRATION="$APP_DIR/docs/migraciones/005_clientes_importacion_excel.sql"
+if [ -f "$MIGRATION" ] && docker ps --format '{{.Names}}' | grep -qx sonograma-postgres; then
+    step "Aplicando migración de importación de clientes..."
+    docker exec -i sonograma-postgres \
+        psql -v ON_ERROR_STOP=1 \
+        -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
+        -d sonograma_db < "$MIGRATION"
+fi
+
 # 3. Build frontend
 # Nota: el frontend usa VITE_API_URL (ver frontend/src/api/sonograma.js)
 step "3/7 – Build frontend React..."

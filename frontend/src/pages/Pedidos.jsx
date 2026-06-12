@@ -31,7 +31,7 @@ function StatusBadge({ status }) {
   )
 }
 
-function UploadZone({ onFile, archivo }) {
+function UploadZone({ onFile, archivo, accept, emptyLabel }) {
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef(null)
 
@@ -50,7 +50,7 @@ function UploadZone({ onFile, archivo }) {
       onDragLeave={() => setDragging(false)}
       onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
     >
-      <input ref={inputRef} type="file" accept="application/pdf" className="hidden"
+      <input ref={inputRef} type="file" accept={accept} className="hidden"
         onChange={e => handleFile(e.target.files[0])} />
       <div className="flex flex-col items-center justify-center gap-2 py-8 px-6 text-center pointer-events-none">
         {archivo ? (
@@ -63,7 +63,7 @@ function UploadZone({ onFile, archivo }) {
             <svg className="w-8 h-8 text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
             </svg>
-            <p className="text-sm text-stone-400">Arrastrá la factura PDF o hacé clic</p>
+            <p className="text-sm text-stone-400">{emptyLabel}</p>
           </>
         )}
       </div>
@@ -76,6 +76,7 @@ export default function Pedidos() {
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
   const [archivo, setArchivo] = useState(null)
+  const [plantilla, setPlantilla] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
 
@@ -91,8 +92,16 @@ export default function Pedidos() {
     setUploading(true)
     setUploadError('')
     try {
-      const resp = await api.pedidos.uploadPdf(archivo)
-      navigate(`/pedidos/${resp.pedidoId}`)
+      const result = await api.pedidos.uploadControl(archivo, plantilla)
+      const url = URL.createObjectURL(result.blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = result.filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      if (result.pedidoId) navigate(`/pedidos/${result.pedidoId}`)
     } catch (e) {
       setUploadError(e.message || 'Error al procesar el PDF')
       setUploading(false)
@@ -110,17 +119,36 @@ export default function Pedidos() {
 
       {/* Upload card */}
       <div className="rounded-2xl border border-stone-800 bg-stone-950 p-6 space-y-4">
-        <h2 className="text-sm font-semibold text-stone-300 uppercase tracking-wider">Nueva factura PDF</h2>
-        <UploadZone onFile={setArchivo} archivo={archivo} />
+        <h2 className="text-sm font-semibold text-stone-300 uppercase tracking-wider">Nueva factura</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs text-stone-500">Factura PDF</p>
+            <UploadZone
+              onFile={setArchivo}
+              archivo={archivo}
+              accept="application/pdf"
+              emptyLabel="Arrastrá la factura PDF o hacé clic"
+            />
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs text-stone-500">Plantilla Excel</p>
+            <UploadZone
+              onFile={setPlantilla}
+              archivo={plantilla}
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              emptyLabel="Arrastrá la plantilla .xlsx o hacé clic"
+            />
+          </div>
+        </div>
         {uploadError && (
           <p className="text-xs text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2">{uploadError}</p>
         )}
         <button
           onClick={handleUpload}
-          disabled={!archivo || uploading}
+          disabled={!archivo || !plantilla || uploading}
           className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          {uploading ? 'Procesando…' : 'Parsear factura'}
+          {uploading ? 'Generando…' : 'Generar Excel e importar'}
         </button>
       </div>
 

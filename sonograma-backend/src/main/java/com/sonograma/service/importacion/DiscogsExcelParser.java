@@ -30,8 +30,38 @@ public class DiscogsExcelParser {
             for (int rowIndex = header.rowIndex() + 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
                 rows.add(parseRow(sheet.getRow(rowIndex), rowIndex + 1, header.columns(), evaluator));
             }
-            return new ParsedSheet(sheet.getSheetName(), rows);
+            return new ParsedSheet(sheet.getSheetName(), markDuplicates(rows));
         }
+    }
+
+    private List<ParsedRow> markDuplicates(List<ParsedRow> rows) {
+        Set<String> seen = new HashSet<>();
+        List<ParsedRow> deduplicated = new ArrayList<>(rows.size());
+        for (ParsedRow row : rows) {
+            if (row.discogsType() == null || row.discogsId() == null) {
+                deduplicated.add(row);
+                continue;
+            }
+            String key = row.discogsType() + ":" + row.discogsId();
+            if (seen.add(key)) {
+                deduplicated.add(row);
+                continue;
+            }
+            deduplicated.add(new ParsedRow(
+                    row.sourceExcelRowNumber(),
+                    row.visibleCellValue(),
+                    row.hyperlinkUrl(),
+                    row.normalizedDiscogsUrl(),
+                    row.urlSource(),
+                    row.discogsType(),
+                    row.discogsId(),
+                    row.artist(),
+                    row.title(),
+                    DiscogsImportRowStatus.IGNORED,
+                    "Link Discogs duplicado dentro de la importación"
+            ));
+        }
+        return deduplicated;
     }
 
     private ParsedRow parseRow(

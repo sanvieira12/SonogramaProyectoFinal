@@ -74,4 +74,8 @@ public class PedidoItem {
     // JSON array of scraped tracks, staged here until catalog import creates CatalogAudioPreview rows
     @Column(name = "tracks_json", columnDefinition = "TEXT")
     private String tracksJson;
+
+    // Full scraped page metadata, kept until the item is imported into catalog.
+    @Column(name = "page_data_json", columnDefinition = "TEXT")
+    private String pageDataJson;
 }

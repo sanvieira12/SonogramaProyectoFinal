@@ -63,10 +63,10 @@ class PdfInvoiceParserTest {
         assertEquals(new BigDecimal("20.58"), invoice.total());
     }
 
-    // ── Test 2: multi-page — all items included, merged duplicates, summary row
+    // ── Test 2: multi-page — all item lines preserved in order, summary row
 
     @Test
-    void parsesAllPagesAndMergesRepeatedCodes() throws Exception {
+    void parsesAllPagesAndPreservesRepeatedLinesInOrder() throws Exception {
         byte[] pdf = buildPdf(
             // page 1
             "AV004 - ACE VISION- TRAVEL CONTINUUM EP     11,79   2   23,58\n" +
@@ -81,14 +81,11 @@ class PdfInvoiceParserTest {
         ParsedInvoice invoice = parser.parseInvoice(pdf);
 
         // All items across pages are present
-        assertEquals(3, invoice.items().size());
-
-        // Merged AV004: 2+1 = 3 qty
-        InvoiceItem merged = invoice.items().stream()
-            .filter(i -> "AV004".equals(i.codigoCatalogo())).findFirst().orElseThrow();
-        assertEquals(3, merged.cantidad());
-        assertEquals(new BigDecimal("35.37"), merged.subtotal());
-        assertEquals(new BigDecimal("11.79"), merged.precioUnitario());
+        assertEquals(4, invoice.items().size());
+        assertEquals("AV004", invoice.items().get(0).codigoCatalogo());
+        assertEquals(2, invoice.items().get(0).cantidad());
+        assertEquals("AV004", invoice.items().get(1).codigoCatalogo());
+        assertEquals(1, invoice.items().get(1).cantidad());
 
         // Code with space works
         InvoiceItem spacedCode = invoice.items().stream()
@@ -144,15 +141,17 @@ class PdfInvoiceParserTest {
 
         InvoiceItem double12 = invoice.items().stream()
             .filter(i -> "WARPLP30".equals(i.codigoCatalogo())).findFirst().orElseThrow();
-        assertEquals("Double", double12.formato());
+        assertEquals("2x12", double12.formato());
+        assertEquals("I Care Because You Do", double12.album());
 
         InvoiceItem doubleLp = invoice.items().stream()
             .filter(i -> "ZEN001".equals(i.codigoCatalogo())).findFirst().orElseThrow();
-        assertEquals("Double", doubleLp.formato());
+        assertEquals("2xLP", doubleLp.formato());
+        assertEquals("Compilation", doubleLp.album());
 
         InvoiceItem single = invoice.items().stream()
             .filter(i -> "NRM01".equals(i.codigoCatalogo())).findFirst().orElseThrow();
-        assertEquals("Single", single.formato());
+        assertEquals("", single.formato());
     }
 
     // ── Test 5: postage / fees / net / total all come from summary row ────────
@@ -172,5 +171,37 @@ class PdfInvoiceParserTest {
         assertEquals(new BigDecimal("56.25"), invoice.neto());
         assertEquals(new BigDecimal("56.25"), invoice.total());
         assertEquals(Integer.valueOf(2), invoice.cantidadTotalPdf());
+    }
+
+    @Test
+    void extractsInvoiceMetadataAndRawText() throws Exception {
+        byte[] pdf = buildPdf(
+            "deejay.de\n" +
+            "Invoice No.: INV-42\n" +
+            "Invoice Date: 12.06.2026\n" +
+            "Shipping Method: DHL Express\n" +
+            "Payment Method: Credit Card\n" +
+            "Total Weight: 1,25 kg\n" +
+            "Currency: EUR\n" +
+            "Terms of Sale: DAP\n" +
+            "Customs Tariff Number: 8523.80.90\n" +
+            "EORI Number: DE123456\n" +
+            "A001 - Artist- Album     10,00   1   10,00"
+        );
+
+        ParsedInvoice invoice = parser.parseInvoice(pdf);
+
+        assertEquals("INV-42", invoice.numeroFactura());
+        assertEquals(java.time.LocalDate.of(2026, 6, 12), invoice.fechaFactura());
+        assertEquals("deejay.de", invoice.proveedor());
+        assertEquals("DHL Express", invoice.envio());
+        assertEquals("Credit Card", invoice.pago());
+        assertEquals(new BigDecimal("1.25"), invoice.pesoTotalKg());
+        assertEquals("kg", invoice.unidadPeso());
+        assertEquals("EUR", invoice.moneda());
+        assertEquals("DAP", invoice.terminosVenta());
+        assertEquals("8523.80.90", invoice.codigoArancel());
+        assertEquals("DE123456", invoice.eoriNo());
+        assertTrue(invoice.rawExtractText().contains("Invoice No.: INV-42"));
     }
 }

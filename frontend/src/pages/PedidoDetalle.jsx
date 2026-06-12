@@ -21,7 +21,6 @@ const ENRICH_COLOR = {
   PENDING: 'text-stone-500', ENRICHED: 'text-emerald-400',
   FAILED: 'text-red-400', IMPORTED: 'text-violet-400',
 }
-
 // ── Small shared components ───────────────────────────────────────────────────
 
 function Field({ label, value }) {
@@ -52,42 +51,7 @@ function Spinner({ text }) {
 
 // ── Tab: Resumen ──────────────────────────────────────────────────────────────
 
-function TabResumen({ pedido, onConfigSaved }) {
-  const [cfg, setCfg] = useState({
-    tipoCambio: pedido.tipoCambio ?? '',
-    extraCostoSimple: pedido.extraCostoSimple ?? '',
-    extraCostoDoble: pedido.extraCostoDoble ?? '',
-    markupSimple: pedido.markupSimple ?? '',
-    markupDoble: pedido.markupDoble ?? '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [err, setErr] = useState('')
-
-  function handleChange(e) {
-    setCfg(prev => ({ ...prev, [e.target.name]: e.target.value }))
-  }
-
-  async function guardar() {
-    setSaving(true); setErr(''); setSaved(false)
-    try {
-      const body = {
-        tipoCambio: cfg.tipoCambio !== '' ? Number(cfg.tipoCambio) : null,
-        extraCostoSimple: cfg.extraCostoSimple !== '' ? Number(cfg.extraCostoSimple) : null,
-        extraCostoDoble: cfg.extraCostoDoble !== '' ? Number(cfg.extraCostoDoble) : null,
-        markupSimple: cfg.markupSimple !== '' ? Number(cfg.markupSimple) : null,
-        markupDoble: cfg.markupDoble !== '' ? Number(cfg.markupDoble) : null,
-      }
-      const updated = await api.pedidos.configurar(pedido.idPedido, body)
-      setSaved(true)
-      onConfigSaved(updated)
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
+function TabResumen({ pedido }) {
   const sumItems = pedido.sumCantidadItems ?? 0
   const cantPdf  = pedido.cantidadTotalPdf
 
@@ -99,8 +63,9 @@ function TabResumen({ pedido, onConfigSaved }) {
         <Field label="Fecha"       value={pedido.fechaFactura} />
         <Field label="Proveedor"   value={pedido.proveedor} />
         <Field label="Moneda"      value={pedido.moneda} />
+        <Field label="Envío"       value={pedido.envio} />
         <Field label="Pago"        value={pedido.pago} />
-        <Field label="Peso (kg)"   value={pedido.pesoTotalKg} />
+        <Field label={`Peso (${pedido.unidadPeso || 'kg'})`} value={pedido.pesoTotalKg} />
         <Field label="Arancel"     value={pedido.codigoArancel} />
         <Field label="EORI"        value={pedido.eoriNo} />
         <Field label="Términos"    value={pedido.terminosVenta} />
@@ -115,6 +80,7 @@ function TabResumen({ pedido, onConfigSaved }) {
           <div><p className="text-xs text-stone-500 mb-0.5">Franqueo</p><p className="text-stone-200 tabular-nums"><Money value={pedido.franqueo} /></p></div>
           <div><p className="text-xs text-stone-500 mb-0.5">Tarifas</p><p className="text-stone-200 tabular-nums"><Money value={pedido.tarifas} /></p></div>
           <div><p className="text-xs text-stone-500 mb-0.5">Neto</p><p className="text-stone-200 tabular-nums"><Money value={pedido.neto} /></p></div>
+          <div><p className="text-xs text-stone-500 mb-0.5">IVA</p><p className="text-stone-200 tabular-nums"><Money value={pedido.iva} /></p></div>
           <div><p className="text-xs text-stone-500 mb-0.5">Total factura</p><p className="text-[#7E9FA8] tabular-nums font-bold"><Money value={pedido.total} /></p></div>
         </div>
       </div>
@@ -133,35 +99,21 @@ function TabResumen({ pedido, onConfigSaved }) {
         </div>
       )}
 
-      {/* Calc settings */}
       <div className="rounded-xl border border-stone-800 bg-stone-950 p-5 space-y-4">
         <h3 className="text-xs font-semibold text-stone-500 uppercase tracking-wider">Configuración de costos</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { name: 'tipoCambio',     label: 'Tipo cambio (€→$)' },
-            { name: 'extraCostoSimple', label: 'Extra costo Single (€)' },
-            { name: 'extraCostoDoble',  label: 'Extra costo Double (€)' },
-            { name: 'markupSimple',   label: 'Markup Single (×)' },
-            { name: 'markupDoble',    label: 'Markup Double (×)' },
-          ].map(({ name, label }) => (
-            <div key={name}>
-              <label className="block text-xs text-stone-500 mb-1">{label}</label>
-              <input
-                type="number" step="0.01" name={name}
-                value={cfg[name]}
-                onChange={handleChange}
-                className="w-full bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-200 focus:outline-none focus:border-[#7E9FA8] tabular-nums"
-              />
+            ['Tipo cambio (€→$)', 49],
+            ['Extra costo Single (€)', 5],
+            ['Extra costo Double (€)', 8],
+            ['Markup Single (×)', 1.6],
+            ['Markup Double (×)', 1.4],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <p className="text-xs text-stone-500 mb-1">{label}</p>
+              <p className="text-sm text-stone-200 tabular-nums">{value}</p>
             </div>
           ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={guardar} disabled={saving}
-            className="px-4 py-2 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 text-white text-sm font-medium transition-colors">
-            {saving ? 'Guardando…' : 'Guardar y recalcular'}
-          </button>
-          {saved && <span className="text-xs text-emerald-400">✓ Guardado</span>}
-          {err && <span className="text-xs text-red-400">{err}</span>}
         </div>
       </div>
     </div>
@@ -178,65 +130,59 @@ function TabItems({ pedido, onRetry }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-stone-800">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-stone-800 bg-stone-950">
-            {['Código','Artista','Título','Fmt','Precio €','Cant','Total €',
-              'Extra €','Real €','Real $','Markup','Final $','Portada','Catálogo','Enrich'].map(h => (
-              <th key={h} className="text-left px-3 py-2.5 font-semibold text-stone-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-            ))}
-            <th className="px-3 py-2.5"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-stone-800/60">
-          {items.map(item => (
-            <tr key={item.idPedidoItem} className="hover:bg-stone-900/40 transition-colors">
-              <td className="px-3 py-2 font-mono text-stone-400 whitespace-nowrap">{item.codigo || '—'}</td>
-              <td className="px-3 py-2 text-stone-300 max-w-[120px] truncate" title={item.artista}>{item.artista}</td>
-              <td className="px-3 py-2 text-stone-200 max-w-[160px] truncate" title={item.titulo}>{item.titulo}</td>
-              <td className="px-3 py-2">
-                {item.formato === 'Double' ? (
-                  <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-xs">2×</span>
-                ) : item.formato ? (
-                  <span className="text-stone-500">1×</span>
-                ) : null}
-              </td>
-              <td className="px-3 py-2 text-stone-300 tabular-nums">{item.precioUnitarioEur != null ? `€${Number(item.precioUnitarioEur).toFixed(2)}` : '—'}</td>
-              <td className="px-3 py-2 text-stone-300 tabular-nums text-center">{item.cantidad ?? '—'}</td>
-              <td className="px-3 py-2 text-stone-300 tabular-nums">{item.totalLineaEur != null ? `€${Number(item.totalLineaEur).toFixed(2)}` : '—'}</td>
-              <td className="px-3 py-2 text-stone-400 tabular-nums">{item.extraCostoEur != null ? `€${Number(item.extraCostoEur).toFixed(2)}` : '—'}</td>
-              <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealEur != null ? `€${Number(item.costoRealEur).toFixed(2)}` : '—'}</td>
-              <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealUyu != null ? `$${Number(item.costoRealUyu).toLocaleString('es-AR')}` : '—'}</td>
-              <td className="px-3 py-2 text-stone-400 tabular-nums">{item.markup != null ? `×${Number(item.markup).toFixed(2)}` : '—'}</td>
-              <td className="px-3 py-2 text-[#7E9FA8] font-semibold tabular-nums whitespace-nowrap">
-                {item.precioFinalUyu != null ? `$${Number(item.precioFinalUyu).toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
-              </td>
-              <td className="px-3 py-2">
-                {item.portadaUrl
-                  ? <img src={item.portadaUrl} alt="" className="w-8 h-8 object-cover rounded" />
-                  : <span className="text-stone-700 text-base">○</span>}
-              </td>
-              <td className="px-3 py-2">
-                {item.idDisco
-                  ? <span className="text-emerald-400">✓</span>
-                  : <span className="text-stone-700">—</span>}
-              </td>
-              <td className={`px-3 py-2 font-medium ${ENRICH_COLOR[item.enrichStatus] || 'text-stone-500'}`}>
-                {item.enrichStatus}
-              </td>
-              <td className="px-3 py-2">
-                {item.enrichStatus === 'FAILED' && (
-                  <button onClick={() => onRetry(item.idPedidoItem)}
-                    className="text-xs text-amber-400 hover:text-amber-300 underline">
-                    Reintentar
-                  </button>
-                )}
-              </td>
+    <div className="space-y-4">
+      <div className="overflow-x-auto rounded-xl border border-stone-800">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-stone-800 bg-stone-950">
+              {['Artista','Título','Formato','Código / SKU','Precio unitario EUR','Cantidad','Total EUR',
+                'Tipo','Costo extra EUR','Costo real unitario EUR','Costo real unitario UYU','Markup','Precio final unitario UYU'].map(h => (
+                <th key={h} className="text-left px-3 py-2.5 font-semibold text-stone-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              ))}
             </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-800/60">
+            {items.map(item => (
+              <tr key={item.idPedidoItem} className="hover:bg-stone-900/40 transition-colors">
+                <td className="px-3 py-2 text-stone-300 max-w-[120px] truncate" title={item.artista}>{item.artista}</td>
+                <td className="px-3 py-2 text-stone-200 max-w-[160px] truncate" title={item.titulo}>{item.titulo}</td>
+                <td className="px-3 py-2 text-stone-400 whitespace-nowrap">{item.formato || '—'}</td>
+                <td className="px-3 py-2 font-mono text-stone-400 whitespace-nowrap">{item.codigo || '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.precioUnitarioEur != null ? `€${Number(item.precioUnitarioEur).toFixed(2)}` : '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums text-center">{item.cantidad ?? '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.totalLineaEur != null ? `€${Number(item.totalLineaEur).toFixed(2)}` : '—'}</td>
+                <td className="px-3 py-2 text-stone-400 whitespace-nowrap">{item.tipo}</td>
+                <td className="px-3 py-2 text-stone-400 tabular-nums">{item.extraCostoEur != null ? `€${Number(item.extraCostoEur).toFixed(2)}` : '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealEur != null ? `€${Number(item.costoRealEur).toFixed(2)}` : '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealUyu != null ? `$${Number(item.costoRealUyu).toLocaleString('es-AR')}` : '—'}</td>
+                <td className="px-3 py-2 text-stone-400 tabular-nums">{item.markup != null ? `×${Number(item.markup).toFixed(2)}` : '—'}</td>
+                <td className="px-3 py-2 text-[#7E9FA8] font-semibold tabular-nums whitespace-nowrap">
+                  {item.precioFinalUyu != null ? `$${Number(item.precioFinalUyu).toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-xl border border-stone-800 bg-stone-950 p-4">
+        <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-3">Estado de catálogo</p>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+          {items.map(item => (
+            <div key={item.idPedidoItem} className="flex items-center gap-2">
+              <span className="font-mono text-stone-400">{item.codigo || item.idPedidoItem}</span>
+              <span className={ENRICH_COLOR[item.enrichStatus] || 'text-stone-500'}>{item.enrichStatus || '—'}</span>
+              {item.idDisco && <span className="text-emerald-400">En catálogo</span>}
+              {item.enrichStatus === 'FAILED' && (
+                <button onClick={() => onRetry(item.idPedidoItem)}
+                  className="text-amber-400 hover:text-amber-300 underline">
+                  Reintentar
+                </button>
+              )}
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
     </div>
   )
 }
@@ -289,15 +235,16 @@ export default function PedidoDetalle() {
   }, [load])
 
   // Poll while enriching
+  const importStatus = pedido?.importStatus
   useEffect(() => {
-    if (!pedido) return
-    if (pedido.importStatus === 'ENRICHING') {
+    if (!importStatus) return
+    if (importStatus === 'ENRICHING') {
       pollRef.current = setInterval(load, 4000)
     } else {
       clearInterval(pollRef.current)
     }
     return () => clearInterval(pollRef.current)
-  }, [pedido?.importStatus, load])
+  }, [importStatus, load])
 
   async function handleEnriquecer() {
     setActionMsg('')
@@ -409,7 +356,7 @@ export default function PedidoDetalle() {
       {/* Tab content */}
       <div>
         {tab === 'resumen' && (
-          <TabResumen pedido={pedido} onConfigSaved={setPedido} />
+          <TabResumen pedido={pedido} />
         )}
         {tab === 'items' && (
           <TabItems pedido={pedido} onRetry={handleRetry} />

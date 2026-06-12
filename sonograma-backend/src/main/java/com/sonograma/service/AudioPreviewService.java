@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -33,7 +35,12 @@ public class AudioPreviewService {
             .filter(p -> "vinylfuture".equals(p.getSource()))
             .forEach(p -> previewRepository.delete(p));
 
-        for (TrackInfo track : tracks) {
+        Map<String, TrackInfo> uniqueTracks = new LinkedHashMap<>();
+        tracks.stream()
+            .filter(track -> track.mp3Url() != null && !track.mp3Url().isBlank())
+            .forEach(track -> uniqueTracks.putIfAbsent(track.mp3Url().strip(), track));
+
+        for (TrackInfo track : uniqueTracks.values()) {
             if (track.mp3Url() == null || track.mp3Url().isBlank()) continue;
             CatalogAudioPreview preview = CatalogAudioPreview.builder()
                 .idDisco(idDisco)
@@ -45,7 +52,7 @@ public class AudioPreviewService {
                 .build();
             previewRepository.save(preview);
         }
-        log.debug("Guardados {} previews para disco {}", tracks.size(), idDisco);
+        log.debug("Guardados {} previews para disco {}", uniqueTracks.size(), idDisco);
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
