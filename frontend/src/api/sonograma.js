@@ -52,6 +52,13 @@ export const api = {
       request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
     buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
+    previews: {
+      listar: (id) => request('GET', `/discos/${id}/previews`),
+      agregar: (id, data) => request('POST', `/discos/${id}/previews`, data),
+      actualizarUrl: (id, previewId, audioUrl) =>
+        request('PATCH', `/discos/${id}/previews/${previewId}/url`, { audioUrl }),
+      eliminar: (id, previewId) => request('DELETE', `/discos/${id}/previews/${previewId}`),
+    },
   },
 
   clientes: {
@@ -63,16 +70,23 @@ export const api = {
     crear: (cliente) => request('POST', '/clientes', cliente),
     crearDireccion: (id, direccion) => request('POST', `/clientes/${id}/direcciones`, direccion),
     actualizar: (id, cliente) => request('PUT', `/clientes/${id}`, cliente),
-    importarExcel: async (file) => {
+    importarExcel: async (file, hoja) => {
       const fd = new FormData(); fd.append('file', file)
-      const res = await fetch(`${BASE}/clientes/importar-excel`, {
+      const query = hoja ? `?hoja=${encodeURIComponent(hoja)}` : ''
+      const res = await fetch(`${BASE}/clientes/importar-excel${query}`, {
         method: 'POST',
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
         body: fd,
       })
       if (redirectIfUnauthorized(res)) throw new Error('Sesión vencida')
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Error al importar')
+      const text = await res.text()
+      let data
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        data = { message: text }
+      }
+      if (!res.ok) throw new Error(data?.message || data?.error || 'Error al importar')
       return data
     },
   },
@@ -207,15 +221,25 @@ export const api = {
     discogsDesdeExcel: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await fetch(`${BASE}/importaciones/discogs/desde-excel`, {
+      const res = await fetch(`${BASE}/importaciones/discogs/jobs`, {
         method: 'POST',
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
         body: fd,
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
-      if (!res.ok) throw new Error('Error al procesar Excel con links de Discogs')
-      return res.json()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.message || 'Error al procesar Excel con links de Discogs')
+      return data
     },
+
+    discogsJob: (jobId) =>
+      request('GET', `/importaciones/discogs/jobs/${jobId}`),
+
+    discogsRetryRow: (jobId, rowId) =>
+      request('POST', `/importaciones/discogs/jobs/${jobId}/rows/${rowId}/retry`),
+
+    discogsImportarJob: (jobId) =>
+      request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),
 
     discogsGuardarLote: (previews) =>
       request('POST', '/importaciones/discogs/guardar-lote', previews),

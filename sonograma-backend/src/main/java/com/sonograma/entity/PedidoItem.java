@@ -70,4 +70,8 @@ public class PedidoItem {
     @Column(name = "enrich_status")
     @Builder.Default
     private EnrichStatus enrichStatus = EnrichStatus.PENDING;
+
+    // JSON array of scraped tracks, staged here until catalog import creates CatalogAudioPreview rows
+    @Column(name = "tracks_json", columnDefinition = "TEXT")
+    private String tracksJson;
 }

@@ -34,6 +34,7 @@ public class PedidoService {
     private final PdfInvoiceParser pdfParser;
     private final PedidoEnrichmentService enrichmentService;
     private final DiscoRepository discoRepository;
+    private final AudioPreviewService audioPreviewService;
 
     private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
 
@@ -251,6 +252,13 @@ public class PedidoService {
                 item.setDisco(disco);
                 item.setEnrichStatus(EnrichStatus.IMPORTED);
                 pedidoItemRepository.save(item);
+                // Persist scraped audio previews linked to the catalog product
+                try {
+                    var tracks = enrichmentService.deserializarTracks(item.getTracksJson());
+                    audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), tracks);
+                } catch (Exception ex) {
+                    log.warn("No se pudieron guardar previews para item {}: {}", item.getIdPedidoItem(), ex.getMessage());
+                }
                 ok++;
             } catch (Exception e) {
                 log.warn("Error importando item {} al catálogo: {}", item.getIdPedidoItem(), e.getMessage());

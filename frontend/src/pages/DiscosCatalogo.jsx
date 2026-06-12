@@ -4,6 +4,8 @@ import { discoService } from '../services/discoService'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
 import Paginacion from '../components/Paginacion'
+import CompactPlayer, { stopAllPreviews } from '../components/CompactPlayer'
+import { api } from '../api/sonograma'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
 
@@ -174,6 +176,24 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
 }
 
 function CatalogPreview({ disco, onEditar, onDarBaja }) {
+  const [previews, setPreviews] = useState([])
+
+  useEffect(() => {
+    // Stop audio when selected disco changes
+    stopAllPreviews()
+    setPreviews([])
+
+    if (!disco?.idDisco) return
+    let cancelled = false
+    api.discos.previews.listar(disco.idDisco)
+      .then(data => { if (!cancelled) setPreviews(data) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [disco?.idDisco])
+
+  // Also stop audio when component unmounts (page leave)
+  useEffect(() => () => stopAllPreviews(), [])
+
   if (!disco) {
     return (
       <aside className="card sticky top-24 min-h-[420px] p-6 hidden lg:flex flex-col items-center justify-center text-center">
@@ -232,6 +252,24 @@ function CatalogPreview({ disco, onEditar, onDarBaja }) {
         {(disco.notas || disco.descripcion) && (
           <p className="text-xs text-slate-500 dark:text-stone-400 line-clamp-3">{disco.notas || disco.descripcion}</p>
         )}
+
+        {/* Audio previews */}
+        {previews.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">Audio previews</p>
+            <div className="space-y-1.5">
+              {previews.map(p => (
+                <CompactPlayer
+                  key={p.id}
+                  audioUrl={p.audioUrl}
+                  trackName={p.trackName}
+                  trackPosition={p.trackPosition}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
           <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400">Dar de baja</button>
