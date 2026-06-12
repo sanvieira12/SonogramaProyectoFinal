@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.InvoiceItem;
+import com.sonograma.dto.ParsedInvoice;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -14,8 +15,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,10 +46,11 @@ public class PdfInvoiceParser {
 
     /**
      * Strict pattern: code, " - ", artist, "- ", album, spaces, price, spaces, qty, spaces, sum.
-     * Groups: 1 = catalog code, 2 = artist, 3 = album.
+     * Groups: 1 = catalog code, 2 = artist, 3 = album,
+     * 4 = unit price, 5 = quantity, 6 = subtotal.
      */
     private static final Pattern ITEM_LINE = Pattern.compile(
-        "^([A-Z0-9][A-Z0-9\\-\\.]{1,29})\\s+-\\s+(.+?)-\\s+(.+?)\\s{2,}\\d{1,4}[,.]\\d{2}\\s+\\d{1,4}\\s+\\d{1,4}[,.]\\d{2}\\s*$"
+        "^([A-Z0-9][A-Z0-9\\-\\.]{1,29})\\s+-\\s+(.+?)-\\s+(.+?)\\s{2,}([\\d.,]+)\\s+(\\d{1,4})\\s+([\\d.,]+)\\s*$"
     );
 
     /**
@@ -54,7 +59,11 @@ public class PdfInvoiceParser {
      * followed by anything containing a price.
      */
     private static final Pattern ITEM_LINE_LOOSE = Pattern.compile(
-        "^([A-Z0-9][A-Z0-9\\-\\.]{1,29})\\s+-\\s+(.+?)-\\s+(.+?)\\s+\\d{1,4}[,.]\\d{2}.*$"
+        "^([A-Z0-9][A-Z0-9\\-\\.]{1,29})\\s+-\\s+(.+?)-\\s+(.+?)\\s+([\\d.,]+)\\s+(\\d{1,4})\\s+([\\d.,]+).*$"
+    );
+
+    private static final Pattern TOTAL_LINE = Pattern.compile(
+        "(?i)^.*?\\b(?:grand\\s+total|invoice\\s+total|total)\\b[^\\d]*([\\d.,]+)\\s*(?:EUR|€)?\\s*$"
     );
 
     public List<InvoiceItem> parse(MultipartFile file) throws IOException {
@@ -62,8 +71,13 @@ public class PdfInvoiceParser {
     }
 
     public List<InvoiceItem> parse(byte[] pdfBytes) throws IOException {
-        List<InvoiceItem> items = new ArrayList<>();
+        return parseInvoice(pdfBytes).items();
+    }
 
+    public ParsedInvoice parseInvoice(byte[] pdfBytes) throws IOException {
+        List<InvoiceItem> items = new ArrayList<>();
+        Set<String> urls = new LinkedHashSet<>();
+        BigDecimal total = null;
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
@@ -72,7 +86,7 @@ public class PdfInvoiceParser {
             log.debug("PDF text extracted ({} chars). First 300: '{}'", text.length(),
                 text.substring(0, Math.min(300, text.length())).replace("\n", "\\n"));
 
-            String[] lines = text.split("\\r?\\n");
+            String[] lines = text.split("\\R");
             for (String raw : lines) {
                 String line = raw.strip();
                 if (line.isEmpty()) continue;
@@ -88,19 +102,14 @@ public class PdfInvoiceParser {
                     }
                 }
             }
-        }
 
-        log.info("PDF parsing complete. Unique items found: {}", items.size());
-        return items;
-    }
+            for (int i = lines.length - 1; i >= 0 && total == null; i--) {
+                Matcher totalMatcher = TOTAL_LINE.matcher(lines[i].strip());
+                if (totalMatcher.matches()) {
+                    total = parseMoney(totalMatcher.group(1));
+                }
+            }
 
-    /**
-     * Extracts all HTTP/HTTPS hyperlinks embedded as annotation links in the PDF,
-     * in page order. One link per product line is the expected deejay.de layout.
-     */
-    public List<String> extractLinks(byte[] pdfBytes) throws IOException {
-        List<String> urls = new ArrayList<>();
-        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             for (PDPage page : doc.getPages()) {
                 for (PDAnnotation ann : page.getAnnotations()) {
                     if (ann instanceof PDAnnotationLink link) {
@@ -115,21 +124,59 @@ public class PdfInvoiceParser {
                 }
             }
         }
-        log.info("PDF link extraction complete. Links found: {}", urls.size());
-        urls.forEach(u -> log.debug("  PDF link: {}", u));
-        return urls;
+
+        log.info("PDF parsing complete. Unique items: {}, links: {}, total: {}",
+            items.size(), urls.size(), total);
+        return new ParsedInvoice(items, List.copyOf(urls), total);
+    }
+
+    /**
+     * Extracts all HTTP/HTTPS hyperlinks embedded as annotation links in the PDF,
+     * in page order. One link per product line is the expected deejay.de layout.
+     */
+    public List<String> extractLinks(byte[] pdfBytes) throws IOException {
+        return parseInvoice(pdfBytes).productLinks();
     }
 
     private InvoiceItem tryParse(String line) {
         Matcher m = ITEM_LINE.matcher(line);
         if (m.matches()) {
-            return new InvoiceItem(clean(m.group(1)), clean(m.group(2)), clean(m.group(3)));
+            return buildItem(m);
         }
         Matcher ml = ITEM_LINE_LOOSE.matcher(line);
         if (ml.matches()) {
-            return new InvoiceItem(clean(ml.group(1)), clean(ml.group(2)), clean(ml.group(3)));
+            return buildItem(ml);
         }
         return null;
+    }
+
+    private InvoiceItem buildItem(Matcher matcher) {
+        return new InvoiceItem(
+            clean(matcher.group(1)),
+            clean(matcher.group(2)),
+            clean(matcher.group(3)),
+            parseMoney(matcher.group(4)),
+            Integer.valueOf(matcher.group(5)),
+            parseMoney(matcher.group(6))
+        );
+    }
+
+    private BigDecimal parseMoney(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String normalized = raw.strip().replace(" ", "");
+        int comma = normalized.lastIndexOf(',');
+        int dot = normalized.lastIndexOf('.');
+        if (comma > dot) {
+            normalized = normalized.replace(".", "").replace(',', '.');
+        } else if (dot > comma) {
+            normalized = normalized.replace(",", "");
+        }
+        try {
+            return new BigDecimal(normalized);
+        } catch (NumberFormatException e) {
+            log.debug("No se pudo interpretar importe '{}'", raw);
+            return null;
+        }
     }
 
     private String clean(String s) {

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import VinylFutureTab from './importar/VinylFutureTab'
 import DiscogsTab from './importar/DiscogsTab'

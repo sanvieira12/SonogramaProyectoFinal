@@ -83,10 +83,7 @@ export default function Dashboard() {
   }, [])
 
   const stats = {
-    total:      discos.length,
     disponibles: discos.filter(d => d.estado === 'DISPONIBLE').length,
-    reservados:  discos.filter(d => d.estado === 'RESERVADO').length,
-    vendidos:    discos.filter(d => d.estado === 'VENDIDO').length,
   }
 
   const valorTotal = discos
@@ -100,6 +97,19 @@ export default function Dashboard() {
   })()
   const ventaMes = estadisticas?.ventasPorMes?.find(v => v.clave === mesActual)
   const ventaTotalMes = ventaMes ? Number(ventaMes.totalMonto || 0) : 0
+  const semanaActual = (() => {
+    const date = new Date()
+    const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+    const day = utc.getUTCDay() || 7
+    utc.setUTCDate(utc.getUTCDate() + 4 - day)
+    const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1))
+    const week = Math.ceil((((utc - yearStart) / 86400000) + 1) / 7)
+    return `${utc.getUTCFullYear()}-S${String(week).padStart(2, '0')}`
+  })()
+  const ventaSemana = estadisticas?.ventasPorSemana?.find(v => v.clave === semanaActual)
+  const ventaTotalSemana = Number(ventaSemana?.totalMonto || 0)
+  const ingresosTotales = (estadisticas?.ventasPorMes || [])
+    .reduce((sum, item) => sum + Number(item.totalMonto || 0), 0)
 
   const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
   const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
@@ -123,7 +133,7 @@ export default function Dashboard() {
 
   function fmtMonto(monto) {
     if (!monto && monto !== 0) return '—'
-    return `$${Number(monto).toLocaleString('es-AR', { minimumFractionDigits: 0 })}`
+    return `UYU $${Number(monto).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
   }
 
   return (
@@ -133,7 +143,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
           label="Ventas del mes"
-          value={ventaTotalMes > 0 ? fmtMonto(ventaTotalMes) : '—'}
+          value={fmtMonto(ventaTotalMes)}
           sublabel={ventaMes ? `${ventaMes.cantidad} ventas` : 'Sin ventas este mes'}
           color="bg-[#7E9FA8]/15"
           icon={
@@ -145,7 +155,7 @@ export default function Dashboard() {
         <StatCard
           label="Disponibles"
           value={loading ? '…' : stats.disponibles}
-          sublabel={!loading && valorTotal > 0 ? `$${valorTotal.toLocaleString('es-AR', { minimumFractionDigits: 0 })} en stock` : undefined}
+          sublabel={!loading && valorTotal > 0 ? `${fmtMonto(valorTotal)} en stock` : undefined}
           color="bg-emerald-50 dark:bg-emerald-900/20"
           icon={
             <svg className="w-5 h-5 text-[#5B8C7D]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -154,8 +164,9 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Reservados"
-          value={loading ? '…' : stats.reservados}
+          label="Ventas esta semana"
+          value={fmtMonto(ventaTotalSemana)}
+          sublabel={ventaSemana ? `${ventaSemana.cantidad} ventas` : 'Sin ventas esta semana'}
           color="bg-amber-50 dark:bg-amber-900/20"
           icon={
             <svg className="w-5 h-5 text-[#B8975E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -164,9 +175,9 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Vendidos"
-          value={loading ? '…' : stats.vendidos}
-          sublabel={!loading && stats.total ? `de ${stats.total} en catálogo` : undefined}
+          label="Ingresos totales"
+          value={fmtMonto(ingresosTotales)}
+          sublabel="Pesos uruguayos"
           color="bg-slate-100 dark:bg-stone-900"
           icon={
             <svg className="w-5 h-5 text-[#6B7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -44,7 +44,7 @@ public class ZipBundleService {
     private static final int MAX_IMAGE_SIZE = 5 * 1024 * 1024;
     private static final int MP3_TIMEOUT_MS = 30_000;
     private static final int MAX_MP3_SIZE = 20 * 1024 * 1024;
-    private static final int DOWNLOAD_THREADS = 4;
+    private static final int DOWNLOAD_THREADS = 8;
 
     private final ExecutorService downloadPool = Executors.newFixedThreadPool(DOWNLOAD_THREADS);
 

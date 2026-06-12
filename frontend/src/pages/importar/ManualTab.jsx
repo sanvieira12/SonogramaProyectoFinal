@@ -6,6 +6,7 @@ const FORMATOS = ['VINILO', 'CD', 'CASSETTE', 'DIGITAL', 'OTRO']
 const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
 const PROCEDENCIAS = ['NUEVO', 'USADO', 'CONSIGNACION', 'IMPORTADO', 'OTRO']
 
+// eslint-disable-next-line no-unused-vars
 const DEPARTAMENTOS_UY = [
   'Artigas', 'Canelones', 'Cerro Largo', 'Colonia', 'Durazno', 'Flores',
   'Florida', 'Lavalleja', 'Maldonado', 'Montevideo', 'Paysandú',

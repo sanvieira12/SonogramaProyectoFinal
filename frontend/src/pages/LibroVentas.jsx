@@ -47,6 +47,7 @@ export default function LibroVentas() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { cargar({}) }, [cargar])
 
   function aplicar() {
@@ -167,10 +168,10 @@ export default function LibroVentas() {
       {ventas.length > 0 && (
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: 'Ventas', value: ventas.length, isNum: true },
+            { label: 'Ventas', value: ventas.length },
             { label: 'Total facturado', value: fmt(totalFinal) },
             { label: 'Ganancia estimada', value: fmt(totalGanancia) },
-          ].map(({ label, value, isNum }) => (
+          ].map(({ label, value }) => (
             <div key={label} className="card p-4 text-center">
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
               <p className="text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">{value}</p>

@@ -1,3 +1,12 @@
 package com.sonograma.dto;
 
-public record InvoiceItem(String codigoCatalogo, String artista, String album) {}
+import java.math.BigDecimal;
+
+public record InvoiceItem(
+    String codigoCatalogo,
+    String artista,
+    String album,
+    BigDecimal precioUnitario,
+    Integer cantidad,
+    BigDecimal subtotal
+) {}

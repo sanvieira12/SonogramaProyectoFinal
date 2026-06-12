@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -37,6 +39,7 @@ public class VinylFutureSearchService {
     private static final Pattern PRODUCT_URL = Pattern.compile(
         "https://www\\.vinylfuture\\.com/.+_Vinyl__\\d+$"
     );
+    private final Map<String, Optional<String>> searchCache = new ConcurrentHashMap<>();
 
     @Value("${sonograma.vinylfuture.delay-ms:400}")
     private long delayMs;
@@ -45,6 +48,12 @@ public class VinylFutureSearchService {
     private int timeoutMs;
 
     public Optional<String> buscar(InvoiceItem item) {
+        String cacheKey = (item.codigoCatalogo() + "|" + item.artista() + "|" + item.album())
+            .toLowerCase();
+        return searchCache.computeIfAbsent(cacheKey, ignored -> buscarSinCache(item));
+    }
+
+    private Optional<String> buscarSinCache(InvoiceItem item) {
         // 1st attempt: catalog code (exact, fast)
         Optional<String> url = searchByQuery(item.codigoCatalogo());
         if (url.isPresent()) {

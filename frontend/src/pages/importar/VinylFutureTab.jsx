@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/sonograma'
 
 function Spinner({ text }) {
@@ -61,6 +61,8 @@ function UploadZone({ onFile, accept, label }) {
 
 // ── Sub-section A: Excel import → preview → confirm ──────────────────────────
 
+// Conservado para reactivar la previsualización Excel sin perder el flujo existente.
+// eslint-disable-next-line no-unused-vars
 function ExcelImport() {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle') // idle | loading | preview | saving | done | error
@@ -240,9 +242,23 @@ function PdfExport() {
   const [blobUrl, setBlobUrl] = useState(null)
   const [filename, setFilename] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [segundos, setSegundos] = useState(0)
+
+  useEffect(() => {
+    if (estado !== 'loading') return undefined
+    const timer = window.setInterval(() => setSegundos(s => s + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [estado])
+
+  const etapa = segundos < 3
+    ? 'Leyendo factura y precios…'
+    : segundos < 12
+      ? 'Buscando portadas y metadata en paralelo…'
+      : 'Preparando archivos y guardando el pedido…'
 
   async function procesar() {
     if (!archivo) return
+    setSegundos(0)
     setEstado('loading')
     setErrorMsg('')
     setBlobUrl(null)
@@ -261,7 +277,7 @@ function PdfExport() {
 
   function reset() {
     setArchivo(null); setBlobUrl(null); setFilename('')
-    setEstado('idle'); setErrorMsg('')
+    setEstado('idle'); setErrorMsg(''); setSegundos(0)
   }
 
   return (
@@ -281,7 +297,17 @@ function PdfExport() {
           </button>
         </>
       )}
-      {estado === 'loading' && <Spinner text="Buscando en vinylfuture.com… puede tardar varios segundos por ítem." />}
+      {estado === 'loading' && (
+        <div className="rounded-xl border border-[#7E9FA8]/20 bg-[#7E9FA8]/5 px-4 py-3">
+          <Spinner text={etapa} />
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-stone-800">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-[#7E9FA8]" />
+          </div>
+          <p className="mt-2 text-center text-xs text-slate-400 dark:text-stone-500">
+            {segundos}s · podés dejar esta pantalla abierta mientras termina
+          </p>
+        </div>
+      )}
       {estado === 'done' && (
         <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
           <p className="font-medium text-emerald-700 dark:text-emerald-400 text-sm mb-2">ZIP generado</p>

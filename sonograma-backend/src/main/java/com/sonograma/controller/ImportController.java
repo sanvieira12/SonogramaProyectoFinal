@@ -1,6 +1,7 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.InvoiceItem;
+import com.sonograma.dto.ParsedInvoice;
 import com.sonograma.dto.VinylPageData;
 import com.sonograma.entity.Disco;
 import com.sonograma.enums.CondicionDisco;
@@ -35,6 +36,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import jakarta.annotation.PreDestroy;
 
 @RestController
 @RequestMapping("/importar")
@@ -49,6 +58,7 @@ public class ImportController {
     private final ZipBundleService zipBundle;
     private final DiscoRepository discoRepository;
     private final ShippingOrderService shippingOrderService;
+    private final ExecutorService importPool = Executors.newFixedThreadPool(4);
 
     /**
      * Parses a deejay.de invoice PDF, searches each item on vinylfuture.com,
@@ -72,36 +82,36 @@ public class ImportController {
             return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
-        List<InvoiceItem> items;
-        List<String> pdfLinks;
+        ParsedInvoice invoice;
         try {
-            items    = pdfParser.parse(pdfBytes);
-            pdfLinks = pdfParser.extractLinks(pdfBytes);
+            invoice = pdfParser.parseInvoice(pdfBytes);
         } catch (IOException e) {
             log.warn("No se pudo parsear el PDF: {}", e.getMessage());
             return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
+        List<InvoiceItem> items = invoice.items();
         if (items.isEmpty()) {
             log.warn("No se extrajeron ítems del PDF.");
         }
 
-        // 1. Search each item on vinylfuture (for CSV url_vinylfuture column)
-        Map<InvoiceItem, Optional<String>> searchResults = new LinkedHashMap<>();
-        for (InvoiceItem item : items) {
-            searchResults.put(item, vinylFutureSearch.buscar(item));
-        }
+        long searchStarted = System.nanoTime();
+        Map<InvoiceItem, Optional<String>> searchResults = parallelMap(
+            items,
+            vinylFutureSearch::buscar
+        );
 
         long found = searchResults.values().stream().filter(Optional::isPresent).count();
-        log.info("Búsqueda completada. {}/{} ítems encontrados en vinylfuture.", found, items.size());
+        log.info("Búsqueda completada en {} ms. {}/{} ítems encontrados en vinylfuture.",
+            elapsedMillis(searchStarted), found, items.size());
 
-        // 2. Scrape images and MP3s from each VinylFuture product page
-        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap = new LinkedHashMap<>();
-        for (Map.Entry<InvoiceItem, Optional<String>> entry : searchResults.entrySet()) {
-            Optional<VinylPageData> pageData = entry.getValue()
-                .flatMap(url -> vinylFutureScraper.scrape(url));
-            pageDataMap.put(entry.getKey(), pageData);
-        }
+        long scrapeStarted = System.nanoTime();
+        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap = parallelMap(
+            items,
+            item -> searchResults.getOrDefault(item, Optional.empty())
+                .flatMap(vinylFutureScraper::scrape)
+        );
+        log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
 
         // 3. Persist to DB
         List<Disco> discosGuardados = new ArrayList<>();
@@ -125,7 +135,8 @@ public class ImportController {
                 disco.setProcedencia("IMPORTADO");
                 disco.setTipoDisco(TipoDisco.VINILO);
                 disco.setCondicion(CondicionDisco.NUEVO);
-                disco.setCantidadCopias(1);
+                disco.setCantidadCopias(item.cantidad() != null ? item.cantidad() : 1);
+                disco.setCosto(item.precioUnitario());
                 if (pageData.isPresent()) {
                     VinylPageData page = pageData.get();
                     disco.setImagenUrl(page.frontImageUrl());
@@ -146,7 +157,11 @@ public class ImportController {
         // 3b. Auto-create ShippingOrder for imported discos
         if (!discosGuardados.isEmpty()) {
             try {
-                shippingOrderService.crearDesdeImport(discosGuardados);
+                shippingOrderService.crearDesdeImport(
+                    discosGuardados,
+                    invoice.items(),
+                    invoice.total()
+                );
                 log.info("ShippingOrder creada con {} ítems.", discosGuardados.size());
             } catch (Exception e) {
                 log.warn("No se pudo crear ShippingOrder: {}", e.getMessage());
@@ -199,6 +214,31 @@ public class ImportController {
             .contentType(MediaType.parseMediaType("application/zip"))
             .contentLength(zipSize)
             .body(body);
+    }
+
+    private <T> Map<InvoiceItem, T> parallelMap(
+            List<InvoiceItem> items,
+            Function<InvoiceItem, T> operation) {
+        Map<InvoiceItem, CompletableFuture<T>> futures = items.stream()
+            .collect(Collectors.toMap(
+                Function.identity(),
+                item -> CompletableFuture.supplyAsync(() -> operation.apply(item), importPool),
+                (first, ignored) -> first,
+                LinkedHashMap::new
+            ));
+
+        Map<InvoiceItem, T> results = new LinkedHashMap<>();
+        futures.forEach((item, future) -> results.put(item, future.join()));
+        return results;
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    @PreDestroy
+    void shutdownImportPool() {
+        importPool.shutdown();
     }
 
     private ResponseEntity<StreamingResponseBody> errorResponse(HttpStatus status, String message) {

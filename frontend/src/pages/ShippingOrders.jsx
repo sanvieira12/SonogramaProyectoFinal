@@ -2,16 +2,9 @@ import { useState, useEffect } from 'react'
 import { api } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
 
-const ESTADO_STYLES = {
-  PENDIENTE: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  ENVIADO:   'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  RECIBIDO:  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  CANCELADO: 'bg-slate-100 text-slate-500 dark:bg-stone-800 dark:text-stone-500',
-}
-
 function fmt(n) {
   if (n == null) return '—'
-  return `$${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `UYU $${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function fmtDate(s) {
@@ -239,7 +232,7 @@ export default function ShippingOrders() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Número', 'Proveedor', 'Fecha', 'Estado', 'Ítems', 'Total', 'Acciones'].map(h => (
+                {['Número', 'Proveedor', 'Fecha', 'Ítems', 'Total gastado', 'Acciones'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -248,12 +241,12 @@ export default function ShippingOrders() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
               ) : orders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-slate-400 dark:text-stone-500">
+                  <td colSpan={6} className="px-4 py-16 text-center text-slate-400 dark:text-stone-500">
                     No hay órdenes de compra. Creá la primera.
                   </td>
                 </tr>
@@ -266,13 +259,8 @@ export default function ShippingOrders() {
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-stone-300">{o.proveedor}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">{fmtDate(o.fechaOrden)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[o.estado] || ''}`}>
-                      {o.estado}
-                    </span>
-                  </td>
                   <td className="px-4 py-3 text-center text-slate-600 dark:text-stone-400">
-                    {(o.items || []).length}
+                    {(o.items || []).reduce((sum, item) => sum + Number(item.cantidad || 0), 0)}
                   </td>
                   <td className="px-4 py-3 tabular-nums font-semibold text-slate-800 dark:text-stone-200">
                     {fmt(o.costoTotal)}

@@ -109,6 +109,7 @@ export default function Deudas() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { cargar('') }, [cargar])
 
   function buscar() {

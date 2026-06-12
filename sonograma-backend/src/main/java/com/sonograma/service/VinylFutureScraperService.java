@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,11 +39,16 @@ public class VinylFutureScraperService {
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     private static final Pattern PRODUCT_ID = Pattern.compile("__(\\d+)$");
+    private final Map<String, Optional<VinylPageData>> pageCache = new ConcurrentHashMap<>();
 
     @Value("${sonograma.vinylfuture.timeout-ms:10000}")
     private int timeoutMs;
 
     public Optional<VinylPageData> scrape(String productUrl) {
+        return pageCache.computeIfAbsent(productUrl, this::scrapeSinCache);
+    }
+
+    private Optional<VinylPageData> scrapeSinCache(String productUrl) {
         Matcher m = PRODUCT_ID.matcher(productUrl);
         if (!m.find()) {
             log.warn("Cannot extract product ID from URL: {}", productUrl);

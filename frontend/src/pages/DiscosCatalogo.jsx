@@ -55,7 +55,7 @@ function EmptyState({ hayFiltro }) {
         {hayFiltro ? 'No hay discos con ese criterio' : 'No hay discos en el catálogo'}
       </p>
       <p className="text-slate-400 dark:text-stone-600 text-sm mt-1">
-        {hayFiltro ? 'Probá con otro filtro o búsqueda' : 'Agregá el primero usando el botón de arriba'}
+        {hayFiltro ? 'Probá con otro filtro o búsqueda' : 'Importá discos para verlos en el catálogo'}
       </p>
     </div>
   )
@@ -64,7 +64,7 @@ function EmptyState({ hayFiltro }) {
 
 /* Panel lateral derecho con el detalle completo del disco.
    Se abre al hacer clic en una fila. */
-function SlideOver({ disco, onCerrar, onEditar }) {
+function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
   if (!disco) return null
 
   return (
@@ -133,13 +133,14 @@ function SlideOver({ disco, onCerrar, onEditar }) {
               ['Género',        disco.genero],
               ['Sello',         disco.selloDiscografico],
               ['Condición',     disco.condicion],
-              ['Precio compra', disco.precioCompra ? `$${Number(disco.precioCompra).toLocaleString('es-AR')}` : null],
-              ['Precio venta',  disco.precioVenta  ? `$${Number(disco.precioVenta).toLocaleString('es-AR')}`  : null],
+              ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
+              ['Precio venta',  disco.precioVenta ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
+              ['Stock actual',  disco.cantidadCopias ?? 0],
               ['Código interno', disco.codigoInterno],
             ].map(([label, value]) => (
               <div key={label} className="bg-slate-50 dark:bg-stone-950 border border-slate-100 dark:border-stone-800 rounded-lg px-3 py-2">
                 <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-0.5">{label}</p>
-                <p className="text-sm font-medium text-slate-700 dark:text-stone-300">{value || '—'}</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-stone-300">{value ?? '—'}</p>
               </div>
             ))}
           </div>
@@ -160,10 +161,83 @@ function SlideOver({ disco, onCerrar, onEditar }) {
           >
             Editar disco
           </button>
-          {/* Espacio para acciones futuras */}
+          <button
+            onClick={() => { onDarBaja(disco); onCerrar() }}
+            className="btn-secondary w-full text-red-600 dark:text-red-400"
+          >
+            Dar de baja
+          </button>
         </div>
       </div>
     </>
+  )
+}
+
+function CatalogPreview({ disco, onEditar, onDarBaja }) {
+  if (!disco) {
+    return (
+      <aside className="card sticky top-24 min-h-[420px] p-6 hidden lg:flex flex-col items-center justify-center text-center">
+        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-stone-800 flex items-center justify-center mb-4">
+          <svg className="w-7 h-7 text-slate-300 dark:text-stone-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 0 1-1.632 2.163l-1.32.377a1.803 1.803 0 1 1-.99-3.467l2.31-.66a2.25 2.25 0 0 0 1.632-2.163zm0 0V2.25L9 5.25v10.303" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-slate-600 dark:text-stone-300">Vista rápida</p>
+        <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Pasá el cursor por un disco para ver sus datos</p>
+      </aside>
+    )
+  }
+
+  const fields = [
+    ['Código', disco.codigoInterno],
+    ['Compra', disco.costo != null ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
+    ['Venta', disco.precioVenta != null ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
+    ['Stock', disco.cantidadCopias ?? 0],
+    ['Condición', disco.condicion],
+    ['Formato', disco.tipoDisco],
+    ['Año', disco.anio],
+    ['Sello', disco.selloDiscografico],
+    ['Género', disco.genero],
+    ['País', disco.pais],
+  ]
+
+  return (
+    <aside className="card sticky top-24 hidden lg:block overflow-hidden">
+      {disco.imagenUrl ? (
+        <img src={disco.imagenUrl} alt={`${disco.artista} - ${disco.album}`}
+          className="w-full aspect-square object-cover bg-slate-100 dark:bg-stone-800" />
+      ) : (
+        <div className="w-full aspect-square bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-sm text-slate-400 dark:text-stone-600">
+          Sin portada
+        </div>
+      )}
+      <div className="p-5 space-y-4">
+        <div>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-slate-900 dark:text-white leading-tight">{disco.album || '—'}</h2>
+              <p className="text-sm text-slate-500 dark:text-stone-400 mt-1">{disco.artista || '—'}</p>
+            </div>
+            <EstadoBadge estado={disco.estado} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {fields.map(([label, value]) => (
+            <div key={label} className={label === 'Sello' || label === 'Género' ? 'col-span-2' : ''}>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+              <p className="text-sm font-medium text-slate-700 dark:text-stone-300 truncate" title={String(value ?? '—')}>{value ?? '—'}</p>
+            </div>
+          ))}
+        </div>
+        {(disco.notas || disco.descripcion) && (
+          <p className="text-xs text-slate-500 dark:text-stone-400 line-clamp-3">{disco.notas || disco.descripcion}</p>
+        )}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
+          <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400">Dar de baja</button>
+        </div>
+      </div>
+    </aside>
   )
 }
 
@@ -177,6 +251,7 @@ export default function DiscosCatalogo() {
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
   const [slideOverDisco, setSlideOverDisco] = useState(null)
+  const [hoveredDisco, setHoveredDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
   const debounceRef = useRef(null)
@@ -251,7 +326,7 @@ export default function DiscosCatalogo() {
   const hayFiltro = filtroEstado !== 'TODOS' || busqueda.trim() !== ''
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
@@ -261,15 +336,6 @@ export default function DiscosCatalogo() {
             {!loading && `${discosFiltrados.length} ${discosFiltrados.length === 1 ? 'disco' : 'discos'} mostrados`}
           </p>
         </div>
-        <button
-          onClick={() => setDiscoForm(false)}
-          className="btn-primary flex items-center gap-2 whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Agregar disco
-        </button>
       </div>
 
       {/* Barra de búsqueda (ancho completo) + filtros de estado */}
@@ -315,7 +381,11 @@ export default function DiscosCatalogo() {
         </div>
       )}
 
-      {/* Tabla principal */}
+      {/* Tabla principal + vista rápida estable en escritorio */}
+      <div
+        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start"
+        onMouseLeave={() => setHoveredDisco(null)}
+      >
       <div className="card overflow-hidden">
         {loading ? (
           <Spinner />
@@ -338,7 +408,13 @@ export default function DiscosCatalogo() {
                   {discosPagina.map(d => (
                     <tr
                       key={d.idDisco}
-                      onClick={() => setSlideOverDisco(d)}
+                      tabIndex={0}
+                      onMouseEnter={() => setHoveredDisco(d)}
+                      onFocus={() => setHoveredDisco(d)}
+                      onClick={() => {
+                        setHoveredDisco(d)
+                        if (window.matchMedia('(max-width: 1023px)').matches) setSlideOverDisco(d)
+                      }}
                       className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
                     >
                       <td className="px-5 py-4">
@@ -366,7 +442,7 @@ export default function DiscosCatalogo() {
                       </td>
                       <td className="px-5 py-4 font-semibold text-slate-900 dark:text-white tabular-nums">
                         {d.precioVenta
-                          ? `$${Number(d.precioVenta).toLocaleString('es-AR')}`
+                          ? `UYU $${Number(d.precioVenta).toLocaleString('es-UY')}`
                           : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
                       </td>
                       <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
@@ -450,12 +526,19 @@ export default function DiscosCatalogo() {
           </>
         )}
       </div>
+      <CatalogPreview
+        disco={hoveredDisco}
+        onEditar={setDiscoForm}
+        onDarBaja={setDiscoEliminar}
+      />
+      </div>
 
       {/* Slide-over de detalle al hacer clic en una fila */}
       <SlideOver
         disco={slideOverDisco}
         onCerrar={() => setSlideOverDisco(null)}
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
+        onDarBaja={d => { setDiscoEliminar(d); setSlideOverDisco(null) }}
       />
 
       {/* Formulario de edición / creación */}

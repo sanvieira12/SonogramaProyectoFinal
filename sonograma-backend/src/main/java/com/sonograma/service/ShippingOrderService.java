@@ -73,7 +73,10 @@ public class ShippingOrderService {
         return toDTO(shippingOrderRepository.save(order));
     }
 
-    public ShippingOrder crearDesdeImport(List<com.sonograma.entity.Disco> discos) {
+    public ShippingOrder crearDesdeImport(
+            List<com.sonograma.entity.Disco> discos,
+            List<com.sonograma.dto.InvoiceItem> invoiceItems,
+            BigDecimal invoiceTotal) {
         int anio = LocalDate.now().getYear();
         long count = shippingOrderRepository.countByAnio(anio) + 1;
         String numero = String.format("SO-%d-%03d", anio, count);
@@ -82,25 +85,39 @@ public class ShippingOrderService {
                 .numero(numero)
                 .proveedor("Vinyl Future")
                 .fechaOrden(LocalDate.now())
-                .estado(EstadoShippingOrder.PENDIENTE)
+                .estado(EstadoShippingOrder.RECIBIDO)
                 .fechaCreacion(LocalDateTime.now())
                 .items(new ArrayList<>())
                 .build();
 
         for (com.sonograma.entity.Disco disco : discos) {
+            com.sonograma.dto.InvoiceItem invoiceItem = invoiceItems.stream()
+                    .filter(item -> item.codigoCatalogo() != null
+                            && item.codigoCatalogo().equalsIgnoreCase(disco.getCodigoInterno()))
+                    .findFirst()
+                    .orElse(null);
+            BigDecimal precioUnitario = invoiceItem != null ? invoiceItem.precioUnitario() : null;
+            Integer cantidad = invoiceItem != null && invoiceItem.cantidad() != null
+                    ? invoiceItem.cantidad() : 1;
+            BigDecimal subtotal = invoiceItem != null ? invoiceItem.subtotal() : null;
             ShippingOrderItem item = ShippingOrderItem.builder()
                     .shippingOrder(order)
                     .disco(disco)
                     .artista(disco.getArtista())
                     .album(disco.getAlbum())
-                    .cantidad(1)
-                    .precioUnitario(BigDecimal.ZERO)
-                    .subtotal(BigDecimal.ZERO)
+                    .cantidad(cantidad)
+                    .precioUnitario(precioUnitario)
+                    .subtotal(subtotal)
                     .build();
             order.getItems().add(item);
         }
 
-        order.setCostoTotal(BigDecimal.ZERO);
+        BigDecimal itemsTotal = order.getItems().stream()
+                .map(ShippingOrderItem::getSubtotal)
+                .filter(java.util.Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        order.setSubtotal(itemsTotal);
+        order.setCostoTotal(invoiceTotal != null ? invoiceTotal : itemsTotal);
         return shippingOrderRepository.save(order);
     }
 
