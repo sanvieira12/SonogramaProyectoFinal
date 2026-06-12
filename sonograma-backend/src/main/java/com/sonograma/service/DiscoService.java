@@ -23,46 +23,47 @@ import java.util.stream.Collectors;
 public class DiscoService {
 
     private final DiscoRepository discoRepository;
+    private final AudioPreviewService audioPreviewService;
 
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
-        return DiscoMapper.toDTO(discoRepository.save(disco));
+        return toDTO(discoRepository.save(disco));
     }
 
     @Transactional(readOnly = true)
     public DiscoResponseDTO obtenerPorId(Long id) {
         return discoRepository.findById(id)
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
     }
 
     @Transactional(readOnly = true)
     public DiscoResponseDTO obtenerPorQR(String codigoQr) {
         return discoRepository.findByCodigoQr(codigoQr)
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco no encontrado con QR: " + codigoQr));
     }
 
     @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerTodos() {
         return discoRepository.findAll().stream()
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerDisponibles() {
         return discoRepository.findByEstadoOrderByFechaIngresoDesc(EstadoDisco.DISPONIBLE).stream()
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerPorEstado(EstadoDisco estado) {
         return discoRepository.findByEstado(estado).stream()
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
@@ -82,7 +83,7 @@ public class DiscoService {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         DiscoMapper.updateFromRequest(disco, request);
-        return DiscoMapper.toDTO(discoRepository.save(disco));
+        return toDTO(discoRepository.save(disco));
     }
 
     public DiscoResponseDTO cambiarEstado(Long id, EstadoDisco nuevoEstado) {
@@ -95,7 +96,7 @@ public class DiscoService {
         if (nuevoEstado == EstadoDisco.SIN_STOCK || nuevoEstado == EstadoDisco.VENDIDO) {
             disco.setCantidadCopias(0);
         }
-        return DiscoMapper.toDTO(discoRepository.save(disco));
+        return toDTO(discoRepository.save(disco));
     }
 
     public DiscoResponseDTO actualizarCopias(Long id, Integer cantidad) {
@@ -111,7 +112,7 @@ public class DiscoService {
         if (cantidad > 0 && disco.getEstado() == EstadoDisco.SIN_STOCK) {
             disco.setEstado(EstadoDisco.DISPONIBLE);
         }
-        return DiscoMapper.toDTO(discoRepository.save(disco));
+        return toDTO(discoRepository.save(disco));
     }
 
     public void eliminarDisco(Long id) {
@@ -135,6 +136,12 @@ public class DiscoService {
                 || contiene(disco.getCondicion() != null ? disco.getCondicion().name() : null, query)
                 || contiene(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null, query)
                 || contiene(disco.getAnio() != null ? String.valueOf(disco.getAnio()) : null, query);
+    }
+
+    private DiscoResponseDTO toDTO(Disco disco) {
+        DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
+        dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
+        return dto;
     }
 
     private boolean contiene(String valor, String query) {

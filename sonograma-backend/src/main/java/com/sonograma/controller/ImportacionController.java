@@ -2,7 +2,9 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.DiscoImportPreviewDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.service.importacion.DiscogsImportService;
+import com.sonograma.service.importacion.DiscogsImportJobService;
 import com.sonograma.service.importacion.VinylFutureImportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +24,7 @@ public class ImportacionController {
 
     private final VinylFutureImportService vinylFutureImportService;
     private final DiscogsImportService discogsImportService;
+    private final DiscogsImportJobService discogsImportJobService;
 
     // ── VinylFuture Excel ─────────────────────────────────────────────────────
 
@@ -67,19 +70,27 @@ public class ImportacionController {
 
     // ── Discogs — Excel con links ─────────────────────────────────────────────
 
-    @PostMapping("/discogs/desde-excel")
-    public ResponseEntity<List<DiscoImportPreviewDTO>> discogsDesdeExcel(
+    @PostMapping({"/discogs/jobs", "/discogs/desde-excel"})
+    public ResponseEntity<DiscogsImportJobDTO> discogsDesdeExcel(
             @RequestParam("file") MultipartFile file) {
-        if (file.isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-        try {
-            List<DiscoImportPreviewDTO> resultados = discogsImportService.fetchDesdeExcel(file);
-            return ResponseEntity.ok(resultados);
-        } catch (IOException e) {
-            log.warn("Error parseando Excel Discogs: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        }
+        return ResponseEntity.ok(discogsImportJobService.createJob(file));
+    }
+
+    @GetMapping("/discogs/jobs/{jobId}")
+    public ResponseEntity<DiscogsImportJobDTO> discogsJob(@PathVariable Long jobId) {
+        return ResponseEntity.ok(discogsImportJobService.getJob(jobId));
+    }
+
+    @PostMapping("/discogs/jobs/{jobId}/rows/{rowId}/retry")
+    public ResponseEntity<DiscogsImportJobDTO> discogsRetryRow(
+            @PathVariable Long jobId,
+            @PathVariable Long rowId) {
+        return ResponseEntity.ok(discogsImportJobService.retryRow(jobId, rowId));
+    }
+
+    @PostMapping("/discogs/jobs/{jobId}/importar")
+    public ResponseEntity<DiscogsImportJobDTO> discogsImportar(@PathVariable Long jobId) {
+        return ResponseEntity.ok(discogsImportJobService.importParsedRows(jobId));
     }
 
     @PostMapping("/discogs/guardar-lote")

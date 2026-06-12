@@ -1,8 +1,11 @@
 package com.sonograma.controller;
 
+import com.sonograma.dto.AudioPreviewDTO;
+import com.sonograma.dto.AudioPreviewRequestDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +21,7 @@ import java.util.List;
 public class DiscoController {
 
     private final DiscoService discoService;
+    private final AudioPreviewService audioPreviewService;
 
     @GetMapping
     public ResponseEntity<List<DiscoResponseDTO>> obtenerTodos() {
@@ -71,6 +75,36 @@ public class DiscoController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> eliminarDisco(@PathVariable Long id) {
         discoService.eliminarDisco(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ── Audio previews ────────────────────────────────────────────────────────
+
+    @GetMapping("/{id}/previews")
+    public ResponseEntity<List<AudioPreviewDTO>> listarPreviews(@PathVariable Long id) {
+        return ResponseEntity.ok(audioPreviewService.listarPorDisco(id));
+    }
+
+    @PostMapping("/{id}/previews")
+    public ResponseEntity<AudioPreviewDTO> agregarPreview(
+            @PathVariable Long id,
+            @RequestBody AudioPreviewRequestDTO req) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(audioPreviewService.agregar(id, req));
+    }
+
+    @PatchMapping("/{id}/previews/{previewId}/url")
+    public ResponseEntity<AudioPreviewDTO> actualizarUrlPreview(
+            @PathVariable Long id,
+            @PathVariable Long previewId,
+            @RequestBody java.util.Map<String, String> body) {
+        return ResponseEntity.ok(audioPreviewService.actualizarUrl(previewId, body.get("audioUrl")));
+    }
+
+    @DeleteMapping("/{id}/previews/{previewId}")
+    public ResponseEntity<Void> eliminarPreview(
+            @PathVariable Long id,
+            @PathVariable Long previewId) {
+        audioPreviewService.eliminar(previewId);
         return ResponseEntity.noContent().build();
     }
 }

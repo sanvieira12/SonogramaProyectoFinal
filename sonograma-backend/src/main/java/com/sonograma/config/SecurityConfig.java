@@ -43,7 +43,14 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
-                .requestMatchers("/auth/**", "/health", "/actuator/**", "/qr/descargar/**", "/error").permitAll()
+                .requestMatchers(
+                    "/auth/**",
+                    "/health",
+                    "/actuator/**",
+                    "/qr/descargar/**",
+                    "/importaciones/discogs/covers/**",
+                    "/error"
+                ).permitAll()
                 .anyRequest().authenticated()
             )
             .authenticationProvider(authenticationProvider())

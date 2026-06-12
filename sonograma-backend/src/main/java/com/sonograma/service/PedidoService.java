@@ -1,0 +1,447 @@
+package com.sonograma.service;
+
+import com.sonograma.dto.*;
+import com.sonograma.entity.Disco;
+import com.sonograma.entity.Pedido;
+import com.sonograma.entity.PedidoItem;
+import com.sonograma.enums.*;
+import com.sonograma.exception.RecursoNoEncontradoException;
+import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.PedidoItemRepository;
+import com.sonograma.repository.PedidoRepository;
+import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.*;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+@Transactional
+public class PedidoService {
+
+    private final PedidoRepository pedidoRepository;
+    private final PedidoItemRepository pedidoItemRepository;
+    private final PdfInvoiceParser pdfParser;
+    private final PedidoEnrichmentService enrichmentService;
+    private final DiscoRepository discoRepository;
+    private final AudioPreviewService audioPreviewService;
+    private final CatalogPricingService catalogPricingService;
+
+    private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
+
+    // ── Upload ────────────────────────────────────────────────────────────────
+
+    public PedidoUploadResponseDTO crearDesdePdf(MultipartFile file) {
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (Exception e) {
+            throw new RuntimeException("No se pudo leer el PDF: " + e.getMessage());
+        }
+
+        ParsedInvoice invoice;
+        try {
+            invoice = pdfParser.parseInvoice(bytes);
+        } catch (Exception e) {
+            throw new RuntimeException("Error al parsear el PDF: " + e.getMessage());
+        }
+
+        Pedido pedido = Pedido.builder()
+            .numeroFactura(invoice.numeroFactura())
+            .fechaFactura(invoice.fechaFactura())
+            .proveedor(invoice.proveedor() != null ? invoice.proveedor() : "Vinyl Future")
+            .envio(invoice.envio())
+            .pago(invoice.pago())
+            .unidadPeso(invoice.unidadPeso())
+            .moneda(invoice.moneda() != null ? invoice.moneda() : "EUR")
+            .pesoTotalKg(invoice.pesoTotalKg())
+            .terminosVenta(invoice.terminosVenta())
+            .codigoArancel(invoice.codigoArancel())
+            .eoriNo(invoice.eoriNo())
+            .nombreArchivo(file.getOriginalFilename())
+            .textoExtraido(invoice.rawExtractText())
+            .franqueo(invoice.franqueo())
+            .tarifas(invoice.tarifas())
+            .neto(invoice.neto())
+            .iva(invoice.iva())
+            .total(invoice.total())
+            .cantidadTotalPdf(invoice.cantidadTotalPdf())
+            .importStatus(ImportStatus.PARSED)
+            .build();
+
+        pedido = pedidoRepository.save(pedido);
+
+        List<PedidoItem> items = new ArrayList<>();
+        for (InvoiceItem inv : invoice.items()) {
+            PedidoItem item = PedidoItem.builder()
+                .pedido(pedido)
+                .codigo(inv.codigoCatalogo())
+                .artista(inv.artista())
+                .titulo(inv.album())
+                .formato(inv.formato())
+                .precioUnitarioEur(inv.precioUnitario())
+                .cantidad(inv.cantidad())
+                .totalLineaEur(calcLineTotal(inv))
+                .enrichStatus(EnrichStatus.PENDING)
+                .build();
+            calcularItem(item);
+            items.add(item);
+        }
+        pedidoItemRepository.saveAll(items);
+
+        int sumCantidad = items.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
+        boolean advertencia = invoice.cantidadTotalPdf() != null && invoice.cantidadTotalPdf() != sumCantidad;
+
+        log.info("Pedido {} creado: {} ítems, total={}", pedido.getIdPedido(), items.size(), invoice.total());
+        return new PedidoUploadResponseDTO(
+            pedido.getIdPedido(),
+            pedido.getNumeroFactura(),
+            items.size(),
+            invoice.cantidadTotalPdf(),
+            advertencia
+        );
+    }
+
+    private BigDecimal calcLineTotal(InvoiceItem inv) {
+        if (inv.subtotal() != null) return inv.subtotal();
+        if (inv.precioUnitario() != null && inv.cantidad() != null) {
+            return inv.precioUnitario().multiply(BigDecimal.valueOf(inv.cantidad()));
+        }
+        return null;
+    }
+
+    // ── Read ──────────────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<PedidoResponseDTO> listar() {
+        return pedidoRepository.findAllOrderedByCreatedAt().stream()
+            .map(p -> toDTO(p, false))
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PedidoResponseDTO obtenerPorId(Long id) {
+        Pedido pedido = pedidoRepository.findById(id)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+        return toDTO(pedido, true);
+    }
+
+    // ── Settings + Recalc ─────────────────────────────────────────────────────
+
+    public PedidoResponseDTO actualizarConfiguracion(Long id, PedidoConfiguracionDTO cfg) {
+        Pedido pedido = pedidoRepository.findById(id)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+
+        pedido.setTipoCambio(CatalogPricingService.TIPO_CAMBIO);
+        pedido.setExtraCostoSimple(CatalogPricingService.EXTRA_SIMPLE);
+        pedido.setExtraCostoDoble(CatalogPricingService.EXTRA_DOBLE);
+        pedido.setMarkupSimple(CatalogPricingService.MARKUP_SIMPLE);
+        pedido.setMarkupDoble(CatalogPricingService.MARKUP_DOBLE);
+
+        pedidoRepository.save(pedido);
+        recalcularItems(pedido);
+        return toDTO(pedido, true);
+    }
+
+    private void recalcularItems(Pedido pedido) {
+        for (PedidoItem item : pedido.getItems()) {
+            calcularItem(item);
+            pedidoItemRepository.save(item);
+        }
+    }
+
+    private void calcularItem(PedidoItem item) {
+        CatalogPricingService.PricingResult result =
+            catalogPricingService.calcular(item.getPrecioUnitarioEur(), item.getFormato());
+        if (result == null) return;
+        item.setExtraCostoEur(result.extraCostEur());
+        item.setCostoRealEur(result.realCostEur());
+        item.setCostoRealUyu(result.realCostUyu());
+        item.setMarkup(result.markup());
+        item.setPrecioFinalUyu(result.salePriceUyu());
+    }
+
+    private boolean esDoble(String formato) {
+        return catalogPricingService.esDoble(formato);
+    }
+
+    // ── Enrichment ────────────────────────────────────────────────────────────
+
+    public void lanzarEnriquecimiento(Long pedidoId) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", pedidoId));
+
+        pedido.setImportStatus(ImportStatus.ENRICHING);
+        pedidoRepository.save(pedido);
+
+        List<Long> itemIds = pedidoItemRepository
+            .findByPedidoIdPedidoAndEnrichStatusIn(
+                pedidoId,
+                List.of(EnrichStatus.PENDING, EnrichStatus.FAILED))
+            .stream()
+            .map(PedidoItem::getIdPedidoItem)
+            .toList();
+
+        if (itemIds.isEmpty()) {
+            pedido.setImportStatus(ImportStatus.AWAITING_REVIEW);
+            pedidoRepository.save(pedido);
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            Semaphore sem = new Semaphore(3);
+            List<CompletableFuture<Void>> futures = itemIds.stream()
+                .map(itemId -> CompletableFuture.runAsync(() -> {
+                    try {
+                        sem.acquire();
+                        enrichmentService.procesarItem(itemId);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        sem.release();
+                    }
+                }, enrichPool))
+                .toList();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            enrichmentService.marcarPedidoPostEnriquecimiento(pedidoId, pedidoRepository);
+            log.info("Enriquecimiento completado para pedido {}", pedidoId);
+        }, enrichPool);
+
+        log.info("Enriquecimiento lanzado en background para pedido {} ({} ítems)", pedidoId, itemIds.size());
+    }
+
+    public void reintentarItemEnriquecimiento(Long itemId) {
+        PedidoItem item = pedidoItemRepository.findById(itemId)
+            .orElseThrow(() -> new RecursoNoEncontradoException("PedidoItem", itemId));
+        item.setEnrichStatus(EnrichStatus.PENDING);
+        pedidoItemRepository.save(item);
+        CompletableFuture.runAsync(() -> enrichmentService.procesarItem(itemId), enrichPool);
+    }
+
+    // ── Import to catalog ─────────────────────────────────────────────────────
+
+    public PedidoResponseDTO importarAlCatalogo(Long pedidoId) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", pedidoId));
+
+        pedido.setImportStatus(ImportStatus.IMPORTING_TO_CATALOG);
+        pedidoRepository.save(pedido);
+
+        int ok = 0, failed = 0;
+        for (PedidoItem item : pedido.getItems()) {
+            try {
+                Disco disco = upsertDisco(item, pedido);
+                item.setDisco(disco);
+                item.setEnrichStatus(EnrichStatus.IMPORTED);
+                pedidoItemRepository.save(item);
+                // Persist scraped audio previews linked to the catalog product
+                try {
+                    var tracks = enrichmentService.deserializarTracks(item.getTracksJson());
+                    audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), tracks);
+                } catch (Exception ex) {
+                    log.warn("No se pudieron guardar previews para item {}: {}", item.getIdPedidoItem(), ex.getMessage());
+                }
+                ok++;
+            } catch (Exception e) {
+                log.warn("Error importando item {} al catálogo: {}", item.getIdPedidoItem(), e.getMessage());
+                failed++;
+            }
+        }
+
+        pedido.setImportStatus(failed == 0 ? ImportStatus.COMPLETED : ImportStatus.PARTIALLY_COMPLETED);
+        pedidoRepository.save(pedido);
+        log.info("Pedido {}: {} importados, {} fallidos", pedidoId, ok, failed);
+        return toDTO(pedido, true);
+    }
+
+    private Disco upsertDisco(PedidoItem item, Pedido pedido) {
+        if (item.getPrecioFinalUyu() == null || item.getPrecioFinalUyu().compareTo(BigDecimal.ZERO) <= 0) {
+            calcularItem(item);
+            pedidoItemRepository.save(item);
+        }
+
+        VinylPageData scraped = enrichmentService.deserializarPageData(item.getPageDataJson()).orElse(null);
+        Disco disco = item.getCodigo() != null && !item.getCodigo().isBlank()
+            ? discoRepository.findByCodigoInterno(item.getCodigo()).orElse(null)
+            : null;
+
+        if (disco == null) {
+            disco = new Disco();
+            disco.setCodigoQr(UUID.randomUUID().toString());
+        }
+
+        setIfPresent(disco::setCodigoInterno, firstNonBlank(item.getCodigo(), scraped != null ? scraped.code() : null));
+        setIfPresent(disco::setArtista, firstNonBlank(item.getArtista(), scraped != null ? scraped.artist() : null));
+        setIfPresent(disco::setAlbum, firstNonBlank(item.getTitulo(), scraped != null ? scraped.title() : null));
+        if (isBlank(disco.getArtista())) disco.setArtista("Desconocido");
+        if (isBlank(disco.getAlbum())) disco.setAlbum("Sin título");
+        disco.setEstado(EstadoDisco.DISPONIBLE);
+        disco.setProcedencia("IMPORTADO");
+        disco.setTipoDisco(mapTipo(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null),
+            disco.getTipoDisco()));
+        disco.setCondicion(mapCondicion(scraped != null ? scraped.condition() : null, disco.getCondicion()));
+        disco.setCantidadCopias(item.getCantidad() != null ? item.getCantidad() : 1);
+        BigDecimal purchasePrice = item.getCostoRealEur() != null
+            ? item.getCostoRealEur()
+            : firstNonNull(item.getPrecioUnitarioEur(), scraped != null ? scraped.purchasePrice() : null);
+        if (purchasePrice != null) disco.setCosto(purchasePrice);
+        if (item.getPrecioFinalUyu() != null) disco.setPrecioVenta(item.getPrecioFinalUyu());
+        setIfPresent(disco::setImagenUrl, firstNonBlank(item.getPortadaUrl(),
+            scraped != null ? scraped.frontImageUrl() : null));
+
+        if (scraped != null) {
+            setIfMissing(disco.getSelloDiscografico(), disco::setSelloDiscografico, scraped.label());
+            setIfMissing(disco.getGenero(), disco::setGenero, scraped.genre());
+            setIfMissing(disco.getPais(), disco::setPais, scraped.country());
+            setIfMissing(disco.getDescripcion(), disco::setDescripcion, scraped.description());
+            if (disco.getAnio() == null && scraped.year() != null) disco.setAnio(scraped.year());
+            if (scraped.tracks() != null && !scraped.tracks().isEmpty()) {
+                if (isBlank(disco.getTracklist())) {
+                    disco.setTracklist(scraped.tracks().stream()
+                        .map(t -> String.join(" ", nonBlank(t.label(), t.name())))
+                        .filter(s -> !s.isBlank())
+                        .reduce((a, b) -> a + "\n" + b)
+                        .orElse(null));
+                }
+            }
+        }
+
+        return discoRepository.save(disco);
+    }
+
+    private TipoDisco mapTipo(String value, TipoDisco existing) {
+        if (existing != null) return existing;
+        if (isBlank(value)) return existing != null ? existing : TipoDisco.VINILO;
+        String normalized = value.toUpperCase();
+        if (normalized.contains("CD")) return TipoDisco.CD;
+        if (normalized.contains("CASSETTE")) return TipoDisco.CASSETTE;
+        if (normalized.contains("DIGITAL")) return TipoDisco.DIGITAL;
+        return TipoDisco.VINILO;
+    }
+
+    private CondicionDisco mapCondicion(String value, CondicionDisco existing) {
+        if (existing != null) return existing;
+        if (isBlank(value)) return existing != null ? existing : CondicionDisco.NUEVO;
+        String normalized = value.toUpperCase();
+        if (normalized.contains("USED") || normalized.contains("USADO") || normalized.startsWith("VG")) {
+            return CondicionDisco.USADO;
+        }
+        return CondicionDisco.NUEVO;
+    }
+
+    private void setIfPresent(java.util.function.Consumer<String> setter, String value) {
+        if (!isBlank(value)) setter.accept(value.strip());
+    }
+
+    private void setIfMissing(String current, java.util.function.Consumer<String> setter, String fallback) {
+        if (isBlank(current)) setIfPresent(setter, fallback);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) return value;
+        }
+        return null;
+    }
+
+    private BigDecimal firstNonNull(BigDecimal... values) {
+        for (BigDecimal value : values) {
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String[] nonBlank(String... values) {
+        return java.util.Arrays.stream(values).filter(v -> !isBlank(v)).toArray(String[]::new);
+    }
+
+    // ── Mapping ───────────────────────────────────────────────────────────────
+
+    private PedidoResponseDTO toDTO(Pedido p, boolean includeItems) {
+        List<PedidoItem> items = includeItems ? p.getItems() : List.of();
+        List<PedidoItemResponseDTO> itemDTOs = items.stream().map(this::toItemDTO).toList();
+
+        BigDecimal merchandiseTotal = items.stream()
+            .filter(i -> i.getTotalLineaEur() != null)
+            .map(PedidoItem::getTotalLineaEur)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        int sumCantidad = items.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
+        boolean advertencia = p.getCantidadTotalPdf() != null && p.getCantidadTotalPdf() != sumCantidad;
+
+        return new PedidoResponseDTO(
+            p.getIdPedido(),
+            p.getNumeroFactura(),
+            p.getFechaFactura(),
+            p.getProveedor(),
+            p.getEnvio(),
+            p.getPago(),
+            p.getUnidadPeso(),
+            p.getMoneda(),
+            p.getPesoTotalKg(),
+            p.getTerminosVenta(),
+            p.getCodigoArancel(),
+            p.getEoriNo(),
+            p.getNombreArchivo(),
+            includeItems ? p.getTextoExtraido() : null,
+            p.getFranqueo(),
+            p.getTarifas(),
+            p.getNeto(),
+            p.getIva(),
+            p.getTotal(),
+            p.getCantidadTotalPdf(),
+            p.getImportStatus().name(),
+            CatalogPricingService.TIPO_CAMBIO,
+            CatalogPricingService.EXTRA_SIMPLE,
+            CatalogPricingService.EXTRA_DOBLE,
+            CatalogPricingService.MARKUP_SIMPLE,
+            CatalogPricingService.MARKUP_DOBLE,
+            p.getCreatedAt(),
+            itemDTOs,
+            merchandiseTotal,
+            items.size(),
+            sumCantidad,
+            advertencia
+        );
+    }
+
+    private PedidoItemResponseDTO toItemDTO(PedidoItem i) {
+        return new PedidoItemResponseDTO(
+            i.getIdPedidoItem(),
+            i.getCodigo(),
+            i.getArtista(),
+            i.getTitulo(),
+            i.getFormato(),
+            i.getPrecioUnitarioEur(),
+            i.getCantidad(),
+            i.getTotalLineaEur(),
+            esDoble(i.getFormato()) ? "Double" : "Single",
+            i.getExtraCostoEur(),
+            i.getCostoRealEur(),
+            i.getCostoRealUyu(),
+            i.getMarkup(),
+            i.getPrecioFinalUyu(),
+            i.getPortadaUrl(),
+            i.getDisco() != null ? i.getDisco().getIdDisco() : null,
+            i.getEnrichStatus() != null ? i.getEnrichStatus().name() : null
+        );
+    }
+
+    @PreDestroy
+    void shutdown() {
+        enrichPool.shutdown();
+    }
+}

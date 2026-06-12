@@ -3,6 +3,7 @@ package com.sonograma.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -38,8 +39,14 @@ public class Cliente {
     @Column(name = "direccion")
     private String direccion;
 
+    @Column(name = "localidad", length = 150)
+    private String localidad;
+
     @Column(name = "observaciones")
     private String observaciones;
+
+    @Column(name = "ultima_compra")
+    private LocalDate ultimaCompra;
 
     @Column(name = "fecha_alta")
     private LocalDateTime fechaAlta = LocalDateTime.now();

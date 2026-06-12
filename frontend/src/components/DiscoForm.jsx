@@ -1,4 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { api } from '../api/sonograma'
+import CompactPlayer, { stopAllPreviews } from './CompactPlayer'
 
 const CONDICIONES = ['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO']
 const TIPOS = ['VINILO', 'CD', 'DIGITAL', 'CASSETTE', 'OTRO']
@@ -71,6 +73,119 @@ function CoverUpload({ value, onChange }) {
       {value && (
         <img src={value} alt="Portada" className="h-16 w-16 object-cover rounded-lg border border-slate-200 dark:border-stone-700" />
       )}
+    </div>
+  )
+}
+
+function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
+  const [previews, setPreviews] = useState(initialPreviews)
+  const [newUrl, setNewUrl] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newPos, setNewPos] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api.discos.previews.listar(discoId)
+      .then(d => { if (!cancelled) setPreviews(d) })
+      .catch(ex => { if (!cancelled) setErr(ex.message) })
+    return () => {
+      cancelled = true
+      stopAllPreviews()
+    }
+  }, [discoId])
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    if (!newUrl.trim()) return
+    setAdding(true)
+    setErr('')
+    try {
+      const added = await api.discos.previews.agregar(discoId, {
+        audioUrl: newUrl.trim(),
+        trackName: newName.trim() || null,
+        trackPosition: newPos.trim() || null,
+        durationSeconds: null,
+      })
+      setPreviews(p => [...p, added])
+      setNewUrl(''); setNewName(''); setNewPos('')
+    } catch (ex) {
+      setErr(ex.message)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  async function handleDelete(previewId) {
+    stopAllPreviews()
+    try {
+      await api.discos.previews.eliminar(discoId, previewId)
+      setPreviews(p => p.filter(x => x.id !== previewId))
+    } catch (ex) {
+      setErr(ex.message)
+    }
+  }
+
+  return (
+    <div className="border-t border-slate-100 dark:border-stone-800 pt-4 space-y-3">
+      <p className="text-xs font-semibold text-slate-600 dark:text-stone-400 uppercase tracking-wide">Audio previews</p>
+
+      {previews.length === 0 && (
+        <p className="text-xs text-slate-400 dark:text-stone-600">Sin previews de audio.</p>
+      )}
+
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+        {previews.map(p => (
+          <div key={p.id} className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <CompactPlayer audioUrl={p.audioUrl} trackName={p.trackName} trackPosition={p.trackPosition} />
+            </div>
+            <button
+              type="button"
+              onClick={() => handleDelete(p.id)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0"
+              title="Eliminar preview"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleAdd} className="space-y-2">
+        <input
+          type="url"
+          className="input text-xs"
+          value={newUrl}
+          onChange={e => setNewUrl(e.target.value)}
+          placeholder="https://... URL del MP3"
+        />
+        <div className="flex gap-2">
+          <input
+            className="input text-xs flex-1"
+            value={newPos}
+            onChange={e => setNewPos(e.target.value)}
+            placeholder="Posición (ej. A1)"
+          />
+          <input
+            className="input text-xs flex-1"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            placeholder="Nombre del track"
+          />
+          <button
+            type="submit"
+            disabled={adding || !newUrl.trim()}
+            className="px-3 py-2 rounded-lg text-xs bg-[#7E9FA8]/20 hover:bg-[#7E9FA8]/30 text-[#7E9FA8] border border-[#7E9FA8]/30 transition-colors disabled:opacity-40 whitespace-nowrap"
+          >
+            {adding ? '...' : 'Agregar'}
+          </button>
+        </div>
+        {err && <p className="text-xs text-red-400">{err}</p>}
+      </form>
     </div>
   )
 }
@@ -232,6 +347,10 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Portada</label>
             <CoverUpload value={form.imagenUrl} onChange={v => set('imagenUrl', v)} />
           </div>
+
+          {esEdicion && disco.idDisco && (
+            <AudioPreviewsSection discoId={disco.idDisco} initialPreviews={disco.audioPreviews || []} />
+          )}
 
           {error && (
             <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-sm rounded-lg px-4 py-3">

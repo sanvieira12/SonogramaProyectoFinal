@@ -18,6 +18,8 @@ public interface ClienteRepository extends JpaRepository<Cliente, Long> {
 
     boolean existsByCedulaAndIdClienteNot(String cedula, Long idCliente);
 
+    Optional<Cliente> findByTelefonoIgnoreCase(String telefono);
+
     @Query("SELECT c FROM Cliente c WHERE c.activo = true AND " +
            "(LOWER(c.nombre) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(c.apellido) LIKE LOWER(CONCAT('%', :q, '%')))")

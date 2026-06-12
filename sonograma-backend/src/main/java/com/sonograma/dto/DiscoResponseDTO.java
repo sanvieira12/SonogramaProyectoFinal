@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -36,6 +37,7 @@ public class DiscoResponseDTO {
     private String previewUrl;
     private String discogsUrl;
     private Integer cantidadCopias;
+    private List<AudioPreviewDTO> audioPreviews;
     private LocalDateTime fechaIngreso;
     private LocalDateTime fechaActualizacion;
 }

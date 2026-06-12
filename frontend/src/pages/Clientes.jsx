@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/sonograma'
+import ClienteImportResult from '../components/ClienteImportResult'
 import Paginacion from '../components/Paginacion'
 
 const DEPARTAMENTOS_UY = [
@@ -284,9 +285,10 @@ export default function Clientes() {
               try {
                 const r = await api.clientes.importarExcel(file)
                 setImportResult(r)
-                if (r.creados > 0) {
+                if (r.creados > 0 || r.actualizados > 0) {
                   const cs = await api.clientes.todos()
                   setClientes(cs)
+                  setPagina(1)
                 }
               } catch (err) { setImportResult({ error: err.message }) }
               finally { setImporting(false); e.target.value = '' }
@@ -307,21 +309,7 @@ export default function Clientes() {
         </div>
       </div>
 
-      {importResult && !importResult.error && (
-        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm flex items-center justify-between gap-4">
-          <span className="text-emerald-700 dark:text-emerald-400">
-            ✓ {importResult.creados} creados · {importResult.omitidos} omitidos
-            {importResult.errores?.length > 0 && ` · ${importResult.errores.length} errores`}
-          </span>
-          <button onClick={() => setImportResult(null)} className="text-emerald-600 text-xs hover:underline">Cerrar</button>
-        </div>
-      )}
-      {importResult?.error && (
-        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400 flex items-center justify-between gap-4">
-          <span>Error: {importResult.error}</span>
-          <button onClick={() => setImportResult(null)} className="text-xs hover:underline">Cerrar</button>
-        </div>
-      )}
+      <ClienteImportResult result={importResult} onClose={() => setImportResult(null)} />
 
       {modalNuevo && (
         <NuevoClienteModal
@@ -371,9 +359,10 @@ export default function Clientes() {
                   {clientes.slice((pagina - 1) * porPagina, pagina * porPagina).map(c => {
                     const vs = ventasPorCliente[c.idCliente] || []
                     const totalGastado = vs.reduce((sum, v) => sum + Number(v.total || 0), 0)
-                    const ultimaCompra = vs.length > 0
+                    const ultimaVenta = vs.length > 0
                       ? vs.reduce((latest, v) => v.fechaVenta > latest ? v.fechaVenta : latest, vs[0].fechaVenta)
                       : null
+                    const ultimaCompra = [ultimaVenta, c.ultimaCompra].filter(Boolean).sort().at(-1) || null
                     return (
                       <tr
                         key={c.idCliente}

@@ -1,6 +1,7 @@
 package com.sonograma.dto;
 
 import lombok.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -16,6 +17,8 @@ public class ClienteDTO {
     private String cedula;
     private String instagramUsuario;
     private String direccion;
+    private String localidad;
     private String observaciones;
+    private LocalDate ultimaCompra;
     private LocalDateTime fechaAlta;
 }

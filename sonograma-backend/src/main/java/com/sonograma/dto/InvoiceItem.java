@@ -6,6 +6,7 @@ public record InvoiceItem(
     String codigoCatalogo,
     String artista,
     String album,
+    String formato,
     BigDecimal precioUnitario,
     Integer cantidad,
     BigDecimal subtotal
