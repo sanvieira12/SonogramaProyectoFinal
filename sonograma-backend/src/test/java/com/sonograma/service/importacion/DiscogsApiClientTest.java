@@ -81,7 +81,7 @@ class DiscogsApiClientTest {
                 HttpClient.newHttpClient(),
                 2
         );
-        client.configureForTest("http://localhost:" + server.getAddress().getPort(), "", 0);
+        client.configureForTest("http://localhost:" + server.getAddress().getPort(), "", 0L, 2);
         return client;
     }
 
