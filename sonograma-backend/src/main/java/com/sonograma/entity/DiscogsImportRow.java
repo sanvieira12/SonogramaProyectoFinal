@@ -63,6 +63,9 @@ public class DiscogsImportRow {
     @Column(name = "label")
     private String label;
 
+    @Column(name = "catalog_number")
+    private String catalogNumber;
+
     @Column(name = "country")
     private String country;
 

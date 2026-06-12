@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS discogs_import_row (
     release_year              INTEGER,
     genre                     VARCHAR(255),
     label                     VARCHAR(255),
+    catalog_number            VARCHAR(255),
     country                   VARCHAR(255),
     style                     VARCHAR(255),
     format                    VARCHAR(255),

@@ -285,6 +285,15 @@ export const api = {
     discogsImportarJob: (jobId) =>
       request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),
 
+    discogsCoversZip: async (jobId) => {
+      const res = await fetch(`${BASE}/importaciones/discogs/jobs/${jobId}/covers.zip`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) throw new Error('No se pudo generar el ZIP de portadas Discogs')
+      return res.blob()
+    },
+
     discogsGuardarLote: (previews) =>
       request('POST', '/importaciones/discogs/guardar-lote', previews),
   },

@@ -12,6 +12,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -250,7 +252,15 @@ public class DiscogsApiClient {
             try {
                 return Math.max(1_000, Long.parseLong(retryAfter.get()) * 1_000);
             } catch (NumberFormatException ignored) {
-                // Use exponential fallback in the worker.
+                try {
+                    long millis = Duration.between(
+                            ZonedDateTime.now(),
+                            ZonedDateTime.parse(retryAfter.get(), DateTimeFormatter.RFC_1123_DATE_TIME)
+                    ).toMillis();
+                    return Math.max(1_000, millis);
+                } catch (Exception invalidDate) {
+                    // Use exponential fallback.
+                }
             }
         }
         Optional<String> remaining = response.headers().firstValue("X-Discogs-Ratelimit-Remaining");
@@ -328,13 +338,28 @@ public class DiscogsApiClient {
 
     private String image(JsonNode json) {
         JsonNode images = json.path("images");
-        if (!images.isArray()) return null;
-        for (JsonNode image : images) {
-            if ("primary".equals(image.path("type").asText())) {
-                return image.path("uri").asText(null);
+        if (images.isArray()) {
+            for (JsonNode image : images) {
+                if ("primary".equalsIgnoreCase(image.path("type").asText())) {
+                    return firstNonBlank(
+                            image.path("uri").asText(null),
+                            image.path("resource_url").asText(null)
+                    );
+                }
+            }
+            if (!images.isEmpty()) {
+                String first = firstNonBlank(
+                        images.get(0).path("uri").asText(null),
+                        images.get(0).path("resource_url").asText(null)
+                );
+                if (first != null) return first;
             }
         }
-        return images.isEmpty() ? null : images.get(0).path("uri").asText(null);
+        return firstNonBlank(text(json, "cover_image"), text(json, "thumb"));
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first == null || first.isBlank() ? second : first;
     }
 
     private String tracklist(JsonNode json) {
@@ -398,14 +423,14 @@ public class DiscogsApiClient {
 
         FetchResult withCacheHit() {
             return new FetchResult(success, rateLimited, true, retryAfterMs, errorMessage,
-                    masterId, resolvedReleaseId, artist, title, year, genre, label, country,
-                    catalogNumber, style, format, imageUrl, previewUrl, tracklist);
+                    masterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
+                    country, style, format, imageUrl, previewUrl, tracklist);
         }
 
         FetchResult withMaster(Long newMasterId) {
             return new FetchResult(success, rateLimited, cacheHit, retryAfterMs, errorMessage,
-                    newMasterId, resolvedReleaseId, artist, title, year, genre, label, country,
-                    catalogNumber, style, format, imageUrl, previewUrl, tracklist);
+                    newMasterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
+                    country, style, format, imageUrl, previewUrl, tracklist);
         }
     }
 

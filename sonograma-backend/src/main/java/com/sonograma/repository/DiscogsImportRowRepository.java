@@ -8,6 +8,8 @@ import java.util.Collection;
 import java.util.List;
 
 public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportRow, Long> {
+    List<DiscogsImportRow> findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(Long jobId);
+
     List<DiscogsImportRow> findByJobIdDiscogsImportJobAndStatusInOrderBySourceExcelRowNumber(
             Long jobId,
             Collection<DiscogsImportRowStatus> statuses

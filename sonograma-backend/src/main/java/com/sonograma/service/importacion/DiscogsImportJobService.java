@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,14 +29,15 @@ import java.util.concurrent.Executors;
 @Slf4j
 public class DiscogsImportJobService {
 
-    private static final int MAX_RETRIES = 3;
-    private static final long MAX_RETRY_DELAY_MS = 30_000;
+    private static final String RATE_LIMIT_WARNING =
+            "Discogs limitó temporalmente esta solicitud. Ítem importado parcialmente; metadata pendiente.";
 
     private final DiscogsExcelParser excelParser;
     private final DiscogsApiClient apiClient;
     private final DiscogsImportJobRepository jobRepository;
     private final DiscogsImportRowRepository rowRepository;
     private final DiscoRepository discoRepository;
+    private final DiscogsCoverService coverService;
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService jobExecutor = Executors.newFixedThreadPool(2);
 
@@ -120,25 +122,37 @@ public class DiscogsImportJobService {
             List<DiscogsImportRow> rows = rowRepository
                     .findByJobIdDiscogsImportJobAndStatusInOrderBySourceExcelRowNumber(
                             jobId,
-                            List.of(DiscogsImportRowStatus.PARSED)
+                            List.of(DiscogsImportRowStatus.PARSED, DiscogsImportRowStatus.RATE_LIMITED)
                     );
             for (DiscogsImportRow row : rows) {
-                if (row.getResolvedReleaseId() == null || blank(row.getArtist()) || blank(row.getTitle())) {
-                    continue;
-                }
                 if (row.getImportedCatalogProduct() != null) {
+                    updateDisco(row.getImportedCatalogProduct(), row);
+                    discoRepository.save(row.getImportedCatalogProduct());
                     row.setStatus(DiscogsImportRowStatus.IMPORTED);
+                    rowRepository.save(row);
                     continue;
                 }
+                boolean partial = row.getStatus() == DiscogsImportRowStatus.RATE_LIMITED;
                 Disco disco = discoRepository.findByDiscogsUrl(row.getNormalizedDiscogsUrl())
                         .orElseGet(() -> discoRepository.save(toDisco(row)));
+                updateDisco(disco, row);
+                discoRepository.save(disco);
                 row.setImportedCatalogProduct(disco);
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
-                row.setErrorMessage(null);
+                if (!partial) row.setErrorMessage(null);
                 rowRepository.save(row);
             }
         });
         return getJob(jobId);
+    }
+
+    public Path buildCoversZip(Long jobId) throws IOException {
+        if (!jobRepository.existsById(jobId)) {
+            throw new NegocioException("Importación Discogs no encontrada: " + jobId);
+        }
+        List<DiscogsImportRow> rows = rowRepository
+                .findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(jobId);
+        return coverService.buildZip(rows);
     }
 
     private void processJob(Long jobId) {
@@ -153,8 +167,9 @@ public class DiscogsImportJobService {
                             .toList()
             );
             if (rowIds != null) {
+                DiscogsApiClient.ImportSession session = apiClient.newSession();
                 for (Long rowId : rowIds) {
-                    processRow(rowId);
+                    processRow(rowId, session);
                 }
             }
             finalizeJob(jobId);
@@ -165,32 +180,30 @@ public class DiscogsImportJobService {
     }
 
     private void processRowAndFinalize(Long jobId, Long rowId) {
-        processRow(rowId);
+        processRow(rowId, apiClient.newSession());
         finalizeJob(jobId);
     }
 
-    private void processRow(Long rowId) {
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            DiscogsImportRow source = updateRowStatus(rowId, DiscogsImportRowStatus.FETCHING_DISCOGS, null);
-            DiscogsApiClient.FetchResult result = apiClient.fetch(source.getDiscogsType(), source.getDiscogsId());
-            if (result.success()) {
-                saveFetchResult(rowId, result);
-                return;
-            }
-            if (!result.rateLimited()) {
-                updateRowStatus(rowId, DiscogsImportRowStatus.FAILED, result.errorMessage());
-                return;
-            }
-
-            int retryCount = incrementRetry(rowId, result.errorMessage());
-            if (retryCount >= MAX_RETRIES) {
-                updateRowStatus(rowId, DiscogsImportRowStatus.RATE_LIMITED, result.errorMessage());
-                return;
-            }
-            updateRowStatus(rowId, DiscogsImportRowStatus.PENDING_RETRY,
-                    result.errorMessage() + ". Reintento " + retryCount + "/" + MAX_RETRIES);
-            sleep(retryDelay(result.retryAfterMs(), retryCount));
+    private void processRow(Long rowId, DiscogsApiClient.ImportSession session) {
+        DiscogsImportRow source = updateRowStatus(rowId, DiscogsImportRowStatus.FETCHING_DISCOGS, null);
+        log.info("Consultando metadata Discogs {} id={} fila={}",
+                source.getDiscogsType(), source.getDiscogsId(), source.getSourceExcelRowNumber());
+        DiscogsApiClient.FetchResult result =
+                apiClient.fetch(session, source.getDiscogsType(), source.getDiscogsId());
+        if (result.success()) {
+            saveFetchResult(rowId, result);
+            return;
         }
+        if (result.rateLimited()) {
+            incrementRetry(rowId, result.errorMessage());
+            updateRowStatus(rowId, DiscogsImportRowStatus.RATE_LIMITED, RATE_LIMIT_WARNING);
+            log.warn("Importación Discogs parcial fila={} id={}: {}",
+                    source.getSourceExcelRowNumber(), source.getDiscogsId(), RATE_LIMIT_WARNING);
+            return;
+        }
+        updateRowStatus(rowId, DiscogsImportRowStatus.FAILED, result.errorMessage());
+        log.warn("Falló metadata Discogs fila={} id={}: {}",
+                source.getSourceExcelRowNumber(), source.getDiscogsId(), result.errorMessage());
     }
 
     private DiscogsImportRow updateRowStatus(Long rowId, DiscogsImportRowStatus status, String message) {
@@ -212,7 +225,7 @@ public class DiscogsImportJobService {
             row.setErrorMessage(message);
             return rowRepository.save(row).getRetryCount();
         });
-        return count == null ? MAX_RETRIES : count;
+        return count == null ? 1 : count;
     }
 
     private void saveFetchResult(Long rowId, DiscogsApiClient.FetchResult result) {
@@ -226,15 +239,35 @@ public class DiscogsImportJobService {
             row.setYear(result.year());
             row.setGenre(result.genre());
             row.setLabel(result.label());
+            row.setCatalogNumber(result.catalogNumber());
             row.setCountry(result.country());
             row.setStyle(result.style());
             row.setFormat(result.format());
-            row.setImageUrl(result.imageUrl());
-            row.setPreviewUrl(result.previewUrl());
+            if (result.imageUrl() != null && result.resolvedReleaseId() != null) {
+                DiscogsCoverService.CoverResult cover =
+                        coverService.download(result.imageUrl(), result.resolvedReleaseId());
+                row.setImageUrl(cover.publicUrl());
+                if (cover.available()) {
+                    log.info("Portada Discogs disponible fila={} release={}",
+                            row.getSourceExcelRowNumber(), result.resolvedReleaseId());
+                } else {
+                    log.warn("Portada Discogs no descargada fila={} release={}: {}",
+                            row.getSourceExcelRowNumber(), result.resolvedReleaseId(), cover.warning());
+                }
+            }
+            row.setPreviewUrl(null);
             row.setTracklist(result.tracklist());
-            row.setStatus(DiscogsImportRowStatus.PARSED);
-            row.setErrorMessage(null);
+            if (row.getImportedCatalogProduct() != null) {
+                updateDisco(row.getImportedCatalogProduct(), row);
+                discoRepository.save(row.getImportedCatalogProduct());
+                row.setStatus(DiscogsImportRowStatus.IMPORTED);
+            } else {
+                row.setStatus(DiscogsImportRowStatus.PARSED);
+            }
+            row.setErrorMessage(row.getImageUrl() == null ? "Discogs no informó una portada" : null);
             rowRepository.save(row);
+            log.info("Metadata Discogs obtenida fila={} release={} cache={}",
+                    row.getSourceExcelRowNumber(), result.resolvedReleaseId(), result.cacheHit());
         });
     }
 
@@ -264,11 +297,11 @@ public class DiscogsImportJobService {
     }
 
     private Disco toDisco(DiscogsImportRow row) {
-        return Disco.builder()
+        Disco disco = Disco.builder()
                 .codigoInterno(generateCode(row))
                 .codigoQr(UUID.randomUUID().toString())
-                .artista(row.getArtist())
-                .album(row.getTitle())
+                .artista(partialArtist(row))
+                .album(partialTitle(row))
                 .genero(row.getGenre())
                 .selloDiscografico(row.getLabel())
                 .anio(row.getYear())
@@ -280,14 +313,51 @@ public class DiscogsImportJobService {
                 .estilo(row.getStyle())
                 .tracklist(row.getTracklist())
                 .imagenUrl(row.getImageUrl())
-                .previewUrl(row.getPreviewUrl())
+                .previewUrl(null)
                 .discogsUrl(row.getNormalizedDiscogsUrl())
                 .procedencia("DISCOGS")
+                .notas(row.getStatus() == DiscogsImportRowStatus.RATE_LIMITED
+                        ? RATE_LIMIT_WARNING
+                        : catalogNotes(row))
                 .build();
+        return disco;
+    }
+
+    private void updateDisco(Disco disco, DiscogsImportRow row) {
+        if (!blank(row.getArtist())) disco.setArtista(row.getArtist());
+        if (!blank(row.getTitle())) disco.setAlbum(row.getTitle());
+        if (!blank(row.getGenre())) disco.setGenero(row.getGenre());
+        if (!blank(row.getLabel())) disco.setSelloDiscografico(row.getLabel());
+        if (row.getYear() != null) disco.setAnio(row.getYear());
+        if (!blank(row.getCountry())) disco.setPais(row.getCountry());
+        if (!blank(row.getStyle())) disco.setEstilo(row.getStyle());
+        if (!blank(row.getTracklist())) disco.setTracklist(row.getTracklist());
+        if (!blank(row.getImageUrl())) disco.setImagenUrl(row.getImageUrl());
+        disco.setPreviewUrl(null);
+        if (row.getResolvedReleaseId() != null) {
+            disco.setTipoDisco(parseFormat(row.getFormat()));
+            disco.setNotas(catalogNotes(row));
+        }
+    }
+
+    private String catalogNotes(DiscogsImportRow row) {
+        return blank(row.getCatalogNumber())
+                ? null
+                : "Número de catálogo Discogs: " + row.getCatalogNumber();
+    }
+
+    private String partialTitle(DiscogsImportRow row) {
+        return blank(row.getTitle())
+                ? "Metadata pendiente (Discogs " + row.getDiscogsId() + ")"
+                : row.getTitle();
+    }
+
+    private String partialArtist(DiscogsImportRow row) {
+        return blank(row.getArtist()) ? "Discogs pendiente" : row.getArtist();
     }
 
     private String generateCode(DiscogsImportRow row) {
-        String initials = Arrays.stream(row.getArtist().split("\\s+"))
+        String initials = Arrays.stream(partialArtist(row).split("\\s+"))
                 .filter(value -> !value.isBlank())
                 .map(value -> value.substring(0, 1).toUpperCase(Locale.ROOT))
                 .reduce("", String::concat);
@@ -301,19 +371,6 @@ public class DiscogsImportJobService {
             return TipoDisco.valueOf(Optional.ofNullable(format).orElse("VINILO"));
         } catch (IllegalArgumentException ex) {
             return TipoDisco.VINILO;
-        }
-    }
-
-    private long retryDelay(long headerDelay, int retryCount) {
-        long exponential = 1_000L * (1L << Math.max(0, retryCount - 1));
-        return Math.min(MAX_RETRY_DELAY_MS, Math.max(headerDelay, exponential));
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
         }
     }
 
@@ -342,8 +399,14 @@ public class DiscogsImportJobService {
                 .needsManualMatch(countStatus(rows, DiscogsImportRowStatus.NEEDS_MANUAL_MATCH))
                 .ignored(countStatus(rows, DiscogsImportRowStatus.IGNORED))
                 .failed(countStatus(rows, DiscogsImportRowStatus.FAILED))
-                .rateLimited(countStatus(rows, DiscogsImportRowStatus.RATE_LIMITED))
+                .rateLimited(count(rows, row ->
+                        DiscogsImportRowStatus.RATE_LIMITED.name().equalsIgnoreCase(row.getStatus())
+                                || (row.getErrorMessage() != null
+                                && row.getErrorMessage().contains("importado parcialmente"))))
                 .imported(countStatus(rows, DiscogsImportRowStatus.IMPORTED))
+                .coversDownloaded(count(rows, row ->
+                        row.getImageUrl() != null
+                                && row.getImageUrl().contains("/discogs/covers/")))
                 .pending(count(rows, row -> Set.of(
                         "pending", "parsed", "fetching_discogs", "pending_retry"
                 ).contains(row.getStatus()) && row.getResolvedReleaseId() == null))
@@ -368,6 +431,8 @@ public class DiscogsImportJobService {
                 .year(row.getYear())
                 .genre(row.getGenre())
                 .label(row.getLabel())
+                .catalogNumber(row.getCatalogNumber())
+                .imageUrl(row.getImageUrl())
                 .status(row.getStatus().name().toLowerCase(Locale.ROOT))
                 .errorMessage(row.getErrorMessage())
                 .retryCount(row.getRetryCount())

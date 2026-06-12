@@ -222,7 +222,7 @@ function ExcelLinks() {
 
   const processing = job && ['pending', 'processing'].includes(job.status)
   const readyCount = job?.rows?.filter(row =>
-    row.status === 'parsed' && row.resolvedReleaseId && !row.importedCatalogProductId
+    ['parsed', 'rate_limited'].includes(row.status) && !row.importedCatalogProductId
   ).length || 0
 
   useEffect(() => {
@@ -268,6 +268,20 @@ function ExcelLinks() {
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'No se pudo reintentar la fila')
+    }
+  }
+
+  async function descargarPortadas() {
+    try {
+      const blob = await api.importaciones.discogsCoversZip(job.id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `discogs-covers-${job.id}.zip`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo descargar el ZIP')
     }
   }
 
@@ -335,6 +349,9 @@ function ExcelLinks() {
               ['Ignoradas', job.ignored],
               ['Fallidas', job.failed],
               ['Rate limited', job.rateLimited],
+              ['Importadas', job.imported],
+              ['Portadas', job.coversDownloaded],
+              ['Pendientes', job.pending],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-slate-200 dark:border-stone-800 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
@@ -344,6 +361,11 @@ function ExcelLinks() {
           </div>
 
           {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+          {job.rateLimited > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+              Discogs limitó temporalmente algunas solicitudes. Esos ítems pueden importarse parcialmente y quedan pendientes de reintentar metadata.
+            </div>
+          )}
 
           <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-stone-800">
             <table className="w-full text-xs">
@@ -396,6 +418,10 @@ function ExcelLinks() {
             <button onClick={importarDisponibles} disabled={readyCount === 0 || processing || estado === 'saving'}
               className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
               {estado === 'saving' ? 'Importando…' : `Importar al catálogo (${readyCount})`}
+            </button>
+            <button onClick={descargarPortadas} disabled={!job.coversDownloaded}
+              className="px-5 py-2.5 rounded-lg border border-[#7E9FA8]/50 text-[#5C7D87] dark:text-[#7E9FA8] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              Descargar portadas ZIP ({job.coversDownloaded || 0})
             </button>
             <button onClick={reset}
               className="px-5 py-2.5 rounded-lg border border-slate-200 dark:border-stone-700 text-slate-600 dark:text-stone-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-stone-900 transition-colors">

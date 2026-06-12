@@ -5,14 +5,23 @@ import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
+import com.sonograma.service.importacion.DiscogsCoverService;
 import com.sonograma.service.importacion.VinylFutureImportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.core.io.Resource;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +34,7 @@ public class ImportacionController {
     private final VinylFutureImportService vinylFutureImportService;
     private final DiscogsImportService discogsImportService;
     private final DiscogsImportJobService discogsImportJobService;
+    private final DiscogsCoverService discogsCoverService;
 
     // ── VinylFuture Excel ─────────────────────────────────────────────────────
 
@@ -91,6 +101,34 @@ public class ImportacionController {
     @PostMapping("/discogs/jobs/{jobId}/importar")
     public ResponseEntity<DiscogsImportJobDTO> discogsImportar(@PathVariable Long jobId) {
         return ResponseEntity.ok(discogsImportJobService.importParsedRows(jobId));
+    }
+
+    @GetMapping("/discogs/jobs/{jobId}/covers.zip")
+    public ResponseEntity<StreamingResponseBody> discogsCoversZip(@PathVariable Long jobId) throws IOException {
+        Path zip = discogsImportJobService.buildCoversZip(jobId);
+        long size = Files.size(zip);
+        StreamingResponseBody body = output -> {
+            try {
+                Files.copy(zip, output);
+            } finally {
+                Files.deleteIfExists(zip);
+            }
+        };
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"discogs-covers-" + timestamp + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .contentLength(size)
+                .body(body);
+    }
+
+    @GetMapping("/discogs/covers/{filename:.+}")
+    public ResponseEntity<Resource> discogsCover(@PathVariable String filename) throws IOException {
+        Resource resource = discogsCoverService.load(filename);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(discogsCoverService.contentType(filename)))
+                .body(resource);
     }
 
     @PostMapping("/discogs/guardar-lote")

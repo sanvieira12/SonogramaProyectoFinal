@@ -29,17 +29,24 @@ public class DiscogsImportService {
     private final DiscoRepository discoRepository;
     private final DiscogsLinkParser discogsLinkParser;
     private final DiscogsApiClient discogsApiClient;
+    private final DiscogsCoverService coverService;
 
     public DiscoImportPreviewDTO fetchDesdeLink(String url) {
         Optional<DiscogsLinkParser.DiscogsLink> link = discogsLinkParser.parse(url);
         if (link.isEmpty()) {
             return errorPreview("No se pudo extraer un ID release/master de la URL: " + url);
         }
-        DiscogsApiClient.FetchResult result = discogsApiClient.fetch(link.get().type(), link.get().id());
+        log.info("URL Discogs detectada: {} -> {} id={}",
+                url, link.get().type(), link.get().id());
+        DiscogsApiClient.FetchResult result = discogsApiClient.fetch(
+                discogsApiClient.newSession(),
+                link.get().type(),
+                link.get().id()
+        );
         if (!result.success()) {
             return errorPreview(result.errorMessage());
         }
-        return toPreview(result, link.get().normalizedUrl());
+        return toPreview(result, link.get().normalizedUrl(), downloadCover(result));
     }
 
     @Transactional
@@ -67,7 +74,8 @@ public class DiscogsImportService {
 
     private DiscoImportPreviewDTO toPreview(
             DiscogsApiClient.FetchResult result,
-            String normalizedUrl
+            String normalizedUrl,
+            DiscogsCoverService.CoverResult cover
     ) {
         return DiscoImportPreviewDTO.builder()
                 .artista(result.artist())
@@ -78,8 +86,8 @@ public class DiscogsImportService {
                 .genero(result.genre())
                 .estilo(result.style())
                 .formato(result.format())
-                .imagenUrl(result.imageUrl())
-                .previewUrl(result.previewUrl())
+                .imagenUrl(cover.publicUrl())
+                .previewUrl(null)
                 .tracklist(result.tracklist())
                 .codigoInterno(generateCode(
                         result.artist(),
@@ -89,8 +97,16 @@ public class DiscogsImportService {
                 .discogsUrl(normalizedUrl)
                 .estado(EstadoDisco.DISPONIBLE.name())
                 .condicion(CondicionDisco.USADO.name())
+                .notas(cover.warning() == null ? null : "Portada: " + cover.warning())
                 .errores(new ArrayList<>())
                 .build();
+    }
+
+    private DiscogsCoverService.CoverResult downloadCover(DiscogsApiClient.FetchResult result) {
+        if (result.resolvedReleaseId() == null) {
+            return DiscogsCoverService.CoverResult.missing("No se pudo resolver el release");
+        }
+        return coverService.download(result.imageUrl(), result.resolvedReleaseId());
     }
 
     private DiscoRequestDTO toRequest(DiscoImportPreviewDTO preview) {

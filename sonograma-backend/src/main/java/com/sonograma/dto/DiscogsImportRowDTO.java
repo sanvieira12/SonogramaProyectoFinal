@@ -22,6 +22,7 @@ public class DiscogsImportRowDTO {
     private Integer year;
     private String genre;
     private String label;
+    private String catalogNumber;
     private String imageUrl;
     private String status;
     private String errorMessage;

@@ -49,7 +49,7 @@ class DiscogsApiClientTest {
     }
 
     @Test
-    void doesNotCacheRateLimitAsPermanentFailure() throws Exception {
+    void retriesRateLimitAndRespectsRetryAfter() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/releases/700", exchange -> {
@@ -66,13 +66,13 @@ class DiscogsApiClientTest {
         server.start();
 
         DiscogsApiClient client = client();
-        var limited = client.fetch("release", 700);
+        long started = System.nanoTime();
         var recovered = client.fetch("release", 700);
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
-        assertThat(limited.rateLimited()).isTrue();
-        assertThat(limited.retryAfterMs()).isEqualTo(1_000);
         assertThat(recovered.success()).isTrue();
         assertThat(requests).hasValue(2);
+        assertThat(elapsedMs).isGreaterThanOrEqualTo(900);
     }
 
     private DiscogsApiClient client() {

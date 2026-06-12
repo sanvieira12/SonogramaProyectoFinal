@@ -17,6 +17,7 @@ import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -45,7 +46,8 @@ class DiscogsImportJobServiceTest {
 
     @Test
     void rateLimitKeepsTheJobAndRowsAvailableForRetry() throws Exception {
-        when(apiClient.fetch(anyString(), anyLong()))
+        when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
+        when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
                 .thenReturn(DiscogsApiClient.FetchResult.failure(true, 1, "HTTP 429"));
 
         DiscogsImportJobDTO created = service.createJob(fixture());
@@ -58,10 +60,16 @@ class DiscogsImportJobServiceTest {
             assertThat(current.getRateLimited()).isEqualTo(1);
             assertThat(current.getRows()).singleElement().satisfies(row -> {
                 assertThat(row.getStatus()).isEqualTo("rate_limited");
-                assertThat(row.getRetryCount()).isEqualTo(3);
+                assertThat(row.getRetryCount()).isEqualTo(1);
                 assertThat(row.getDiscogsId()).isEqualTo(999L);
+                assertThat(row.getErrorMessage()).contains("importado parcialmente");
             });
         });
+
+        DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
+        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getRows()).singleElement()
+                .satisfies(row -> assertThat(row.getImportedCatalogProductId()).isNotNull());
     }
 
     private MockMultipartFile fixture() throws Exception {

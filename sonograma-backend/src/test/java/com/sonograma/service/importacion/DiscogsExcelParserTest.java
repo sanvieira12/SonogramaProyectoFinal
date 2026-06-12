@@ -46,6 +46,27 @@ class DiscogsExcelParserTest {
                 .isEqualTo("Fila sin artista ni álbum y sin link Discogs");
     }
 
+    @Test
+    void marksRepeatedDiscogsIdsAsDuplicates() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            sheet.createRow(0).createCell(0).setCellValue("Discogs URL");
+            sheet.createRow(1).createCell(0).setCellValue("https://discogs.com/release/101-one");
+            sheet.createRow(2).createCell(0).setCellValue("https://www.discogs.com/release/101-two?x=1");
+            workbook.write(output);
+            var file = new MockMultipartFile(
+                    "file", "duplicates.xlsx", "application/xlsx", output.toByteArray()
+            );
+
+            var rows = parser.parse(file).rows();
+
+            assertThat(rows.get(0).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
+            assertThat(rows.get(1).status()).isEqualTo(DiscogsImportRowStatus.IGNORED);
+            assertThat(rows.get(1).errorMessage()).contains("duplicado");
+        }
+    }
+
     private MockMultipartFile workbookFixture() throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {

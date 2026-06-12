@@ -46,8 +46,10 @@ services:
       JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
       SONOGRAMA_FRONTEND_BASE_URL: ${SONOGRAMA_FRONTEND_BASE_URL:-https://tudominio.com}
       DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
+      DISCOGS_COVERS_DIRECTORY: /opt/sonograma/data/discogs-covers
     volumes:
       - logs_data:/opt/sonograma/logs
+      - discogs_covers_data:/opt/sonograma/data/discogs-covers
     expose:
       - "8080"
     networks:
@@ -86,6 +88,12 @@ volumes:
       type: none
       o: bind
       device: /opt/sonograma/logs
+  discogs_covers_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sonograma/data/discogs-covers
 
 networks:
   sonograma-net:
