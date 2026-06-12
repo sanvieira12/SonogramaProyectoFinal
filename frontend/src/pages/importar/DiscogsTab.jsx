@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/sonograma'
 
 function Spinner({ text }) {
@@ -216,11 +216,26 @@ function LinkSingle() {
 function ExcelLinks() {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle')
-  const [previews, setPreviews] = useState([])
-  const [seleccionados, setSeleccionados] = useState(new Set())
+  const [job, setJob] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [resultado, setResultado] = useState(null)
   const inputRef = useRef(null)
+
+  const processing = job && ['pending', 'processing'].includes(job.status)
+  const readyCount = job?.rows?.filter(row =>
+    row.status === 'parsed' && row.resolvedReleaseId && !row.importedCatalogProductId
+  ).length || 0
+
+  useEffect(() => {
+    if (!processing) return undefined
+    const timer = window.setInterval(async () => {
+      try {
+        setJob(await api.importaciones.discogsJob(job.id))
+      } catch (err) {
+        setErrorMsg(err.message || 'No se pudo actualizar el progreso')
+      }
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [job?.id, processing])
 
   async function fetchExcel() {
     if (!archivo) return
@@ -228,10 +243,7 @@ function ExcelLinks() {
     setErrorMsg('')
     try {
       const data = await api.importaciones.discogsDesdeExcel(archivo)
-      setPreviews(data)
-      setSeleccionados(new Set(
-        data.map((_, i) => i).filter(i => !data[i].errores?.length)
-      ))
+      setJob(data)
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'Error al procesar Excel')
@@ -239,26 +251,29 @@ function ExcelLinks() {
     }
   }
 
-  async function guardarLote() {
-    const lista = previews.filter((_, i) => seleccionados.has(i))
+  async function importarDisponibles() {
     setEstado('saving')
     try {
-      const data = await api.importaciones.discogsGuardarLote(lista)
-      setResultado(data)
-      setEstado('done')
+      setJob(await api.importaciones.discogsImportarJob(job.id))
+      setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'Error al guardar')
       setEstado('error')
     }
   }
 
-  function toggleRow(i) {
-    setSeleccionados(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s })
+  async function retryRow(rowId) {
+    try {
+      setJob(await api.importaciones.discogsRetryRow(job.id, rowId))
+      setEstado('preview')
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo reintentar la fila')
+    }
   }
 
   function reset() {
-    setArchivo(null); setPreviews([]); setSeleccionados(new Set())
-    setEstado('idle'); setErrorMsg(''); setResultado(null)
+    setArchivo(null); setJob(null)
+    setEstado('idle'); setErrorMsg('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -267,7 +282,7 @@ function ExcelLinks() {
       <div>
         <h3 className="font-semibold text-slate-800 dark:text-stone-200 text-sm mb-1">Importar desde Excel con links de Discogs</h3>
         <p className="text-xs text-slate-500 dark:text-stone-400">
-          El Excel debe tener una columna llamada <code className="font-mono bg-slate-100 dark:bg-stone-800 px-1 rounded">Link</code>, <code className="font-mono bg-slate-100 dark:bg-stone-800 px-1 rounded">URL</code> o <code className="font-mono bg-slate-100 dark:bg-stone-800 px-1 rounded">Discogs</code> con las URLs de los releases.
+          Lee links visibles e hipervínculos embebidos de releases y masters. El procesamiento continúa en segundo plano.
         </p>
       </div>
 
@@ -296,63 +311,97 @@ function ExcelLinks() {
         </>
       )}
 
-      {estado === 'loading' && <Spinner text="Consultando Discogs API por cada link… esto puede tardar." />}
+      {estado === 'loading' && <Spinner text="Leyendo todas las filas y creando la importación…" />}
 
-      {estado === 'preview' && previews.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600 dark:text-stone-400">
-            {previews.length} resultados — {seleccionados.size} sin errores seleccionados
-          </p>
+      {(estado === 'preview' || estado === 'saving') && job && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{job.nombreArchivo}</p>
+              <p className="text-xs text-slate-500 dark:text-stone-500">
+                Hoja {job.nombreHoja} · Estado: {job.status}
+              </p>
+            </div>
+            {processing && <Spinner text="Enriqueciendo…" />}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              ['Filas leídas', job.totalRowsRead],
+              ['Release URLs', job.validReleaseUrls],
+              ['Master URLs', job.validMasterUrls],
+              ['Hipervínculos', job.embeddedHyperlinkRows],
+              ['Match manual', job.needsManualMatch],
+              ['Ignoradas', job.ignored],
+              ['Fallidas', job.failed],
+              ['Rate limited', job.rateLimited],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-slate-200 dark:border-stone-800 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white">{value || 0}</p>
+              </div>
+            ))}
+          </div>
+
+          {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+
           <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-stone-800">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950">
-                  <th className="w-8 px-3 py-2"></th>
-                  {['Artista', 'Álbum', 'Año', 'Género', 'Sello', 'Estado'].map(h => (
+                  {['Fila', 'URL extraída', 'Fuente', 'Tipo / ID', 'Artista / Título', 'Estado', 'Detalle', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-                {previews.map((p, i) => (
-                  <tr key={i} className={p.errores?.length ? 'bg-red-50 dark:bg-red-900/10' : ''}>
+                {job.rows?.map(row => (
+                  <tr key={row.id} className={['failed', 'rate_limited'].includes(row.status) ? 'bg-red-50 dark:bg-red-900/10' : ''}>
+                    <td className="px-3 py-2 font-mono">{row.sourceExcelRowNumber}</td>
+                    <td className="px-3 py-2 max-w-[240px]">
+                      {row.normalizedDiscogsUrl ? (
+                        <a href={row.normalizedDiscogsUrl} target="_blank" rel="noreferrer"
+                          className="text-[#5C7D87] dark:text-[#7E9FA8] hover:underline break-all">
+                          {row.normalizedDiscogsUrl}
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td className="px-3 py-2">{row.urlSource || '—'}</td>
+                    <td className="px-3 py-2 font-mono">
+                      {row.discogsType ? `${row.discogsType}/${row.discogsId}` : '—'}
+                      {row.masterId && row.resolvedReleaseId && (
+                        <div className="text-[10px] text-slate-400">release/{row.resolvedReleaseId}</div>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
-                      <input type="checkbox" checked={seleccionados.has(i)} disabled={!!p.errores?.length}
-                        onChange={() => toggleRow(i)}
-                        className="rounded border-slate-300 text-[#5C7D87] disabled:opacity-30" />
+                      <div className="font-medium text-slate-800 dark:text-stone-200">{row.artist || '—'}</div>
+                      <div className="text-slate-500 dark:text-stone-500">{row.title || '—'}</div>
                     </td>
-                    <td className="px-3 py-2 font-medium text-slate-800 dark:text-stone-200">
-                      {p.artista || <span className="text-red-400 text-xs">{p.errores?.[0] || 'Error'}</span>}
+                    <td className="px-3 py-2">{row.status}</td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500 max-w-[240px]">{row.errorMessage || '—'}</td>
+                    <td className="px-3 py-2">
+                      {['failed', 'rate_limited'].includes(row.status) && (
+                        <button onClick={() => retryRow(row.id)}
+                          className="text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">
+                          Reintentar
+                        </button>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-stone-400">{p.album || '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500">{p.anio || '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500">{p.genero || '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500 max-w-[120px] truncate">{p.sello || '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500">{p.estado || 'DISPONIBLE'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <div className="flex gap-3">
-            <button onClick={guardarLote} disabled={seleccionados.size === 0}
+            <button onClick={importarDisponibles} disabled={readyCount === 0 || processing || estado === 'saving'}
               className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
-              Guardar seleccionados ({seleccionados.size})
+              {estado === 'saving' ? 'Importando…' : `Importar al catálogo (${readyCount})`}
             </button>
             <button onClick={reset}
               className="px-5 py-2.5 rounded-lg border border-slate-200 dark:border-stone-700 text-slate-600 dark:text-stone-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-stone-900 transition-colors">
               Cancelar
             </button>
           </div>
-        </div>
-      )}
-
-      {estado === 'saving' && <Spinner text="Guardando en el catálogo…" />}
-
-      {estado === 'done' && resultado && (
-        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">✓ {resultado.length} discos importados</p>
-          <button onClick={reset} className="mt-1 text-xs underline text-emerald-600 dark:text-emerald-400">Nueva importación</button>
         </div>
       )}
 
