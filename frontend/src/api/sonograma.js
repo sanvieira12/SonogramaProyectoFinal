@@ -159,6 +159,28 @@ export const api = {
     },
   },
 
+  pedidos: {
+    listar: () => request('GET', '/pedidos'),
+    porId: (id) => request('GET', `/pedidos/${id}`),
+    uploadPdf: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/pedidos/upload-pdf`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.message || data?.error || 'Error al procesar el PDF')
+      return data
+    },
+    configurar: (id, cfg) => request('PATCH', `/pedidos/${id}/configuracion`, cfg),
+    enriquecer: (id) => request('POST', `/pedidos/${id}/enriquecer`),
+    importarCatalogo: (id) => request('POST', `/pedidos/${id}/importar-catalogo`),
+    retryItem: (pedidoId, itemId) => request('POST', `/pedidos/${pedidoId}/items/${itemId}/retry-enrich`),
+  },
+
   importaciones: {
     vinylfuturePreview: async (file) => {
       const fd = new FormData()

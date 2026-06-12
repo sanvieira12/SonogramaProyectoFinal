@@ -1,0 +1,39 @@
+package com.sonograma.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+
+public record PedidoResponseDTO(
+    Long idPedido,
+    String numeroFactura,
+    LocalDate fechaFactura,
+    String proveedor,
+    String pago,
+    String moneda,
+    BigDecimal pesoTotalKg,
+    String terminosVenta,
+    String codigoArancel,
+    String eoriNo,
+    String nombreArchivo,
+    String textoExtraido,
+    BigDecimal franqueo,
+    BigDecimal tarifas,
+    BigDecimal neto,
+    BigDecimal total,
+    Integer cantidadTotalPdf,
+    String importStatus,
+    BigDecimal tipoCambio,
+    BigDecimal extraCostoSimple,
+    BigDecimal extraCostoDoble,
+    BigDecimal markupSimple,
+    BigDecimal markupDoble,
+    LocalDateTime createdAt,
+    List<PedidoItemResponseDTO> items,
+    // Computed
+    BigDecimal merchandiseTotal,
+    int totalItemsCount,
+    int sumCantidadItems,
+    boolean advertenciaCantidad
+) {}
