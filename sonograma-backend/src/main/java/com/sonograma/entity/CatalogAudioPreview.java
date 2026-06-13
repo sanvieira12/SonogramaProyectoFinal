@@ -28,8 +28,11 @@ public class CatalogAudioPreview {
     @Column(name = "track_position")
     private String trackPosition;
 
-    @Column(name = "audio_url", nullable = false)
+    @Column(name = "audio_url", length = 1000)
     private String audioUrl;
+
+    @Column(name = "youtube_url", length = 1000)
+    private String youtubeUrl;
 
     @Column(name = "duration_seconds")
     private Integer durationSeconds;

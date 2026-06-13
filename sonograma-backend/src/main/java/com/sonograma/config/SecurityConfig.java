@@ -44,7 +44,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                 .requestMatchers(
-                    "/auth/**",
+                    "/auth/login",
+                    "/auth/registro",
                     "/health",
                     "/actuator/**",
                     "/qr/descargar/**",

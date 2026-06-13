@@ -24,6 +24,18 @@ public class QRController {
                 .body(qrBytes);
     }
 
+    @GetMapping("/descargar/{idDisco}/{copyNumber}")
+    public ResponseEntity<byte[]> descargarQR(
+            @PathVariable Long idDisco,
+            @PathVariable Integer copyNumber) {
+        byte[] qrBytes = qrService.descargarQR(idDisco, copyNumber);
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .header("Content-Disposition",
+                        "inline; filename=\"qr-" + idDisco + "-" + copyNumber + ".png\"")
+                .body(qrBytes);
+    }
+
     @PostMapping("/escanear")
     public ResponseEntity<DiscoResponseDTO> escanearQR(@RequestBody EscaneoQRRequest request) {
         return ResponseEntity.ok(qrService.obtenerPorQRScaneado(request.getCodigoQr()));

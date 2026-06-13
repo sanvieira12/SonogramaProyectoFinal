@@ -38,6 +38,7 @@ public class DiscoResponseDTO {
     private String discogsUrl;
     private Integer cantidadCopias;
     private List<AudioPreviewDTO> audioPreviews;
+    private List<DiscoQrCopyDTO> qrCopies;
     private LocalDateTime fechaIngreso;
     private LocalDateTime fechaActualizacion;
 }

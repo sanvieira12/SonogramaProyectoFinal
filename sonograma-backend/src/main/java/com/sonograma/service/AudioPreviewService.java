@@ -32,22 +32,25 @@ public class AudioPreviewService {
         // Remove existing auto-scraped previews for this disco before re-importing
         List<CatalogAudioPreview> existing = previewRepository.findByIdDiscoOrderByTrackPosition(idDisco);
         existing.stream()
-            .filter(p -> "vinylfuture".equals(p.getSource()))
+            .filter(p -> "vinylfuture".equals(p.getSource())
+                || "discogs-youtube".equals(p.getSource()))
             .forEach(p -> previewRepository.delete(p));
 
         Map<String, TrackInfo> uniqueTracks = new LinkedHashMap<>();
         tracks.stream()
-            .filter(track -> track.mp3Url() != null && !track.mp3Url().isBlank())
-            .forEach(track -> uniqueTracks.putIfAbsent(track.mp3Url().strip(), track));
+            .filter(this::hasPlayableUrl)
+            .forEach(track -> uniqueTracks.putIfAbsent(trackKey(track), track));
 
         for (TrackInfo track : uniqueTracks.values()) {
-            if (track.mp3Url() == null || track.mp3Url().isBlank()) continue;
             CatalogAudioPreview preview = CatalogAudioPreview.builder()
                 .idDisco(idDisco)
                 .trackName(track.name())
                 .trackPosition(track.label())
                 .audioUrl(track.mp3Url())
-                .source("vinylfuture")
+                .youtubeUrl(track.youtubeUrl())
+                .source(track.mp3Url() != null && !track.mp3Url().isBlank()
+                    ? "vinylfuture"
+                    : "discogs-youtube")
                 .status(AudioPreviewStatus.FOUND)
                 .build();
             previewRepository.save(preview);
@@ -66,11 +69,15 @@ public class AudioPreviewService {
     // ── Manual CRUD ───────────────────────────────────────────────────────────
 
     public AudioPreviewDTO agregar(Long idDisco, AudioPreviewRequestDTO req) {
+        if (isBlank(req.audioUrl()) && isBlank(req.youtubeUrl())) {
+            throw new IllegalArgumentException("Ingresá una URL de audio o YouTube");
+        }
         CatalogAudioPreview preview = CatalogAudioPreview.builder()
             .idDisco(idDisco)
             .trackName(req.trackName())
             .trackPosition(req.trackPosition())
             .audioUrl(req.audioUrl())
+            .youtubeUrl(req.youtubeUrl())
             .durationSeconds(req.durationSeconds())
             .source("manual")
             .status(AudioPreviewStatus.FOUND)
@@ -103,10 +110,25 @@ public class AudioPreviewService {
             p.getTrackName(),
             p.getTrackPosition(),
             p.getAudioUrl(),
+            p.getYoutubeUrl(),
             p.getDurationSeconds(),
             p.getSource(),
             p.getStatus().name(),
             p.getCreatedAt()
         );
+    }
+
+    private boolean hasPlayableUrl(TrackInfo track) {
+        return track != null && (!isBlank(track.mp3Url()) || !isBlank(track.youtubeUrl()));
+    }
+
+    private String trackKey(TrackInfo track) {
+        return !isBlank(track.mp3Url())
+            ? "audio:" + track.mp3Url().strip()
+            : "youtube:" + track.youtubeUrl().strip();
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

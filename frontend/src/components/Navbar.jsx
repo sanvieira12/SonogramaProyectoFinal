@@ -55,20 +55,20 @@ export default function Navbar({ usuario }) {
     : '?'
 
   return (
-    <nav className="bg-white dark:bg-black border-b border-slate-200 dark:border-stone-800 px-6 py-0 transition-colors duration-300 sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto flex items-center justify-between h-14 gap-4">
+    <nav className="bg-white dark:bg-black border-b border-slate-200 dark:border-stone-800 px-4 sm:px-6 py-0 transition-colors duration-300 sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto flex items-center justify-between min-h-16 gap-4">
 
         {/* Izquierda: logo + navegación */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 min-w-0">
           <Link to="/" className="flex items-center">
             <img
               src="/logo.png"
               alt="Sonograma"
-              className="h-14 w-auto max-w-[180px] object-contain dark:invert"
+              className="h-20 w-20 object-contain dark:invert -my-2 flex-shrink-0"
             />
           </Link>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 overflow-x-auto py-2">
             <NavLink to="/" end className={navLinkClass}>
               <span className="flex items-center gap-1.5">
                 <HomeIcon />

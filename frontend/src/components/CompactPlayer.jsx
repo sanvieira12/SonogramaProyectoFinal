@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-
-// Module-level singleton — only one player plays at a time
-let globalStopFn = null
-
-export function stopAllPreviews() {
-  globalStopFn?.()
-  globalStopFn = null
-}
+import { claimPreview, releasePreview } from './audioPreviewPlayback'
 
 function fmtTime(secs) {
   if (!isFinite(secs) || secs < 0) return '0:00'
@@ -15,13 +8,14 @@ function fmtTime(secs) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export default function CompactPlayer({ audioUrl, trackName, trackPosition }) {
+export default function CompactPlayer({ audioUrl, youtubeUrl, trackName, trackPosition }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
 
   useEffect(() => {
+    if (!audioUrl) return undefined
     const audio = new Audio()
     audio.preload = 'none'
     audioRef.current = audio
@@ -40,9 +34,32 @@ export default function CompactPlayer({ audioUrl, trackName, trackPosition }) {
       audio.removeEventListener('ended', onEnd)
       audio.pause()
       audio.src = ''
-      if (globalStopFn === localStop) globalStopFn = null
+      releasePreview(localStop)
     }
-  }, [audioUrl]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioUrl])
+
+  if (!audioUrl && youtubeUrl) {
+    return (
+      <div className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg bg-slate-50 dark:bg-stone-950/70 border border-slate-200 dark:border-stone-800/60">
+        <span className="text-xs text-slate-700 dark:text-stone-300 truncate">
+          {trackPosition && (
+            <span className="text-slate-400 dark:text-stone-500 mr-1.5 text-[10px] font-mono">{trackPosition}</span>
+          )}
+          <span className="font-medium">{trackName || 'Track'}</span>
+        </span>
+        <a
+          href={youtubeUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs font-semibold text-[#5C7D87] dark:text-[#7E9FA8] border border-[#7E9FA8]/40 rounded-md px-2.5 py-1 hover:bg-[#7E9FA8]/10 flex-shrink-0"
+        >
+          Escuchar
+        </a>
+      </div>
+    )
+  }
+
+  if (!audioUrl) return null
 
   function localStop() {
     const audio = audioRef.current
@@ -60,16 +77,14 @@ export default function CompactPlayer({ audioUrl, trackName, trackPosition }) {
     if (playing) {
       audio.pause()
       setPlaying(false)
-      if (globalStopFn === localStop) globalStopFn = null
+      releasePreview(localStop)
     } else {
-      // Stop whatever is currently playing
-      if (globalStopFn && globalStopFn !== localStop) globalStopFn()
-      globalStopFn = localStop
+      claimPreview(localStop)
 
       if (!audio.src) audio.src = audioUrl
       audio.play().catch(() => {
         setPlaying(false)
-        globalStopFn = null
+        releasePreview(localStop)
       })
       setPlaying(true)
     }

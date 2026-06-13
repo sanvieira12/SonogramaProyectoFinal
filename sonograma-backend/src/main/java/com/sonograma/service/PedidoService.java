@@ -34,6 +34,7 @@ public class PedidoService {
     private final PedidoEnrichmentService enrichmentService;
     private final DiscoRepository discoRepository;
     private final AudioPreviewService audioPreviewService;
+    private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
 
     private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
@@ -315,6 +316,8 @@ public class PedidoService {
             }
         }
 
+        disco = discoRepository.save(disco);
+        qrCopyService.synchronize(disco);
         return discoRepository.save(disco);
     }
 

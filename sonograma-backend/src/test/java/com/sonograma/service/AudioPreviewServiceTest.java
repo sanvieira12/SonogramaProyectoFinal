@@ -99,6 +99,25 @@ class AudioPreviewServiceTest {
         verify(previewRepository, times(1)).save(any(CatalogAudioPreview.class));
     }
 
+    @Test
+    void guardarDesdeTracks_persistsYoutubeWhenMp3IsMissing() {
+        Long idDisco = 9L;
+        List<TrackInfo> tracks = List.of(
+            new TrackInfo("A1", "Video Track", null, "https://www.youtube.com/watch?v=test")
+        );
+
+        when(previewRepository.findByIdDiscoOrderByTrackPosition(idDisco)).thenReturn(List.of());
+        when(previewRepository.save(any(CatalogAudioPreview.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.guardarDesdeTracks(idDisco, tracks);
+
+        ArgumentCaptor<CatalogAudioPreview> captor = ArgumentCaptor.forClass(CatalogAudioPreview.class);
+        verify(previewRepository).save(captor.capture());
+        assertNull(captor.getValue().getAudioUrl());
+        assertEquals("https://www.youtube.com/watch?v=test", captor.getValue().getYoutubeUrl());
+        assertEquals("discogs-youtube", captor.getValue().getSource());
+    }
+
     // ── Test 3: listarPorDisco returns mapped DTOs ───────────────────────────
 
     @Test

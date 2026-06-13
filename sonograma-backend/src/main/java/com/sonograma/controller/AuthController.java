@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.security.Principal;
 
 @RestController
 @RequestMapping("/auth")
@@ -31,5 +32,10 @@ public class AuthController {
         return ResponseEntity.ok(authenticationService.login(
                 request.getNombreUsuario(),
                 request.getContrasenia()));
+    }
+
+    @GetMapping("/session")
+    public ResponseEntity<UsuarioDTO> session(Principal principal) {
+        return ResponseEntity.ok(authenticationService.obtenerUsuarioActual(principal.getName()));
     }
 }

@@ -161,7 +161,8 @@ public class VinylFutureScraperService {
         return new TrackInfo(
             firstNonBlank(current.label(), candidate.label()),
             firstNonBlank(current.name(), candidate.name()),
-            current.mp3Url()
+            current.mp3Url(),
+            firstNonBlank(current.youtubeUrl(), candidate.youtubeUrl())
         );
     }
 

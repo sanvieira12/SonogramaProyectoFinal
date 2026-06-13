@@ -9,6 +9,8 @@ import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CsvExportService;
+import com.sonograma.service.AudioPreviewService;
+import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
@@ -58,6 +60,8 @@ public class ImportController {
     private final ZipBundleService zipBundle;
     private final DiscoRepository discoRepository;
     private final ShippingOrderService shippingOrderService;
+    private final AudioPreviewService audioPreviewService;
+    private final DiscoQrCopyService qrCopyService;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
 
     /**
@@ -147,12 +151,37 @@ public class ImportController {
                         disco.setTracklist(tracklist);
                     }
                 }
+                disco = discoRepository.save(disco);
+                qrCopyService.synchronize(disco);
+                if (pageData.isPresent()) {
+                    audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), pageData.get().tracks());
+                }
                 discosGuardados.add(discoRepository.save(disco));
                 log.info("Disco guardado en BD: {} - {}", item.artista(), item.album());
             } catch (Exception e) {
                 log.warn("No se pudo guardar en BD: {} - {}: {}", item.artista(), item.album(), e.getMessage());
             }
         }
+        long coversFound = pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .filter(page -> page.frontImageUrl() != null && !page.frontImageUrl().isBlank())
+            .count();
+        long previewsFound = pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .flatMap(page -> page.tracks().stream())
+            .filter(track -> track.mp3Url() != null && !track.mp3Url().isBlank())
+            .count();
+        List<String> failedLinks = searchResults.entrySet().stream()
+            .filter(entry -> entry.getValue().isEmpty())
+            .map(entry -> firstNonBlank(
+                entry.getKey().codigoCatalogo(),
+                entry.getKey().artista() + " - " + entry.getKey().album()
+            ))
+            .toList();
+        log.info(
+            "Resumen importación Vinyl Future: importados={}, portadas={}, previews={}, links fallidos={}",
+            discosGuardados.size(), coversFound, previewsFound, failedLinks
+        );
 
         // 3b. Auto-create ShippingOrder for imported discos
         if (!discosGuardados.isEmpty()) {
@@ -234,6 +263,10 @@ public class ImportController {
 
     private long elapsedMillis(long startedAt) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    private String firstNonBlank(String first, String fallback) {
+        return first == null || first.isBlank() ? fallback : first;
     }
 
     @PreDestroy

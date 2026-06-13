@@ -7,6 +7,8 @@ import com.sonograma.repository.UsuarioRepository;
 import com.sonograma.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,14 +44,14 @@ public class AuthenticationService {
 
     public LoginResponse login(String nombreUsuario, String contrasenia) {
         Usuario usuario = usuarioRepository.findByNombreUsuario(nombreUsuario)
-                .orElseThrow(() -> new IllegalArgumentException("Usuario o contraseña incorrectos"));
+                .orElseThrow(() -> new BadCredentialsException("Usuario o contraseña incorrectos"));
 
         if (!usuario.getActivo()) {
-            throw new IllegalArgumentException("Usuario desactivado");
+            throw new DisabledException("Usuario desactivado");
         }
 
         if (!passwordEncoder.matches(contrasenia, usuario.getContrasenia())) {
-            throw new IllegalArgumentException("Usuario o contraseña incorrectos");
+            throw new BadCredentialsException("Usuario o contraseña incorrectos");
         }
 
         usuario.setFechaUltimoAcceso(LocalDateTime.now());
@@ -60,6 +62,16 @@ public class AuthenticationService {
                 .token(token)
                 .usuario(mapearADTO(usuario))
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public UsuarioDTO obtenerUsuarioActual(String nombreUsuario) {
+        Usuario usuario = usuarioRepository.findByNombreUsuario(nombreUsuario)
+            .orElseThrow(() -> new IllegalArgumentException("La sesión ya no corresponde a un usuario válido"));
+        if (!usuario.getActivo()) {
+            throw new DisabledException("Usuario desactivado");
+        }
+        return mapearADTO(usuario);
     }
 
     private UsuarioDTO mapearADTO(Usuario usuario) {

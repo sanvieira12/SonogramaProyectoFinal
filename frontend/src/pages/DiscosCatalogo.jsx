@@ -4,7 +4,8 @@ import { discoService } from '../services/discoService'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
 import Paginacion from '../components/Paginacion'
-import CompactPlayer, { stopAllPreviews } from '../components/CompactPlayer'
+import CompactPlayer from '../components/CompactPlayer'
+import { stopAllPreviews } from '../components/audioPreviewPlayback'
 import { api } from '../api/sonograma'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
@@ -63,10 +64,87 @@ function EmptyState({ hayFiltro }) {
   )
 }
 
+function TrackPreviews({ disco }) {
+  const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
+  const previews = loaded.discoId === disco?.idDisco
+    ? loaded.previews
+    : (disco?.audioPreviews || [])
+
+  useEffect(() => {
+    stopAllPreviews()
+    if (!disco?.idDisco) return undefined
+    let cancelled = false
+    api.discos.previews.listar(disco.idDisco)
+      .then(data => { if (!cancelled) setLoaded({ discoId: disco.idDisco, previews: data }) })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      stopAllPreviews()
+    }
+  }, [disco?.idDisco])
+
+  if (previews.length === 0) {
+    return <p className="text-xs text-slate-400 dark:text-stone-500">Sin previews de audio o video.</p>
+  }
+
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">Tracks</p>
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+        {previews.map(p => (
+          <CompactPlayer
+            key={p.id}
+            audioUrl={p.audioUrl}
+            youtubeUrl={p.youtubeUrl}
+            trackName={p.trackName}
+            trackPosition={p.trackPosition}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function QrModal({ disco, onClose }) {
+  if (!disco) return null
+  const copies = disco.qrCopies || []
+  const sourceLabel = disco.procedencia === 'DISCOGS'
+    ? `${disco.artista} - ${disco.album}`
+    : (disco.discogsUrl || disco.codigoInterno || 'Vinyl Future')
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-white dark:bg-stone-900 rounded-2xl border border-slate-200 dark:border-stone-700 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white/95 dark:bg-stone-900/95 backdrop-blur px-6 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-slate-900 dark:text-white">{disco.album}</h2>
+            <p className="text-sm text-slate-500 dark:text-stone-400">{disco.artista}</p>
+            <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Código: {disco.codigoInterno || '—'} · Origen: {sourceLabel}</p>
+          </div>
+          <button onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4 p-6">
+          {copies.map(copy => (
+            <article key={copy.id || copy.codigoQr} className="border border-slate-200 dark:border-stone-700 rounded-xl p-4 text-center break-inside-avoid">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3">Copia {copy.copyNumber}</p>
+              <div className="bg-white p-3 rounded-lg inline-block">
+                <QRCode value={copy.content || copy.codigoQr} size={180} />
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-stone-400 mt-3 break-all">{copy.content || copy.codigoQr}</p>
+            </article>
+          ))}
+          {copies.length === 0 && (
+            <p className="text-sm text-slate-500 dark:text-stone-400 sm:col-span-2 text-center py-8">Este disco no tiene copias físicas con QR.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /* Panel lateral derecho con el detalle completo del disco.
    Se abre al hacer clic en una fila. */
-function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
+function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
   if (!disco) return null
 
   return (
@@ -115,15 +193,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
             </div>
           )}
 
-          {/* QR code */}
-          {disco.codigoQr && (
-            <div className="flex flex-col items-center gap-2">
-              <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Código QR</p>
-              <div className="bg-white p-2 rounded-lg inline-block">
-                <QRCode value={disco.codigoQr} size={120} />
-              </div>
-            </div>
-          )}
+          <TrackPreviews disco={disco} />
 
           {/* Estado */}
           <EstadoBadge estado={disco.estado} />
@@ -157,6 +227,9 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
 
         {/* Acciones fijas al fondo */}
         <div className="p-6 pt-0 space-y-2">
+          <button onClick={() => onViewQr(disco)} className="btn-secondary w-full">
+            Ver QR ({disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
+          </button>
           <button
             onClick={() => { onEditar(disco); onCerrar() }}
             className="btn-primary w-full"
@@ -175,18 +248,18 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja }) {
   )
 }
 
-function CatalogPreview({ disco, onEditar, onDarBaja }) {
-  const [previews, setPreviews] = useState(disco?.audioPreviews || [])
+function CatalogPreview({ disco, onEditar, onDarBaja, onViewQr }) {
+  const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
+  const previews = loaded.discoId === disco?.idDisco
+    ? loaded.previews
+    : (disco?.audioPreviews || [])
 
   useEffect(() => {
-    // Stop audio when selected disco changes
     stopAllPreviews()
-    setPreviews(disco?.audioPreviews || [])
-
     if (!disco?.idDisco) return
     let cancelled = false
     api.discos.previews.listar(disco.idDisco)
-      .then(data => { if (!cancelled) setPreviews(data) })
+      .then(data => { if (!cancelled) setLoaded({ discoId: disco.idDisco, previews: data }) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [disco?.idDisco])
@@ -262,6 +335,7 @@ function CatalogPreview({ disco, onEditar, onDarBaja }) {
                 <CompactPlayer
                   key={p.id}
                   audioUrl={p.audioUrl}
+                  youtubeUrl={p.youtubeUrl}
                   trackName={p.trackName}
                   trackPosition={p.trackPosition}
                 />
@@ -272,7 +346,8 @@ function CatalogPreview({ disco, onEditar, onDarBaja }) {
 
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
-          <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400">Dar de baja</button>
+          <button onClick={() => onViewQr(disco)} className="btn-secondary">Ver QR</button>
+          <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Dar de baja</button>
         </div>
       </div>
     </aside>
@@ -290,6 +365,7 @@ export default function DiscosCatalogo() {
   const [eliminando, setEliminando] = useState(false)
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [hoveredDisco, setHoveredDisco] = useState(null)
+  const [qrDisco, setQrDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
   const debounceRef = useRef(null)
@@ -568,6 +644,7 @@ export default function DiscosCatalogo() {
         disco={hoveredDisco}
         onEditar={setDiscoForm}
         onDarBaja={setDiscoEliminar}
+        onViewQr={setQrDisco}
       />
       </div>
 
@@ -577,7 +654,10 @@ export default function DiscosCatalogo() {
         onCerrar={() => setSlideOverDisco(null)}
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
         onDarBaja={d => { setDiscoEliminar(d); setSlideOverDisco(null) }}
+        onViewQr={d => { setQrDisco(d); setSlideOverDisco(null) }}
       />
+
+      <QrModal disco={qrDisco} onClose={() => setQrDisco(null)} />
 
       {/* Formulario de edición / creación */}
       {discoForm !== null && (

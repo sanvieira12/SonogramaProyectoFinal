@@ -1,6 +1,11 @@
 import { redirectIfUnauthorized } from './session'
 
-const BASE = import.meta.env.VITE_API_URL || '/api'
+export function normalizeApiBase(value) {
+  const base = (value || '/api').trim().replace(/\/+$/, '')
+  return base || '/api'
+}
+
+const BASE = normalizeApiBase(import.meta.env.VITE_API_URL)
 
 function token() {
   return localStorage.getItem('token')
@@ -15,11 +20,16 @@ function headers(extra = {}) {
 }
 
 async function request(method, path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(),
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: headers(),
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new Error('No se pudo conectar con Sonograma. Revisá la conexión e intentá nuevamente.')
+  }
   if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
   if (res.status === 204) return null
   const text = await res.text()
@@ -38,6 +48,7 @@ async function request(method, path, body) {
 export const api = {
   login: (nombreUsuario, contrasenia) =>
     request('POST', '/auth/login', { nombreUsuario, contrasenia }),
+  session: () => request('GET', '/auth/session'),
 
   registro: (nombreUsuario, email, contrasenia) =>
     request('POST', '/auth/registro', { nombreUsuario, email, contrasenia }),

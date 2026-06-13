@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/sonograma'
-import CompactPlayer, { stopAllPreviews } from './CompactPlayer'
+import CompactPlayer from './CompactPlayer'
+import { stopAllPreviews } from './audioPreviewPlayback'
 
 const CONDICIONES = ['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO']
 const TIPOS = ['VINILO', 'CD', 'DIGITAL', 'CASSETTE', 'OTRO']
@@ -80,6 +81,7 @@ function CoverUpload({ value, onChange }) {
 function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
   const [previews, setPreviews] = useState(initialPreviews)
   const [newUrl, setNewUrl] = useState('')
+  const [newYoutubeUrl, setNewYoutubeUrl] = useState('')
   const [newName, setNewName] = useState('')
   const [newPos, setNewPos] = useState('')
   const [adding, setAdding] = useState(false)
@@ -98,18 +100,19 @@ function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
 
   async function handleAdd(e) {
     e.preventDefault()
-    if (!newUrl.trim()) return
+    if (!newUrl.trim() && !newYoutubeUrl.trim()) return
     setAdding(true)
     setErr('')
     try {
       const added = await api.discos.previews.agregar(discoId, {
         audioUrl: newUrl.trim(),
+        youtubeUrl: newYoutubeUrl.trim(),
         trackName: newName.trim() || null,
         trackPosition: newPos.trim() || null,
         durationSeconds: null,
       })
       setPreviews(p => [...p, added])
-      setNewUrl(''); setNewName(''); setNewPos('')
+      setNewUrl(''); setNewYoutubeUrl(''); setNewName(''); setNewPos('')
     } catch (ex) {
       setErr(ex.message)
     } finally {
@@ -139,7 +142,7 @@ function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
         {previews.map(p => (
           <div key={p.id} className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
-              <CompactPlayer audioUrl={p.audioUrl} trackName={p.trackName} trackPosition={p.trackPosition} />
+              <CompactPlayer audioUrl={p.audioUrl} youtubeUrl={p.youtubeUrl} trackName={p.trackName} trackPosition={p.trackPosition} />
             </div>
             <button
               type="button"
@@ -163,6 +166,13 @@ function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
           onChange={e => setNewUrl(e.target.value)}
           placeholder="https://... URL del MP3"
         />
+        <input
+          type="url"
+          className="input text-xs"
+          value={newYoutubeUrl}
+          onChange={e => setNewYoutubeUrl(e.target.value)}
+          placeholder="https://youtube.com/... (si no hay MP3)"
+        />
         <div className="flex gap-2">
           <input
             className="input text-xs flex-1"
@@ -178,7 +188,7 @@ function AudioPreviewsSection({ discoId, initialPreviews = [] }) {
           />
           <button
             type="submit"
-            disabled={adding || !newUrl.trim()}
+            disabled={adding || (!newUrl.trim() && !newYoutubeUrl.trim())}
             className="px-3 py-2 rounded-lg text-xs bg-[#7E9FA8]/20 hover:bg-[#7E9FA8]/30 text-[#7E9FA8] border border-[#7E9FA8]/30 transition-colors disabled:opacity-40 whitespace-nowrap"
           >
             {adding ? '...' : 'Agregar'}

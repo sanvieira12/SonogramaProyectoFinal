@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -24,12 +25,13 @@ public class DiscoService {
 
     private final DiscoRepository discoRepository;
     private final AudioPreviewService audioPreviewService;
+    private final DiscoQrCopyService qrCopyService;
 
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
-        return toDTO(discoRepository.save(disco));
+        return saveWithQr(disco);
     }
 
     @Transactional(readOnly = true)
@@ -41,6 +43,12 @@ public class DiscoService {
 
     @Transactional(readOnly = true)
     public DiscoResponseDTO obtenerPorQR(String codigoQr) {
+        DiscoQrCopy qrCopy = qrCopyService.findByCode(codigoQr);
+        if (qrCopy != null) {
+            return discoRepository.findById(qrCopy.getIdDisco())
+                    .map(this::toDTO)
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Disco", qrCopy.getIdDisco()));
+        }
         return discoRepository.findByCodigoQr(codigoQr)
                 .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco no encontrado con QR: " + codigoQr));
@@ -75,7 +83,7 @@ public class DiscoService {
         }
         return discoRepository.findAll().stream()
                 .filter(d -> coincide(d, query))
-                .map(DiscoMapper::toDTO)
+                .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
@@ -83,7 +91,7 @@ public class DiscoService {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         DiscoMapper.updateFromRequest(disco, request);
-        return toDTO(discoRepository.save(disco));
+        return saveWithQr(disco);
     }
 
     public DiscoResponseDTO cambiarEstado(Long id, EstadoDisco nuevoEstado) {
@@ -96,7 +104,7 @@ public class DiscoService {
         if (nuevoEstado == EstadoDisco.SIN_STOCK || nuevoEstado == EstadoDisco.VENDIDO) {
             disco.setCantidadCopias(0);
         }
-        return toDTO(discoRepository.save(disco));
+        return saveWithQr(disco);
     }
 
     public DiscoResponseDTO actualizarCopias(Long id, Integer cantidad) {
@@ -112,7 +120,7 @@ public class DiscoService {
         if (cantidad > 0 && disco.getEstado() == EstadoDisco.SIN_STOCK) {
             disco.setEstado(EstadoDisco.DISPONIBLE);
         }
-        return toDTO(discoRepository.save(disco));
+        return saveWithQr(disco);
     }
 
     public void eliminarDisco(Long id) {
@@ -122,7 +130,8 @@ public class DiscoService {
             throw new NegocioException("No se puede dar de baja un disco ya vendido");
         }
         disco.setEstado(EstadoDisco.SIN_STOCK);
-        discoRepository.save(disco);
+        disco.setCantidadCopias(0);
+        saveWithQr(disco);
     }
 
     private boolean coincide(Disco disco, String query) {
@@ -141,7 +150,14 @@ public class DiscoService {
     private DiscoResponseDTO toDTO(Disco disco) {
         DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
         dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
+        dto.setQrCopies(qrCopyService.listDtos(disco));
         return dto;
+    }
+
+    private DiscoResponseDTO saveWithQr(Disco disco) {
+        Disco saved = discoRepository.save(disco);
+        qrCopyService.synchronize(saved);
+        return toDTO(discoRepository.save(saved));
     }
 
     private boolean contiene(String valor, String query) {

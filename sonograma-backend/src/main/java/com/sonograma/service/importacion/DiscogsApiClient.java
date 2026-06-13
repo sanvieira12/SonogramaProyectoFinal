@@ -2,6 +2,7 @@ package com.sonograma.service.importacion;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonograma.dto.TrackInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +18,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
@@ -157,7 +160,8 @@ public class DiscogsApiClient {
                     format(json),
                     image(json),
                     null,
-                    tracklist(json)
+                    tracklist(json),
+                    tracks(json)
             );
         } catch (Exception ex) {
             return FetchResult.failure(false, 0, "Respuesta inválida de Discogs: " + ex.getMessage());
@@ -375,6 +379,55 @@ public class DiscogsApiClient {
         return value.toString();
     }
 
+    private List<TrackInfo> tracks(JsonNode json) {
+        List<TrackInfo> result = new ArrayList<>();
+        JsonNode sourceTracks = json.path("tracklist");
+        JsonNode videos = json.path("videos");
+
+        if (sourceTracks.isArray()) {
+            for (JsonNode track : sourceTracks) {
+                String title = text(track, "title");
+                if (title == null) continue;
+                result.add(new TrackInfo(
+                    text(track, "position"),
+                    title,
+                    null,
+                    matchingVideoUrl(videos, title)
+                ));
+            }
+        }
+
+        if (videos.isArray()) {
+            for (JsonNode video : videos) {
+                String uri = text(video, "uri");
+                if (uri == null || result.stream().anyMatch(track -> uri.equals(track.youtubeUrl()))) continue;
+                result.add(new TrackInfo(null, text(video, "title"), null, uri));
+            }
+        }
+        return result;
+    }
+
+    private String matchingVideoUrl(JsonNode videos, String trackTitle) {
+        if (!videos.isArray()) return null;
+        String normalizedTrack = normalizeTitle(trackTitle);
+        for (JsonNode video : videos) {
+            String title = text(video, "title");
+            String uri = text(video, "uri");
+            if (title == null || uri == null) continue;
+            String normalizedVideo = normalizeTitle(title);
+            if (normalizedVideo.contains(normalizedTrack) || normalizedTrack.contains(normalizedVideo)) {
+                return uri;
+            }
+        }
+        return null;
+    }
+
+    private String normalizeTitle(String value) {
+        return value.toLowerCase(Locale.ROOT)
+            .replaceAll("[^\\p{L}\\p{N}]+", " ")
+            .trim();
+    }
+
     private record HttpResult(
             boolean success,
             boolean rateLimited,
@@ -414,23 +467,24 @@ public class DiscogsApiClient {
             String format,
             String imageUrl,
             String previewUrl,
-            String tracklist
+            String tracklist,
+            List<TrackInfo> tracks
     ) {
         static FetchResult failure(boolean rateLimited, long retryAfterMs, String message) {
             return new FetchResult(false, rateLimited, false, retryAfterMs, message,
-                    null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, List.of());
         }
 
         FetchResult withCacheHit() {
             return new FetchResult(success, rateLimited, true, retryAfterMs, errorMessage,
                     masterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
-                    country, style, format, imageUrl, previewUrl, tracklist);
+                    country, style, format, imageUrl, previewUrl, tracklist, tracks);
         }
 
         FetchResult withMaster(Long newMasterId) {
             return new FetchResult(success, rateLimited, cacheHit, retryAfterMs, errorMessage,
                     newMasterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
-                    country, style, format, imageUrl, previewUrl, tracklist);
+                    country, style, format, imageUrl, previewUrl, tracklist, tracks);
         }
     }
 

@@ -31,10 +31,13 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      const data = await api.login(form.nombreUsuario, form.contrasenia)
+      const data = await api.login(form.nombreUsuario.trim(), form.contrasenia)
+      if (!data?.token || !data?.usuario) {
+        throw new Error('El servidor no devolvió una sesión válida')
+      }
       localStorage.setItem('token', data.token)
       localStorage.setItem('usuario', JSON.stringify(data.usuario))
-      navigate('/')
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -59,7 +62,7 @@ export default function Login() {
           <img
             src="/logo-sonograma.png"
             alt="Sonograma"
-            className="h-16 w-16 object-contain dark:invert mx-auto mb-4 transition-all"
+            className="h-32 w-32 sm:h-40 sm:w-40 object-contain dark:invert mx-auto mb-3 transition-all"
           />
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Sonograma</h1>
           <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400 mt-1">Disquería</p>

@@ -8,6 +8,7 @@ import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CatalogPricingService;
+import com.sonograma.service.DiscoQrCopyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -28,6 +29,7 @@ public class VinylFutureImportService {
 
     private final DiscoRepository discoRepository;
     private final CatalogPricingService catalogPricingService;
+    private final DiscoQrCopyService qrCopyService;
 
     private static final Map<String, String> COLUMN_ALIASES = new HashMap<>();
 
@@ -114,6 +116,8 @@ public class VinylFutureImportService {
                 com.sonograma.entity.Disco disco = DiscoMapper.toEntity(req);
                 disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
                 disco.setCodigoQr(UUID.randomUUID().toString());
+                disco = discoRepository.save(disco);
+                qrCopyService.synchronize(disco);
                 guardados.add(DiscoMapper.toDTO(discoRepository.save(disco)));
             } catch (Exception e) {
                 log.warn("Error guardando disco '{}': {}", preview.getAlbum(), e.getMessage());

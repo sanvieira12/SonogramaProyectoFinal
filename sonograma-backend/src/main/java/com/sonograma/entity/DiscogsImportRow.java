@@ -84,6 +84,9 @@ public class DiscogsImportRow {
     @Column(name = "tracklist", columnDefinition = "TEXT")
     private String tracklist;
 
+    @Column(name = "tracks_json", columnDefinition = "TEXT")
+    private String tracksJson;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     private DiscogsImportRowStatus status;

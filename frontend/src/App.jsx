@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -12,11 +13,37 @@ import Pedidos from './pages/Pedidos'
 import PedidoDetalle from './pages/PedidoDetalle'
 import Deudores from './pages/Deudores'
 import Navbar from './components/Navbar'
+import { api } from './api/sonograma'
 
 function PrivateRoute() {
-  return localStorage.getItem('token')
-    ? <Outlet />
-    : <Navigate to="/login" replace />
+  const [status, setStatus] = useState(localStorage.getItem('token') ? 'checking' : 'guest')
+
+  useEffect(() => {
+    if (status !== 'checking') return
+    let cancelled = false
+    api.session()
+      .then(usuario => {
+        if (cancelled) return
+        localStorage.setItem('usuario', JSON.stringify(usuario))
+        setStatus('authenticated')
+      })
+      .catch(() => {
+        if (cancelled) return
+        localStorage.removeItem('token')
+        localStorage.removeItem('usuario')
+        setStatus('guest')
+      })
+    return () => { cancelled = true }
+  }, [status])
+
+  if (status === 'checking') {
+    return (
+      <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center">
+        <p className="text-sm text-slate-500 dark:text-stone-400">Validando sesión...</p>
+      </div>
+    )
+  }
+  return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />
 }
 
 function Layout() {

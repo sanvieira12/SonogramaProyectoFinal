@@ -1,7 +1,9 @@
 package com.sonograma.service.importacion;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.dto.DiscogsImportRowDTO;
+import com.sonograma.dto.TrackInfo;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscogsImportJob;
 import com.sonograma.entity.DiscogsImportRow;
@@ -10,6 +12,8 @@ import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
+import com.sonograma.service.AudioPreviewService;
+import com.sonograma.service.DiscoQrCopyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,6 +43,9 @@ public class DiscogsImportJobService {
     private final DiscoRepository discoRepository;
     private final DiscogsCoverService coverService;
     private final PlatformTransactionManager transactionManager;
+    private final ObjectMapper objectMapper;
+    private final AudioPreviewService audioPreviewService;
+    private final DiscoQrCopyService qrCopyService;
     private final ExecutorService jobExecutor = Executors.newFixedThreadPool(2);
 
     public DiscogsImportJobDTO createJob(MultipartFile file) {
@@ -127,7 +134,9 @@ public class DiscogsImportJobService {
             for (DiscogsImportRow row : rows) {
                 if (row.getImportedCatalogProduct() != null) {
                     updateDisco(row.getImportedCatalogProduct(), row);
-                    discoRepository.save(row.getImportedCatalogProduct());
+                    Disco disco = discoRepository.save(row.getImportedCatalogProduct());
+                    qrCopyService.synchronize(disco);
+                    audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), parseTracks(row.getTracksJson()));
                     row.setStatus(DiscogsImportRowStatus.IMPORTED);
                     rowRepository.save(row);
                     continue;
@@ -137,6 +146,8 @@ public class DiscogsImportJobService {
                         .orElseGet(() -> discoRepository.save(toDisco(row)));
                 updateDisco(disco, row);
                 discoRepository.save(disco);
+                qrCopyService.synchronize(disco);
+                audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), parseTracks(row.getTracksJson()));
                 row.setImportedCatalogProduct(disco);
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
                 if (!partial) row.setErrorMessage(null);
@@ -257,9 +268,18 @@ public class DiscogsImportJobService {
             }
             row.setPreviewUrl(null);
             row.setTracklist(result.tracklist());
+            try {
+                row.setTracksJson(objectMapper.writeValueAsString(result.tracks()));
+            } catch (Exception ex) {
+                log.warn("No se pudieron serializar links de audio Discogs para fila {}",
+                        row.getSourceExcelRowNumber());
+            }
             if (row.getImportedCatalogProduct() != null) {
                 updateDisco(row.getImportedCatalogProduct(), row);
-                discoRepository.save(row.getImportedCatalogProduct());
+                Disco disco = discoRepository.save(row.getImportedCatalogProduct());
+                qrCopyService.synchronize(disco);
+                discoRepository.save(disco);
+                audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), result.tracks());
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
             } else {
                 row.setStatus(DiscogsImportRowStatus.PARSED);
@@ -321,6 +341,19 @@ public class DiscogsImportJobService {
                         : catalogNotes(row))
                 .build();
         return disco;
+    }
+
+    private List<TrackInfo> parseTracks(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(
+                json,
+                objectMapper.getTypeFactory().constructCollectionType(List.class, TrackInfo.class)
+            );
+        } catch (Exception ex) {
+            log.warn("No se pudieron leer links de audio Discogs: {}", ex.getMessage());
+            return List.of();
+        }
     }
 
     private void updateDisco(Disco disco, DiscogsImportRow row) {

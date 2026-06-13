@@ -9,6 +9,8 @@ import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.service.AudioPreviewService;
+import com.sonograma.service.DiscoQrCopyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,8 @@ public class DiscogsImportService {
     private final DiscogsLinkParser discogsLinkParser;
     private final DiscogsApiClient discogsApiClient;
     private final DiscogsCoverService coverService;
+    private final AudioPreviewService audioPreviewService;
+    private final DiscoQrCopyService qrCopyService;
 
     public DiscoImportPreviewDTO fetchDesdeLink(String url) {
         Optional<DiscogsLinkParser.DiscogsLink> link = discogsLinkParser.parse(url);
@@ -55,7 +59,13 @@ public class DiscogsImportService {
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
         disco.setCantidadCopias(1);
-        return DiscoMapper.toDTO(discoRepository.save(disco));
+        disco = discoRepository.save(disco);
+        qrCopyService.synchronize(disco);
+        audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
+        DiscoResponseDTO dto = DiscoMapper.toDTO(discoRepository.save(disco));
+        dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
+        dto.setQrCopies(qrCopyService.listDtos(disco));
+        return dto;
     }
 
     @Transactional
@@ -89,6 +99,7 @@ public class DiscogsImportService {
                 .imagenUrl(cover.publicUrl())
                 .previewUrl(null)
                 .tracklist(result.tracklist())
+                .tracks(result.tracks())
                 .codigoInterno(generateCode(
                         result.artist(),
                         result.year(),

@@ -28,6 +28,7 @@ public class DiscoImportPreviewDTO {
     private String previewUrl;
     private String discogsUrl;
     private String tracklist;
+    private List<TrackInfo> tracks;
     private BigDecimal precioVenta;
     private BigDecimal costo;
     private String estado;
