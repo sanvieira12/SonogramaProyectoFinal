@@ -49,6 +49,8 @@ public class SecurityConfig {
                     "/health",
                     "/actuator/**",
                     "/qr/descargar/**",
+                    "/importar/vinylfuture/media/**",
+                    "/importaciones/vinylfuture/media/**",
                     "/importaciones/discogs/covers/**",
                     "/error"
                 ).permitAll()

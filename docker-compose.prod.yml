@@ -47,9 +47,11 @@ services:
       SONOGRAMA_FRONTEND_BASE_URL: ${SONOGRAMA_FRONTEND_BASE_URL:-https://tudominio.com}
       DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
       DISCOGS_COVERS_DIRECTORY: /opt/sonograma/data/discogs-covers
+      VINYLFUTURE_MEDIA_DIRECTORY: /opt/sonograma/data/vinylfuture-media
     volumes:
       - logs_data:/opt/sonograma/logs
       - discogs_covers_data:/opt/sonograma/data/discogs-covers
+      - vinylfuture_media_data:/opt/sonograma/data/vinylfuture-media
     expose:
       - "8080"
     networks:
@@ -94,6 +96,12 @@ volumes:
       type: none
       o: bind
       device: /opt/sonograma/data/discogs-covers
+  vinylfuture_media_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sonograma/data/vinylfuture-media
 
 networks:
   sonograma-net:

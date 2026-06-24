@@ -7,6 +7,7 @@ import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
 import com.sonograma.service.importacion.DiscogsCoverService;
 import com.sonograma.service.importacion.VinylFutureImportService;
+import com.sonograma.service.VinylFutureAssetService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +36,7 @@ public class ImportacionController {
     private final DiscogsImportService discogsImportService;
     private final DiscogsImportJobService discogsImportJobService;
     private final DiscogsCoverService discogsCoverService;
+    private final VinylFutureAssetService vinylFutureAssetService;
 
     // ── VinylFuture Excel ─────────────────────────────────────────────────────
 
@@ -58,6 +60,14 @@ public class ImportacionController {
             @RequestBody List<DiscoImportPreviewDTO> seleccionados) {
         List<DiscoResponseDTO> guardados = vinylFutureImportService.confirmarImport(seleccionados);
         return ResponseEntity.ok(guardados);
+    }
+
+    @GetMapping("/vinylfuture/media/{filename:.+}")
+    public ResponseEntity<Resource> vinylfutureMedia(@PathVariable String filename) throws IOException {
+        Resource resource = vinylFutureAssetService.load(filename);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
+                .body(resource);
     }
 
     // ── Discogs — link único ──────────────────────────────────────────────────

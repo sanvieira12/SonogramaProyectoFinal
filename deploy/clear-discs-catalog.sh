@@ -6,6 +6,7 @@ SCOPE="${2:---all-catalog}"
 PG_CONTAINER="${PG_CONTAINER:-sonograma-postgres}"
 DB_NAME="${SPRING_DATASOURCE_DATABASE:-sonograma_db}"
 DB_USER="${SPRING_DATASOURCE_USERNAME:-sonograma_user}"
+MEDIA_DIR="${VINYLFUTURE_MEDIA_DIR:-/opt/sonograma/data/vinylfuture-media}"
 
 if [[ "$MODE" != "--dry-run" && "$MODE" != "--execute" ]]; then
   echo "Uso: $0 [--dry-run|--execute] [--all-catalog|--vinylfuture-only]" >&2
@@ -111,5 +112,9 @@ SQL
 if [[ "$MODE" == "--dry-run" ]]; then
   echo "Dry-run completo: no se confirmó ningún borrado."
 else
+  if [[ -d "$MEDIA_DIR" ]]; then
+    find "$MEDIA_DIR" -type f -delete
+    echo "Assets VinylFuture eliminados de $MEDIA_DIR."
+  fi
   echo "Limpieza de catálogo confirmada para alcance $SCOPE."
 fi

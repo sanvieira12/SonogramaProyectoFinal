@@ -25,6 +25,7 @@ command -v docker &>/dev/null || die "Docker no instalado"
 command -v node   &>/dev/null || die "Node.js no instalado"
 
 set -a; source "$ENV_FILE"; set +a
+mkdir -p /opt/sonograma/data/vinylfuture-media /opt/sonograma/data/discogs-covers
 
 # 1. Backup previo
 step "1/7 – Backup de base de datos..."

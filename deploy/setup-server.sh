@@ -65,7 +65,7 @@ fi
 
 # 5. Directorios
 log "Creando estructura de directorios..."
-mkdir -p /opt/sonograma/backups /opt/sonograma/logs /opt/sonograma/app /etc/sonograma
+mkdir -p /opt/sonograma/backups /opt/sonograma/logs /opt/sonograma/app /opt/sonograma/data/vinylfuture-media /etc/sonograma
 chown -R ubuntu:ubuntu /opt/sonograma 2>/dev/null || \
     chown -R $SUDO_USER:$SUDO_USER /opt/sonograma 2>/dev/null || true
 chmod -R 755 /opt/sonograma

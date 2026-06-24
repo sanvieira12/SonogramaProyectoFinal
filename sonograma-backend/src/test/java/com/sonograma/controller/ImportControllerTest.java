@@ -16,6 +16,7 @@ import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
+import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.ZipBundleService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +42,7 @@ class ImportControllerTest {
     @Mock private PdfInvoiceParser pdfParser;
     @Mock private VinylFutureSearchService searchService;
     @Mock private VinylFutureScraperService scraperService;
+    @Mock private VinylFutureAssetService assetService;
     @Mock private CsvExportService csvExportService;
     @Mock private ZipBundleService zipBundleService;
     @Mock private DiscoRepository discoRepository;
@@ -72,6 +74,7 @@ class ImportControllerTest {
         when(pdfParser.parseInvoice(any(byte[].class))).thenReturn(invoice);
         when(searchService.buscar(item)).thenReturn(Optional.of(page.sourceUrl()));
         when(scraperService.scrape(page.sourceUrl())).thenReturn(Optional.of(page));
+        when(assetService.storeAssets(item, page)).thenReturn(page);
         when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.empty());
         when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);

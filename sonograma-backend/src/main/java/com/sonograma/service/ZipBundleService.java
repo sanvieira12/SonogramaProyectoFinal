@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.dto.InvoiceItem;
 import com.sonograma.dto.TrackInfo;
 import com.sonograma.dto.VinylPageData;
+import com.sonograma.service.VinylFutureAssetService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -47,6 +48,11 @@ public class ZipBundleService {
     private static final int DOWNLOAD_THREADS = 8;
 
     private final ExecutorService downloadPool = Executors.newFixedThreadPool(DOWNLOAD_THREADS);
+    private final VinylFutureAssetService vinylFutureAssetService;
+
+    public ZipBundleService(VinylFutureAssetService vinylFutureAssetService) {
+        this.vinylFutureAssetService = vinylFutureAssetService;
+    }
 
     public Path buildZip(String csv, Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) throws IOException {
         record TrackResult(String filename, Path path) {}
@@ -162,6 +168,12 @@ public class ZipBundleService {
         Path tempFile = null;
         HttpURLConnection connection = null;
         try {
+            Path localPath = vinylFutureAssetService.localPath(url);
+            if (localPath != null && Files.isRegularFile(localPath)) {
+                tempFile = Files.createTempFile(prefix, ".download");
+                Files.copy(localPath, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                return tempFile;
+            }
             connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
             connection.setInstanceFollowRedirects(true);
             connection.setConnectTimeout(timeout);

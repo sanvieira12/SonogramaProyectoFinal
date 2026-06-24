@@ -17,12 +17,14 @@ import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
+import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.ZipBundleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -59,6 +61,7 @@ public class ImportController {
     private final PdfInvoiceParser pdfParser;
     private final VinylFutureSearchService vinylFutureSearch;
     private final VinylFutureScraperService vinylFutureScraper;
+    private final VinylFutureAssetService vinylFutureAssetService;
     private final CsvExportService csvExport;
     private final ZipBundleService zipBundle;
     private final DiscoRepository discoRepository;
@@ -170,6 +173,16 @@ public class ImportController {
         );
         log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
 
+        long assetsStarted = System.nanoTime();
+        pageDataMap = pageDataMap.entrySet().stream()
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> entry.getValue().map(page -> vinylFutureAssetService.storeAssets(entry.getKey(), page)),
+                (first, ignored) -> first,
+                LinkedHashMap::new
+            ));
+        log.info("Assets Vinyl Future procesados en {} ms.", elapsedMillis(assetsStarted));
+
         List<Disco> imported = new ArrayList<>();
         int skippedDuplicates = 0;
         int qrEntriesCreated = 0;
@@ -238,9 +251,10 @@ public class ImportController {
             .flatMap(page -> page.tracks().stream())
             .filter(track -> !blank(track.youtubeUrl()))
             .count();
+        Map<InvoiceItem, Optional<VinylPageData>> finalPageDataMap = pageDataMap;
         List<String> failedLinks = items.stream()
             .filter(item -> searchResults.getOrDefault(item, Optional.empty()).isEmpty()
-                || pageDataMap.getOrDefault(item, Optional.empty()).isEmpty())
+                || finalPageDataMap.getOrDefault(item, Optional.empty()).isEmpty())
             .map(item -> firstNonBlank(
                 item.codigoCatalogo(), item.artista() + " - " + item.album()))
             .distinct()
@@ -355,6 +369,14 @@ public class ImportController {
 
     private String firstNonBlank(String first, String fallback) {
         return first == null || first.isBlank() ? fallback : first;
+    }
+
+    @GetMapping("/vinylfuture/media/{filename:.+}")
+    public ResponseEntity<Resource> vinylFutureMedia(@PathVariable String filename) throws IOException {
+        Resource resource = vinylFutureAssetService.load(filename);
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
+            .body(resource);
     }
 
     @PreDestroy
