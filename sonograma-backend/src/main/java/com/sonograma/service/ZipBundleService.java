@@ -81,7 +81,7 @@ public class ZipBundleService {
                     continue;
                 }
 
-                String trackName = track.name().isBlank() ? track.label() : track.name();
+                String trackName = firstNonBlank(track.name(), track.label(), "track-" + (trackIndex + 1));
                 String filename = String.format("%02d_%s.mp3", trackIndex + 1, sanitizePath(trackName));
                 mp3Tasks.add(new Mp3Task(albumIndex, filename));
                 mp3Futures.add(CompletableFuture.supplyAsync(
@@ -109,7 +109,9 @@ public class ZipBundleService {
         try {
             try (OutputStream fileOut = new BufferedOutputStream(Files.newOutputStream(zipPath));
                  ZipOutputStream zip = new ZipOutputStream(fileOut, StandardCharsets.UTF_8)) {
-                addEntry(zip, "import.csv", csv.getBytes(StandardCharsets.UTF_8));
+                byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
+                addEntry(zip, "import.csv", csvBytes);
+                addEntry(zip, "data/catalog.csv", csvBytes);
 
                 for (int albumIndex = 0; albumIndex < entries.size(); albumIndex++) {
                     InvoiceItem item = entries.get(albumIndex).getKey();
@@ -247,10 +249,25 @@ public class ZipBundleService {
     }
 
     private String sanitizePath(String name) {
+        if (name == null || name.isBlank()) {
+            return "sin-nombre";
+        }
         return name.replaceAll("[/\\\\:*?\"<>|]", "_").strip();
     }
 
     private String sanitizeCode(String code) {
+        if (code == null || code.isBlank()) {
+            return "sin-codigo";
+        }
         return code.replaceAll("[^A-Za-z0-9\\-]", "_");
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

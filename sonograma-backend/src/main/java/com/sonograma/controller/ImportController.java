@@ -194,7 +194,21 @@ public class ImportController {
                 pageData.ifPresent(page ->
                     audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
                 imported.add(discoRepository.save(disco));
-                log.info("Disco guardado en BD: {} - {}", disco.getArtista(), disco.getAlbum());
+                int mp3Count = pageData.map(page -> (int) page.tracks().stream()
+                    .filter(track -> !blank(track.mp3Url()))
+                    .count()).orElse(0);
+                int youtubeCount = pageData.map(page -> (int) page.tracks().stream()
+                    .filter(track -> !blank(track.youtubeUrl()))
+                    .count()).orElse(0);
+                log.info(
+                    "Vinyl Future importado: title='{} - {}', sourceUrl='{}', cover={}, mp3Previews={}, youtubeLinks={}, dbUpdated=true",
+                    disco.getArtista(),
+                    disco.getAlbum(),
+                    pageData.map(VinylPageData::sourceUrl).orElse(null),
+                    pageData.map(page -> !blank(page.frontImageUrl())).orElse(false),
+                    mp3Count,
+                    youtubeCount
+                );
             } catch (Exception ex) {
                 log.warn("No se pudo guardar en BD: {} - {}: {}",
                     item.artista(), item.album(), ex.getMessage());
