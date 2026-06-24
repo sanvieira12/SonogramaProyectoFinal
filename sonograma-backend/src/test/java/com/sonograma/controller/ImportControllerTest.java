@@ -74,7 +74,8 @@ class ImportControllerTest {
         when(pdfParser.parseInvoice(any(byte[].class))).thenReturn(invoice);
         when(searchService.buscar(item)).thenReturn(Optional.of(page.sourceUrl()));
         when(scraperService.scrape(page.sourceUrl())).thenReturn(Optional.of(page));
-        when(assetService.storeAssets(item, page)).thenReturn(page);
+        when(assetService.storeAssetsWithResult(item, page))
+            .thenReturn(new VinylFutureAssetService.AssetStoreResult(page, 1, 1, 0));
         when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.empty());
         when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);

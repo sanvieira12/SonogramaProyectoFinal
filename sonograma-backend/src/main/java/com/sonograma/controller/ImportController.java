@@ -49,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -172,18 +173,19 @@ public class ImportController {
         long scrapeStarted = System.nanoTime();
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap = parallelMap(
             items,
-            item -> searchResults.getOrDefault(item, Optional.empty()).flatMap(vinylFutureScraper::scrape)
+            item -> searchResults.getOrDefault(item, Optional.empty()).flatMap(vinylFutureScraper::scrape),
+            (item, pageData, processed, total) -> log.info(
+                "VinylFuture product page processed {}/{}: item='{}', found={}",
+                processed,
+                total,
+                itemReference(item),
+                pageData.isPresent()
+            )
         );
         log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
 
         long assetsStarted = System.nanoTime();
-        pageDataMap = pageDataMap.entrySet().stream()
-            .collect(Collectors.toMap(
-                Map.Entry::getKey,
-                entry -> entry.getValue().map(page -> vinylFutureAssetService.storeAssets(entry.getKey(), page)),
-                (first, ignored) -> first,
-                LinkedHashMap::new
-            ));
+        pageDataMap = storeAssetsWithProgress(pageDataMap);
         log.info("Assets Vinyl Future procesados en {} ms.", elapsedMillis(assetsStarted));
 
         List<Disco> imported = new ArrayList<>();
@@ -353,10 +355,25 @@ public class ImportController {
     private <T> Map<InvoiceItem, T> parallelMap(
             List<InvoiceItem> items,
             Function<InvoiceItem, T> operation) {
+        return parallelMap(items, operation, null);
+    }
+
+    private <T> Map<InvoiceItem, T> parallelMap(
+            List<InvoiceItem> items,
+            Function<InvoiceItem, T> operation,
+            ProgressLogger<T> progressLogger) {
+        AtomicInteger processed = new AtomicInteger();
+        int total = items.size();
         Map<InvoiceItem, CompletableFuture<T>> futures = items.stream()
             .collect(Collectors.toMap(
                 Function.identity(),
-                item -> CompletableFuture.supplyAsync(() -> operation.apply(item), importPool),
+                item -> CompletableFuture.supplyAsync(() -> {
+                    T result = operation.apply(item);
+                    if (progressLogger != null) {
+                        progressLogger.log(item, result, processed.incrementAndGet(), total);
+                    }
+                    return result;
+                }, importPool),
                 (first, ignored) -> first,
                 LinkedHashMap::new
             ));
@@ -366,12 +383,75 @@ public class ImportController {
         return results;
     }
 
+    private Map<InvoiceItem, Optional<VinylPageData>> storeAssetsWithProgress(
+            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) {
+        int totalProducts = (int) pageDataMap.values().stream().flatMap(Optional::stream).count();
+        if (totalProducts == 0) {
+            log.info("Assets Vinyl Future: no hay productos con metadata para descargar.");
+            return pageDataMap;
+        }
+
+        AtomicInteger productsProcessed = new AtomicInteger();
+        AtomicInteger coversDownloaded = new AtomicInteger();
+        AtomicInteger mp3Downloaded = new AtomicInteger();
+        AtomicInteger failedMediaDownloads = new AtomicInteger();
+        log.info("Assets Vinyl Future: iniciando descarga persistente de media para {} productos.", totalProducts);
+
+        Map<InvoiceItem, CompletableFuture<Optional<VinylFutureAssetService.AssetStoreResult>>> futures =
+            pageDataMap.entrySet().stream()
+                .collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    entry -> CompletableFuture.supplyAsync(() -> entry.getValue().map(page ->
+                        vinylFutureAssetService.storeAssetsWithResult(entry.getKey(), page)
+                    ), importPool),
+                    (first, ignored) -> first,
+                    LinkedHashMap::new
+                ));
+
+        Map<InvoiceItem, Optional<VinylPageData>> results = new LinkedHashMap<>();
+        futures.forEach((item, future) -> {
+            Optional<VinylFutureAssetService.AssetStoreResult> storeResult = future.join();
+            storeResult.ifPresent(result -> {
+                coversDownloaded.addAndGet(result.coversDownloaded());
+                mp3Downloaded.addAndGet(result.mp3Downloaded());
+                failedMediaDownloads.addAndGet(result.failedMediaDownloads());
+                int processed = productsProcessed.incrementAndGet();
+                log.info(
+                    "VinylFuture media processed {}/{}: item='{}', coversDownloaded={}, mp3FilesDownloaded={}, failedMediaDownloads={}, totals[covers={}, mp3={}, failed={}]",
+                    processed,
+                    totalProducts,
+                    itemReference(item),
+                    result.coversDownloaded(),
+                    result.mp3Downloaded(),
+                    result.failedMediaDownloads(),
+                    coversDownloaded.get(),
+                    mp3Downloaded.get(),
+                    failedMediaDownloads.get()
+                );
+            });
+            results.put(item, storeResult.map(VinylFutureAssetService.AssetStoreResult::page));
+        });
+
+        log.info(
+            "Assets Vinyl Future finalizados: productsProcessed={}, coversDownloaded={}, mp3FilesDownloaded={}, failedMediaDownloads={}",
+            productsProcessed.get(),
+            coversDownloaded.get(),
+            mp3Downloaded.get(),
+            failedMediaDownloads.get()
+        );
+        return results;
+    }
+
     private long elapsedMillis(long startedAt) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
     private String firstNonBlank(String first, String fallback) {
         return first == null || first.isBlank() ? fallback : first;
+    }
+
+    private String itemReference(InvoiceItem item) {
+        return firstNonBlank(item.codigoCatalogo(), item.artista() + " - " + item.album());
     }
 
     @GetMapping("/vinylfuture/media/**")
@@ -403,5 +483,10 @@ public class ImportController {
             .contentType(MediaType.TEXT_PLAIN)
             .contentLength(payload.length)
             .body(body);
+    }
+
+    @FunctionalInterface
+    private interface ProgressLogger<T> {
+        void log(InvoiceItem item, T result, int processed, int total);
     }
 }

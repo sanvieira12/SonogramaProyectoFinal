@@ -37,6 +37,7 @@ public class VinylFutureAssetService {
     private static final int TIMEOUT_MS = 30_000;
     private static final int MAX_IMAGE_SIZE = 10 * 1024 * 1024;
     private static final int MAX_AUDIO_SIZE = 30 * 1024 * 1024;
+    private static final int MAX_DOWNLOAD_ATTEMPTS = 3;
     private static final String PUBLIC_PREFIX = "/api/importar/vinylfuture/media/";
 
     private final Path mediaDirectory;
@@ -47,15 +48,24 @@ public class VinylFutureAssetService {
     }
 
     public VinylPageData storeAssets(InvoiceItem item, VinylPageData page) {
+        AssetStoreResult result = storeAssetsWithResult(item, page);
+        return result == null ? null : result.page();
+    }
+
+    public AssetStoreResult storeAssetsWithResult(InvoiceItem item, VinylPageData page) {
         if (page == null) return null;
 
         String folder = discFolder(item, page);
-        String coverUrl = store(
+        StoredAsset coverAsset = store(
             page.frontImageUrl(),
             folder + "/cover." + extensionFromUrl(page.frontImageUrl(), "jpg"),
             MAX_IMAGE_SIZE,
             "image/*"
-        ).publicUrlOrFallback(page.frontImageUrl());
+        );
+        String coverUrl = coverAsset.publicUrlOrFallback(page.frontImageUrl());
+        int coversDownloaded = coverAsset.downloaded() ? 1 : 0;
+        int failedMediaDownloads = coverAsset.failed() ? 1 : 0;
+        int mp3Downloaded = 0;
 
         List<TrackInfo> tracks = new ArrayList<>();
         List<TrackInfo> sourceTracks = page.tracks() == null ? List.of() : page.tracks();
@@ -67,13 +77,19 @@ public class VinylFutureAssetService {
                 String trackName = firstNonBlank(track.name(), "Track " + position);
                 String filename = folder + "/" + sanitize(position, 12)
                     + " - " + sanitize(trackName, 80) + ".mp3";
-                audioUrl = store(track.mp3Url(), filename, MAX_AUDIO_SIZE, "audio/mpeg,*/*")
-                    .publicUrlOrFallback(track.mp3Url());
+                StoredAsset audioAsset = store(track.mp3Url(), filename, MAX_AUDIO_SIZE, "audio/mpeg,*/*");
+                audioUrl = audioAsset.publicUrlOrFallback(track.mp3Url());
+                if (audioAsset.downloaded()) {
+                    mp3Downloaded++;
+                }
+                if (audioAsset.failed()) {
+                    failedMediaDownloads++;
+                }
             }
             tracks.add(new TrackInfo(track.label(), track.name(), audioUrl, track.youtubeUrl()));
         }
 
-        return new VinylPageData(
+        VinylPageData storedPage = new VinylPageData(
             page.sourceUrl(),
             page.artist(),
             page.title(),
@@ -90,6 +106,7 @@ public class VinylFutureAssetService {
             page.backImageUrl(),
             tracks
         );
+        return new AssetStoreResult(storedPage, coversDownloaded, mp3Downloaded, failedMediaDownloads);
     }
 
     public Resource load(String filename) throws IOException {
@@ -143,7 +160,7 @@ public class VinylFutureAssetService {
             Files.createDirectories(target.getParent());
             Path temporary = Files.createTempFile(mediaDirectory, "vinylfuture-", ".download");
             try {
-                downloadTo(sourceUrl, temporary, maxSize, accept);
+                downloadToWithRetries(sourceUrl, temporary, maxSize, accept);
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
             } finally {
                 Files.deleteIfExists(temporary);
@@ -154,6 +171,30 @@ public class VinylFutureAssetService {
             log.warn("No se pudo guardar asset VinylFuture '{}': {}", sourceUrl, ex.getMessage());
             return StoredAsset.failure();
         }
+    }
+
+    private void downloadToWithRetries(String sourceUrl, Path target, int maxSize, String accept)
+            throws IOException {
+        IOException lastError = null;
+        for (int attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+            try {
+                downloadTo(sourceUrl, target, maxSize, accept);
+                if (attempt > 1) {
+                    log.info("Asset VinylFuture recuperado en reintento {}/{}: {}",
+                        attempt, MAX_DOWNLOAD_ATTEMPTS, sourceUrl);
+                }
+                return;
+            } catch (IOException ex) {
+                lastError = ex;
+                if (attempt >= MAX_DOWNLOAD_ATTEMPTS) {
+                    break;
+                }
+                log.warn("Reintento asset VinylFuture {}/{} para '{}': {}",
+                    attempt + 1, MAX_DOWNLOAD_ATTEMPTS, sourceUrl, ex.getMessage());
+                sleepBeforeRetry(attempt);
+            }
+        }
+        throw lastError;
     }
 
     private void downloadTo(String sourceUrl, Path target, int maxSize, String accept) throws IOException {
@@ -246,17 +287,33 @@ public class VinylFutureAssetService {
         return null;
     }
 
-    private record StoredAsset(String publicUrl, boolean downloaded) {
+    private void sleepBeforeRetry(int attempt) throws IOException {
+        try {
+            Thread.sleep(500L * attempt);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IOException("descarga interrumpida", ex);
+        }
+    }
+
+    public record AssetStoreResult(
+        VinylPageData page,
+        int coversDownloaded,
+        int mp3Downloaded,
+        int failedMediaDownloads
+    ) {}
+
+    private record StoredAsset(String publicUrl, boolean downloaded, boolean failed) {
         static StoredAsset success(String publicUrl, boolean downloaded) {
-            return new StoredAsset(publicUrl, downloaded);
+            return new StoredAsset(publicUrl, downloaded, false);
         }
 
         static StoredAsset missing() {
-            return new StoredAsset(null, false);
+            return new StoredAsset(null, false, false);
         }
 
         static StoredAsset failure() {
-            return new StoredAsset(null, false);
+            return new StoredAsset(null, false, true);
         }
 
         String publicUrlOrFallback(String fallback) {

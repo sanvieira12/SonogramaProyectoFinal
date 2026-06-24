@@ -243,6 +243,7 @@ function PdfExport() {
   const [exportando, setExportando] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [segundos, setSegundos] = useState(0)
+  const [exportSegundos, setExportSegundos] = useState(0)
 
   useEffect(() => {
     if (estado !== 'loading') return undefined
@@ -250,11 +251,25 @@ function PdfExport() {
     return () => window.clearInterval(timer)
   }, [estado])
 
+  useEffect(() => {
+    if (!exportando) return undefined
+    const timer = window.setInterval(() => setExportSegundos(s => s + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [exportando])
+
   const etapa = segundos < 3
     ? 'Leyendo factura y precios…'
     : segundos < 12
       ? 'Buscando portadas y metadata en paralelo…'
       : 'Preparando archivos y guardando el pedido…'
+
+  const etapaZip = exportSegundos < 4
+    ? 'Preparando importación y validando catálogo…'
+    : exportSegundos < 18
+      ? 'Procesando productos y descargando media…'
+      : exportSegundos < 45
+        ? 'Descargando portadas y MP3, luego se arma el ZIP final…'
+        : 'La descarga sigue en curso. Se mantiene abierta hasta completar todo el ZIP…'
 
   async function procesar() {
     if (!archivo) return
@@ -271,6 +286,7 @@ function PdfExport() {
   }
 
   async function exportarZip() {
+    setExportSegundos(0)
     setExportando(true)
     setErrorMsg('')
     try {
@@ -291,7 +307,7 @@ function PdfExport() {
 
   function reset() {
     setArchivo(null); setResumen(null)
-    setEstado('idle'); setErrorMsg(''); setSegundos(0)
+    setEstado('idle'); setErrorMsg(''); setSegundos(0); setExportSegundos(0)
   }
 
   return (
@@ -354,7 +370,18 @@ function PdfExport() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500 text-emerald-700 dark:text-emerald-300 text-sm font-medium disabled:opacity-50">
             {exportando ? 'Preparando ZIP…' : 'Exportar CSV, portadas y audio (opcional)'}
           </button>
-          <button onClick={reset} className="ml-3 text-xs underline text-emerald-600 dark:text-emerald-400">Nueva importación</button>
+          <button onClick={reset} disabled={exportando} className="ml-3 text-xs underline text-emerald-600 dark:text-emerald-400 disabled:opacity-50">Nueva importación</button>
+          {exportando && (
+            <div className="mt-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-100/60 dark:bg-emerald-950/30 px-4 py-3">
+              <Spinner text={etapaZip} />
+              <div className="h-1.5 overflow-hidden rounded-full bg-emerald-200/70 dark:bg-emerald-900">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-500" />
+              </div>
+              <p className="mt-2 text-center text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                {exportSegundos}s · no se descarga ningún ZIP hasta terminar portadas, MP3 y compresión final
+              </p>
+            </div>
+          )}
           {errorMsg && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
         </div>
       )}
