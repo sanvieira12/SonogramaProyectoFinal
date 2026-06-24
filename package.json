@@ -1,0 +1,10 @@
+{
+  "name": "sonograma",
+  "private": true,
+  "scripts": {
+    "clean:catalog": "bash deploy/clear-discs-catalog.sh --execute --all-catalog",
+    "reset:catalog-only": "bash deploy/clear-discs-catalog.sh --execute --all-catalog",
+    "clean:catalog:dry-run": "bash deploy/clear-discs-catalog.sh --dry-run --all-catalog",
+    "clean:catalog:vinylfuture": "bash deploy/clear-discs-catalog.sh --execute --vinylfuture-only"
+  }
+}

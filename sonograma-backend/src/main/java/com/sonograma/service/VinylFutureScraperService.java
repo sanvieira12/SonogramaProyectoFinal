@@ -88,11 +88,15 @@ public class VinylFutureScraperService {
             doc.title()
         );
         String artist = firstNonBlank(
+            text(doc, "article.single_product .artist h1"),
+            text(doc, "article.product h2.artist"), text(doc, ".artikel h2.artist"),
             labelled.get("artist"), labelled.get("artista"),
             meta(doc, "meta[name=music:musician]", "content"),
             text(doc, "[itemprop=byArtist]"), text(doc, ".artist")
         );
         String title = firstNonBlank(
+            text(doc, "article.single_product .title h1"),
+            text(doc, "article.product h3.title"), text(doc, ".artikel h3.title"),
             labelled.get("title"), labelled.get("titulo"), labelled.get("album"),
             jsonLd.get("name"), text(doc, "[itemprop=name]"), pageTitle
         );
@@ -102,13 +106,19 @@ public class VinylFutureScraperService {
             clean(artist),
             clean(title),
             clean(firstNonBlank(labelled.get("catalog"), labelled.get("catalogue"), labelled.get("codigo"),
-                labelled.get("cat no"), labelled.get("cat. no"), labelled.get("barcode"), jsonLd.get("sku"))),
-            clean(firstNonBlank(labelled.get("label"), labelled.get("sello"), text(doc, ".label"))),
+                labelled.get("cat no"), labelled.get("cat. no"), labelled.get("barcode"),
+                text(doc, "article.single_product .labelContainer [itemprop=alternateName]"),
+                text(doc, "article.product .musiclabel strong"), text(doc, ".musiclabel strong"), jsonLd.get("sku"))),
+            clean(firstNonBlank(labelled.get("label"), labelled.get("sello"),
+                text(doc, "article.single_product .labelContainer [itemprop=provider]"),
+                text(doc, "article.product .musiclabel a"), text(doc, ".musiclabel a"), text(doc, ".label"))),
             clean(firstNonBlank(labelled.get("genre"), labelled.get("genero"), text(doc, ".genre"))),
             parseYear(firstNonBlank(labelled.get("year"), labelled.get("anio"), labelled.get("released"),
                 jsonLd.get("datePublished"))),
             clean(firstNonBlank(labelled.get("country"), labelled.get("pais"))),
-            clean(firstNonBlank(labelled.get("format"), labelled.get("formato"))),
+            clean(firstNonBlank(labelled.get("format"), labelled.get("formato"),
+                text(doc, "article.single_product .product_infos .infos .medium"),
+                text(doc, "article.product .infos .medium"), text(doc, ".infos .medium"))),
             clean(firstNonBlank(labelled.get("condition"), labelled.get("condicion"))),
             clean(firstNonBlank(meta(doc, "meta[property=og:description]", "content"),
                 meta(doc, "meta[name=description]", "content"), jsonLd.get("description"),
@@ -170,7 +180,8 @@ public class VinylFutureScraperService {
         String explicit = firstNonBlank(element.attr("data-position"), element.attr("data-track"),
             element.selectFirst(".position") != null ? element.selectFirst(".position").text() : null,
             element.selectFirst("b") != null ? element.selectFirst("b").text() : null);
-        Matcher matcher = TRACK_POSITION.matcher(firstNonBlank(explicit, element.text(), ""));
+        String candidate = firstNonBlank(explicit, element.text());
+        Matcher matcher = TRACK_POSITION.matcher(candidate == null ? "" : candidate);
         return matcher.find() ? matcher.group(1).toUpperCase(Locale.ROOT) : clean(explicit);
     }
 

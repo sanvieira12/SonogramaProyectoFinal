@@ -19,12 +19,15 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/importaciones")
@@ -62,12 +65,21 @@ public class ImportacionController {
         return ResponseEntity.ok(guardados);
     }
 
-    @GetMapping("/vinylfuture/media/{filename:.+}")
-    public ResponseEntity<Resource> vinylfutureMedia(@PathVariable String filename) throws IOException {
+    @GetMapping("/vinylfuture/media/**")
+    public ResponseEntity<Resource> vinylfutureMedia(HttpServletRequest request) throws IOException {
+        String filename = mediaPath(request);
         Resource resource = vinylFutureAssetService.load(filename);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
                 .body(resource);
+    }
+
+    private String mediaPath(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String marker = "/vinylfuture/media/";
+        int index = uri.indexOf(marker);
+        String path = index >= 0 ? uri.substring(index + marker.length()) : "";
+        return URLDecoder.decode(path, StandardCharsets.UTF_8);
     }
 
     // ── Discogs — link único ──────────────────────────────────────────────────

@@ -73,4 +73,52 @@ class VinylFutureScraperServiceTest {
         assertEquals("https://www.deejay.de/streamit/7/8/106278a.mp3",
             result.tracks().get(0).mp3Url());
     }
+
+    @Test
+    void ignoresBlankAudioElementsWithoutTrackPosition() {
+        String html = """
+            <audio src=""></audio>
+            <a href="/preview.mp3"></a>
+            """;
+        Document doc = Jsoup.parse(html, "https://www.vinylfuture.com/release_Vinyl__106278");
+
+        VinylPageData result = service.extractPageData(
+            doc, "https://www.vinylfuture.com/release_Vinyl__106278");
+
+        assertEquals(1, result.tracks().size());
+        assertEquals("https://www.vinylfuture.com/preview.mp3", result.tracks().get(0).mp3Url());
+    }
+
+    @Test
+    void prefersVisibleProductMetadataOverWebsiteJsonLd() {
+        String html = """
+            <script type="application/ld+json">{"@type":"WebSite","name":"vinylfuture.com"}</script>
+            <article class="single_product">
+              <div class="artikel">
+                <div class="artist"><h1 itemprop="publisher">Betonkust</h1></div>
+                <div class="title"><h1 itemprop="inalbum name">Tropicana Tracks Two</h1></div>
+                <div class="labelContainer">
+                  <h1 itemprop="alternateName">ALT025</h1>
+                  <h3 itemprop="provider">Altered Circuits</h3>
+                </div>
+              </div>
+              <div class="product_infos">
+                <div class="infos">
+                  <span class="format"><b>Format:</b> <span class="medium disc1">12inch Vinyl</span></span>
+                </div>
+              </div>
+            </article>
+            """;
+        Document doc = Jsoup.parse(html,
+            "https://www.vinylfuture.com/Betonkust_Tropicana_Tracks_Two_ALT025_Vinyl__1225612");
+
+        VinylPageData result = service.extractPageData(doc,
+            "https://www.vinylfuture.com/Betonkust_Tropicana_Tracks_Two_ALT025_Vinyl__1225612");
+
+        assertEquals("Betonkust", result.artist());
+        assertEquals("Tropicana Tracks Two", result.title());
+        assertEquals("ALT025", result.code());
+        assertEquals("Altered Circuits", result.label());
+        assertEquals("12inch Vinyl", result.format());
+    }
 }

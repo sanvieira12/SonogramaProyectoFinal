@@ -17,6 +17,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -46,6 +48,7 @@ public class ZipBundleService {
     private static final int MP3_TIMEOUT_MS = 30_000;
     private static final int MAX_MP3_SIZE = 20 * 1024 * 1024;
     private static final int DOWNLOAD_THREADS = 8;
+    private static final DateTimeFormatter EXPORT_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final ExecutorService downloadPool = Executors.newFixedThreadPool(DOWNLOAD_THREADS);
     private final VinylFutureAssetService vinylFutureAssetService;
@@ -57,6 +60,7 @@ public class ZipBundleService {
     public Path buildZip(String csv, Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) throws IOException {
         record TrackResult(String filename, Path path) {}
         record Mp3Task(int albumIndex, String filename) {}
+        String root = "vinylfuture-export-" + LocalDateTime.now().format(EXPORT_TS);
 
         List<Map.Entry<InvoiceItem, VinylPageData>> entries = pageDataMap.entrySet().stream()
             .filter(entry -> entry.getValue().isPresent())
@@ -65,14 +69,7 @@ public class ZipBundleService {
 
         List<CompletableFuture<Path>> imageFutures = entries.stream()
             .map(entry -> CompletableFuture.supplyAsync(
-                () -> entry.getValue().frontImageUrl() == null
-                    ? null
-                    : downloadToTemp(
-                        entry.getValue().frontImageUrl(),
-                        IMAGE_TIMEOUT_MS,
-                        MAX_IMAGE_SIZE,
-                        "cover-"
-                    ),
+                () -> resolveAsset(entry.getValue().frontImageUrl(), IMAGE_TIMEOUT_MS, MAX_IMAGE_SIZE, "cover-"),
                 downloadPool
             ))
             .toList();
@@ -87,11 +84,12 @@ public class ZipBundleService {
                     continue;
                 }
 
-                String trackName = firstNonBlank(track.name(), track.label(), "track-" + (trackIndex + 1));
-                String filename = String.format("%02d_%s.mp3", trackIndex + 1, sanitizePath(trackName));
+                String position = firstNonBlank(track.label(), String.format("%02d", trackIndex + 1));
+                String trackName = firstNonBlank(track.name(), "Track " + position);
+                String filename = sanitizePath(position) + " - " + sanitizePath(trackName) + ".mp3";
                 mp3Tasks.add(new Mp3Task(albumIndex, filename));
                 mp3Futures.add(CompletableFuture.supplyAsync(
-                    () -> downloadToTemp(track.mp3Url(), MP3_TIMEOUT_MS, MAX_MP3_SIZE, "track-"),
+                    () -> resolveAsset(track.mp3Url(), MP3_TIMEOUT_MS, MAX_MP3_SIZE, "track-"),
                     downloadPool
                 ));
             }
@@ -116,22 +114,23 @@ public class ZipBundleService {
             try (OutputStream fileOut = new BufferedOutputStream(Files.newOutputStream(zipPath));
                  ZipOutputStream zip = new ZipOutputStream(fileOut, StandardCharsets.UTF_8)) {
                 byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-                addEntry(zip, "import.csv", csvBytes);
-                addEntry(zip, "data/catalog.csv", csvBytes);
+                addEntry(zip, root + "/import.csv", csvBytes);
+                addEntry(zip, root + "/data/import.csv", csvBytes);
+                addEntry(zip, root + "/data/catalog.csv", csvBytes);
 
                 for (int albumIndex = 0; albumIndex < entries.size(); albumIndex++) {
                     InvoiceItem item = entries.get(albumIndex).getKey();
                     VinylPageData page = entries.get(albumIndex).getValue();
-                    String folder = sanitizePath(
-                        item.artista() + " - " + item.album() + " - " + item.codigoCatalogo()
-                    );
-                    String code = sanitizeCode(item.codigoCatalogo());
+                    String folder = root + "/media/" + mediaFolder(item, page);
                     List<String> missing = new ArrayList<>();
 
                     Path imagePath = imagePaths.get(albumIndex);
                     if (imagePath != null) {
-                        String extension = guessExtension(page.frontImageUrl(), "jpg");
-                        addFileEntry(zip, folder + "/images/" + code + "_front." + extension, imagePath);
+                        String relative = vinylFutureAssetService.relativePath(page.frontImageUrl());
+                        String filename = relative != null && relative.contains("/")
+                            ? relative.substring(relative.lastIndexOf('/') + 1)
+                            : "cover." + guessExtension(page.frontImageUrl(), "jpg");
+                        addFileEntry(zip, folder + "/" + filename, imagePath);
                     } else if (page.frontImageUrl() != null) {
                         missing.add("front image: " + page.frontImageUrl());
                     } else {
@@ -140,7 +139,7 @@ public class ZipBundleService {
 
                     for (TrackResult track : tracksByAlbum.getOrDefault(albumIndex, List.of())) {
                         if (track.path() != null) {
-                            addFileEntry(zip, folder + "/audio/" + track.filename(), track.path());
+                            addFileEntry(zip, folder + "/" + track.filename(), track.path());
                         } else {
                             missing.add("audio: " + track.filename());
                         }
@@ -164,16 +163,26 @@ public class ZipBundleService {
         }
     }
 
+    private Path resolveAsset(String url, int timeout, int maxSize, String prefix) {
+        if (url == null || url.isBlank()) return null;
+        Path localPath = vinylFutureAssetService.localPath(url);
+        if (localPath != null && Files.isRegularFile(localPath)) {
+            try {
+                Path tempFile = Files.createTempFile(prefix, ".download");
+                Files.copy(localPath, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                return tempFile;
+            } catch (IOException ex) {
+                log.warn("No se pudo preparar asset local '{}': {}", localPath, ex.getMessage());
+                return null;
+            }
+        }
+        return downloadToTemp(url, timeout, maxSize, prefix);
+    }
+
     private Path downloadToTemp(String url, int timeout, int maxSize, String prefix) {
         Path tempFile = null;
         HttpURLConnection connection = null;
         try {
-            Path localPath = vinylFutureAssetService.localPath(url);
-            if (localPath != null && Files.isRegularFile(localPath)) {
-                tempFile = Files.createTempFile(prefix, ".download");
-                Files.copy(localPath, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                return tempFile;
-            }
             connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
             connection.setInstanceFollowRedirects(true);
             connection.setConnectTimeout(timeout);
@@ -264,14 +273,24 @@ public class ZipBundleService {
         if (name == null || name.isBlank()) {
             return "sin-nombre";
         }
-        return name.replaceAll("[/\\\\:*?\"<>|]", "_").strip();
+        String sanitized = name.replaceAll("[/\\\\:*?\"<>|]", "_")
+            .replaceAll("\\p{Cntrl}", "")
+            .replaceAll("\\s+", " ")
+            .strip();
+        return sanitized.isBlank() ? "sin-nombre" : sanitized;
     }
 
-    private String sanitizeCode(String code) {
-        if (code == null || code.isBlank()) {
-            return "sin-codigo";
-        }
-        return code.replaceAll("[^A-Za-z0-9\\-]", "_");
+    private String mediaFolder(InvoiceItem item, VinylPageData page) {
+        String code = firstNonBlank(page.code(), item.codigoCatalogo(), "sin-codigo");
+        String artist = firstNonBlank(page.artist(), item.artista(), "sin-artista");
+        String album = firstNonBlank(page.title(), item.album(), "sin-album");
+        return truncate(sanitizePath(code), 50)
+            + " - " + truncate(sanitizePath(artist), 70)
+            + " - " + truncate(sanitizePath(album), 90);
+    }
+
+    private String truncate(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength).strip();
     }
 
     private String firstNonBlank(String... values) {

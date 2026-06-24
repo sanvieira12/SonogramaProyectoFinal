@@ -55,10 +55,14 @@ class VinylFutureAssetServiceTest {
 
             assertThat(stored.frontImageUrl()).startsWith("/api/importar/vinylfuture/media/");
             assertThat(stored.tracks().get(0).mp3Url()).startsWith("/api/importar/vinylfuture/media/");
-            assertThat(Files.list(tempDir)).hasSize(2);
+            assertThat(service.relativePath(stored.frontImageUrl()))
+                .isEqualTo("CAT-1 - Artist - Album/cover.jpg");
+            assertThat(service.relativePath(stored.tracks().get(0).mp3Url()))
+                .isEqualTo("CAT-1 - Artist - Album/A1 - Track One.mp3");
+            assertThat(Files.walk(tempDir).filter(Files::isRegularFile)).hasSize(2);
             assertThat(service.localPath(stored.frontImageUrl())).isRegularFile();
             assertThat(service.localPath(stored.tracks().get(0).mp3Url())).isRegularFile();
-            assertThat(service.load(Path.of(stored.frontImageUrl()).getFileName().toString()).exists()).isTrue();
+            assertThat(service.load(service.relativePath(stored.frontImageUrl())).exists()).isTrue();
         } finally {
             server.stop(0);
         }

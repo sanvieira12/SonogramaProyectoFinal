@@ -33,8 +33,10 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -51,6 +53,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.PreDestroy;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/importar")
@@ -371,12 +374,21 @@ public class ImportController {
         return first == null || first.isBlank() ? fallback : first;
     }
 
-    @GetMapping("/vinylfuture/media/{filename:.+}")
-    public ResponseEntity<Resource> vinylFutureMedia(@PathVariable String filename) throws IOException {
+    @GetMapping("/vinylfuture/media/**")
+    public ResponseEntity<Resource> vinylFutureMedia(HttpServletRequest request) throws IOException {
+        String filename = mediaPath(request);
         Resource resource = vinylFutureAssetService.load(filename);
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
             .body(resource);
+    }
+
+    private String mediaPath(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String marker = "/vinylfuture/media/";
+        int index = uri.indexOf(marker);
+        String path = index >= 0 ? uri.substring(index + marker.length()) : "";
+        return URLDecoder.decode(path, StandardCharsets.UTF_8);
     }
 
     @PreDestroy

@@ -16,12 +16,16 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.springframework.web.util.UriUtils;
 
 @Slf4j
 @Service
@@ -45,10 +49,10 @@ public class VinylFutureAssetService {
     public VinylPageData storeAssets(InvoiceItem item, VinylPageData page) {
         if (page == null) return null;
 
-        String key = assetKey(item, page);
+        String folder = discFolder(item, page);
         String coverUrl = store(
             page.frontImageUrl(),
-            key + "-cover." + extensionFromUrl(page.frontImageUrl(), "jpg"),
+            folder + "/cover." + extensionFromUrl(page.frontImageUrl(), "jpg"),
             MAX_IMAGE_SIZE,
             "image/*"
         ).publicUrlOrFallback(page.frontImageUrl());
@@ -59,9 +63,10 @@ public class VinylFutureAssetService {
             TrackInfo track = sourceTracks.get(i);
             String audioUrl = track.mp3Url();
             if (audioUrl != null && !audioUrl.isBlank()) {
-                String trackName = firstNonBlank(track.name(), track.label(), "track-" + (i + 1));
-                String filename = key + "-" + String.format("%02d", i + 1)
-                    + "-" + sanitize(trackName, 70) + ".mp3";
+                String position = firstNonBlank(track.label(), String.format("%02d", i + 1));
+                String trackName = firstNonBlank(track.name(), "Track " + position);
+                String filename = folder + "/" + sanitize(position, 12)
+                    + " - " + sanitize(trackName, 80) + ".mp3";
                 audioUrl = store(track.mp3Url(), filename, MAX_AUDIO_SIZE, "audio/mpeg,*/*")
                     .publicUrlOrFallback(track.mp3Url());
             }
@@ -109,10 +114,16 @@ public class VinylFutureAssetService {
         int index = urlOrPath.indexOf(PUBLIC_PREFIX);
         if (index < 0) return null;
         try {
-            return safeFile(urlOrPath.substring(index + PUBLIC_PREFIX.length()));
+            return safeFile(decodePath(urlOrPath.substring(index + PUBLIC_PREFIX.length())));
         } catch (IOException ex) {
             return null;
         }
+    }
+
+    public String relativePath(String urlOrPath) {
+        Path localPath = localPath(urlOrPath);
+        if (localPath == null) return null;
+        return mediaDirectory.relativize(localPath).toString().replace('\\', '/');
     }
 
     private StoredAsset store(String sourceUrl, String filename, int maxSize, String accept) {
@@ -129,7 +140,8 @@ public class VinylFutureAssetService {
                 return StoredAsset.success(publicUrl(target), false);
             }
 
-            Path temporary = Files.createTempFile(mediaDirectory, filename + "-", ".download");
+            Files.createDirectories(target.getParent());
+            Path temporary = Files.createTempFile(mediaDirectory, "vinylfuture-", ".download");
             try {
                 downloadTo(sourceUrl, temporary, maxSize, accept);
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
@@ -161,7 +173,8 @@ public class VinylFutureAssetService {
                 throw new IOException("asset supera el límite de " + maxSize + " bytes");
             }
             try (InputStream input = new BufferedInputStream(connection.getInputStream());
-                 OutputStream output = new BufferedOutputStream(Files.newOutputStream(target))) {
+                 OutputStream output = new BufferedOutputStream(Files.newOutputStream(
+                     target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING))) {
                 byte[] buffer = new byte[16 * 1024];
                 long total = 0;
                 int read;
@@ -187,24 +200,21 @@ public class VinylFutureAssetService {
     }
 
     private String publicUrl(Path file) {
-        return PUBLIC_PREFIX + file.getFileName();
+        String relative = mediaDirectory.relativize(file).toString().replace('\\', '/');
+        return PUBLIC_PREFIX + UriUtils.encodePath(relative, StandardCharsets.UTF_8);
     }
 
-    private String assetKey(InvoiceItem item, VinylPageData page) {
-        String raw = firstNonBlank(
-            page.code(),
-            item.codigoCatalogo(),
-            page.artist() + "-" + page.title(),
-            item.artista() + "-" + item.album(),
-            "vinylfuture"
-        );
-        String hash = Integer.toHexString(firstNonBlank(page.sourceUrl(), raw).hashCode());
-        return sanitize(raw, 80) + "-" + hash;
+    private String discFolder(InvoiceItem item, VinylPageData page) {
+        String code = firstNonBlank(page.code(), item.codigoCatalogo(), "sin-codigo");
+        String artist = firstNonBlank(page.artist(), item.artista(), "sin-artista");
+        String album = firstNonBlank(page.title(), item.album(), "sin-album");
+        return sanitize(code, 50) + " - " + sanitize(artist, 70) + " - " + sanitize(album, 90);
     }
 
     private String extensionFromUrl(String url, String fallback) {
         if (url == null) return fallback;
         String path = url.split("\\?", 2)[0].toLowerCase(Locale.ROOT);
+        if (path.endsWith(".jpeg")) return "jpg";
         for (String extension : List.of("jpeg", "jpg", "png", "webp", "gif")) {
             if (path.endsWith("." + extension)) return extension;
         }
@@ -214,11 +224,19 @@ public class VinylFutureAssetService {
     private String sanitize(String value, int maxLength) {
         String fallback = value == null || value.isBlank() ? "sin-datos" : value;
         String sanitized = fallback.replaceAll("[/\\\\:*?\"<>|]", "_")
-            .replaceAll("[^A-Za-z0-9._ -]", "_")
-            .replaceAll("\\s+", "_")
+            .replaceAll("\\p{Cntrl}", "")
+            .replaceAll("\\s+", " ")
             .strip();
         if (sanitized.isBlank()) sanitized = "sin-datos";
         return sanitized.length() > maxLength ? sanitized.substring(0, maxLength).strip() : sanitized;
+    }
+
+    private String decodePath(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ex) {
+            return value;
+        }
     }
 
     private String firstNonBlank(String... values) {
