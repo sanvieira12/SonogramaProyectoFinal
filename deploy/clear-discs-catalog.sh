@@ -111,5 +111,5 @@ SQL
 if [[ "$MODE" == "--dry-run" ]]; then
   echo "Dry-run completo: no se confirmó ningún borrado."
 else
-  echo "Limpieza de catálogo VinylFuture confirmada."
+  echo "Limpieza de catálogo confirmada para alcance $SCOPE."
 fi
