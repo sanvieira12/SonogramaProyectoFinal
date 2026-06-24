@@ -105,9 +105,27 @@ function TrackPreviews({ disco }) {
   )
 }
 
+function buildSaleUrl(disco, codigoQr) {
+  if (!disco?.idDisco || !codigoQr) return ''
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/ventas/nueva?idDisco=${disco.idDisco}&qr=${encodeURIComponent(codigoQr)}`
+}
+
+function qrCopiesForDisco(disco) {
+  const copies = Array.isArray(disco?.qrCopies) ? disco.qrCopies : []
+  if (copies.length > 0) return copies
+  if (!disco?.codigoQr) return []
+  return [{
+    id: `legacy-${disco.idDisco}`,
+    copyNumber: 1,
+    codigoQr: disco.codigoQr,
+    content: buildSaleUrl(disco, disco.codigoQr),
+  }]
+}
+
 function QrModal({ disco, onClose }) {
   if (!disco) return null
-  const copies = disco.qrCopies || []
+  const copies = qrCopiesForDisco(disco)
   const sourceLabel = disco.procedencia === 'DISCOGS'
     ? `${disco.artista} - ${disco.album}`
     : (disco.discogsUrl || disco.codigoInterno || 'Vinyl Future')
@@ -124,17 +142,33 @@ function QrModal({ disco, onClose }) {
           <button onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
         </div>
         <div className="grid sm:grid-cols-2 gap-4 p-6">
-          {copies.map(copy => (
-            <article key={copy.id || copy.codigoQr} className="border border-slate-200 dark:border-stone-700 rounded-xl p-4 text-center break-inside-avoid">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3">
-                Copia {copy.copyNumber} de {copies.length}
-              </p>
-              <div className="bg-white p-3 rounded-lg inline-block">
-                <QRCode value={copy.content || copy.codigoQr} size={180} />
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-stone-400 mt-3 break-all">{copy.content || copy.codigoQr}</p>
-            </article>
-          ))}
+          {copies.map(copy => {
+            const saleUrl = buildSaleUrl(disco, copy.codigoQr) || copy.content
+            return (
+              <article key={copy.id || copy.codigoQr} className="border border-slate-200 dark:border-stone-700 rounded-xl p-4 break-inside-avoid">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3 text-center">
+                  Copia {copy.copyNumber || '—'} de {copies.length}
+                </p>
+                <div className="bg-white p-3 rounded-lg w-fit mx-auto">
+                  <QRCode value={saleUrl} size={180} />
+                </div>
+                <div className="mt-4 space-y-2 text-left">
+                  {[
+                    ['Disco', disco.album],
+                    ['Código catálogo', disco.codigoInterno],
+                    ['Identificador copia', copy.copyNumber ? `Copia ${copy.copyNumber}` : null],
+                    ['Código QR', copy.codigoQr],
+                    ['URL venta', saleUrl],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                      <p className="text-xs font-medium text-slate-700 dark:text-stone-300 break-all">{value || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )
+          })}
           {copies.length === 0 && (
             <p className="text-sm text-slate-500 dark:text-stone-400 sm:col-span-2 text-center py-8">Este disco no tiene copias físicas con QR.</p>
           )}
