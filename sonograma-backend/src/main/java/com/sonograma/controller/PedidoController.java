@@ -3,10 +3,12 @@ package com.sonograma.controller;
 import com.sonograma.dto.PedidoConfiguracionDTO;
 import com.sonograma.dto.PedidoResponseDTO;
 import com.sonograma.dto.PedidoUploadResponseDTO;
+import com.sonograma.entity.Pedido;
 import com.sonograma.service.PedidoService;
 import com.sonograma.service.PedidoControlImportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -40,11 +42,13 @@ public class PedidoController {
     @PostMapping("/upload-control")
     public ResponseEntity<byte[]> uploadControl(
             @RequestParam("pdf") MultipartFile pdf,
-            @RequestParam("template") MultipartFile template) {
-        if (pdf.isEmpty() || template.isEmpty()) {
+            @RequestParam(required = false) MultipartFile template) {
+        if (pdf.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
-        var result = controlImportService.importAndGenerate(pdf, template);
+        var result = (template != null && !template.isEmpty())
+            ? controlImportService.importAndGenerate(pdf, template)
+            : controlImportService.importAndGenerate(pdf);
         var generated = result.workbook();
         ContentDisposition disposition = ContentDisposition.attachment()
             .filename(generated.filename(), StandardCharsets.UTF_8)
@@ -65,6 +69,21 @@ public class PedidoController {
     @GetMapping("/{id}")
     public ResponseEntity<PedidoResponseDTO> obtener(@PathVariable Long id) {
         return ResponseEntity.ok(pedidoService.obtenerPorId(id));
+    }
+
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<Resource> descargarPdf(@PathVariable Long id) {
+        Pedido pedido = pedidoService.obtenerEntidad(id);
+        Resource resource = pedidoService.obtenerPdfOriginal(id);
+        String filename = pedido.getPdfOriginalFilename() != null ? pedido.getPdfOriginalFilename() : "pedido-" + id + ".pdf";
+        ContentDisposition disposition = ContentDisposition.inline()
+            .filename(filename, StandardCharsets.UTF_8)
+            .build();
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(
+                pedido.getPdfContentType() != null ? pedido.getPdfContentType() : "application/pdf"))
+            .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+            .body(resource);
     }
 
     @PatchMapping("/{id}/configuracion")

@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.Locale;
 
@@ -33,16 +35,44 @@ public class InvoiceControlWorkbookService {
     private static final int COL_MARKUP = 17;
     private static final int COL_FINAL_UYU = 18;
 
+    private static final String CLASSPATH_TEMPLATE = "/templates/control_template.xlsx";
+
     private final PedidoRepository pedidoRepository;
 
     public record GeneratedWorkbook(byte[] content, String filename) {}
+
+    @Transactional(readOnly = true)
+    public GeneratedWorkbook generate(Long pedidoId) {
+        try (InputStream is = getClass().getResourceAsStream(CLASSPATH_TEMPLATE)) {
+            if (is == null) throw new IllegalStateException(
+                "Plantilla embebida no encontrada en " + CLASSPATH_TEMPLATE
+                + ". Colocá el archivo en src/main/resources/templates/control_template.xlsx.");
+            Pedido pedido = pedidoRepository.findById(pedidoId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", pedidoId));
+            return generateFromStream(pedido, is);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new RuntimeException("No se pudo cargar la plantilla embebida", e);
+        }
+    }
 
     @Transactional(readOnly = true)
     public GeneratedWorkbook generate(Long pedidoId, MultipartFile template) {
         Pedido pedido = pedidoRepository.findById(pedidoId)
             .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", pedidoId));
 
-        try (Workbook workbook = WorkbookFactory.create(template.getInputStream())) {
+        try (InputStream is = template.getInputStream()) {
+            return generateFromStream(pedido, is);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new RuntimeException("No se pudo leer la plantilla", e);
+        }
+    }
+
+    private GeneratedWorkbook generateFromStream(Pedido pedido, InputStream templateStream) {
+        try (Workbook workbook = WorkbookFactory.create(templateStream)) {
             if (!(workbook instanceof XSSFWorkbook)) {
                 throw new IllegalArgumentException("La plantilla debe ser un archivo .xlsx");
             }

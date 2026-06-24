@@ -20,4 +20,10 @@ public class PedidoControlImportService {
         PedidoUploadResponseDTO upload = pedidoService.crearDesdePdf(pdf);
         return new Result(upload.pedidoId(), workbookService.generate(upload.pedidoId(), template));
     }
+
+    @Transactional
+    public Result importAndGenerate(MultipartFile pdf) {
+        PedidoUploadResponseDTO upload = pedidoService.crearDesdePdf(pdf);
+        return new Result(upload.pedidoId(), workbookService.generate(upload.pedidoId()));
+    }
 }

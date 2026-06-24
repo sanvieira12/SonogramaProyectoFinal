@@ -8,6 +8,7 @@ import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CatalogPricingService;
+import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,7 @@ public class VinylFutureImportService {
     private final DiscoRepository discoRepository;
     private final CatalogPricingService catalogPricingService;
     private final DiscoQrCopyService qrCopyService;
+    private final AudioPreviewService audioPreviewService;
 
     private static final Map<String, String> COLUMN_ALIASES = new HashMap<>();
 
@@ -75,6 +77,9 @@ public class VinylFutureImportService {
         COLUMN_ALIASES.put("notas", "notas");
         COLUMN_ALIASES.put("notes", "notas");
         COLUMN_ALIASES.put("observaciones", "notas");
+        COLUMN_ALIASES.put("cantidad", "cantidad");
+        COLUMN_ALIASES.put("quantity", "cantidad");
+        COLUMN_ALIASES.put("stock", "cantidad");
     }
 
     public List<DiscoImportPreviewDTO> parsearExcel(MultipartFile file) throws IOException {
@@ -107,6 +112,12 @@ public class VinylFutureImportService {
         for (DiscoImportPreviewDTO preview : seleccionados) {
             if (!preview.getErrores().isEmpty() && tieneErroresCriticos(preview)) continue;
             try {
+                if (preview.getCodigoInterno() != null
+                        && !preview.getCodigoInterno().isBlank()
+                        && discoRepository.findByCodigoInterno(preview.getCodigoInterno()).isPresent()) {
+                    log.info("VinylFuture Excel omitido por código duplicado: {}", preview.getCodigoInterno());
+                    continue;
+                }
                 DiscoRequestDTO req = mapearARequest(preview);
                 if (req.getPrecioVenta() == null && req.getCosto() != null) {
                     CatalogPricingService.PricingResult pricing =
@@ -118,7 +129,12 @@ public class VinylFutureImportService {
                 disco.setCodigoQr(UUID.randomUUID().toString());
                 disco = discoRepository.save(disco);
                 qrCopyService.synchronize(disco);
-                guardados.add(DiscoMapper.toDTO(discoRepository.save(disco)));
+                audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
+                disco = discoRepository.save(disco);
+                DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
+                dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
+                dto.setQrCopies(qrCopyService.listDtos(disco));
+                guardados.add(dto);
             } catch (Exception e) {
                 log.warn("Error guardando disco '{}': {}", preview.getAlbum(), e.getMessage());
             }
@@ -165,6 +181,7 @@ public class VinylFutureImportService {
         builder.notas(valores.get("notas"));
         builder.codigoInterno(valores.get("catalogo"));
         builder.formato(valores.get("formato"));
+        builder.cantidadCopias(parseQuantity(valores.get("cantidad"), errores));
         builder.estado("DISPONIBLE");
         builder.filaExcel(numeroFila);
 
@@ -229,6 +246,7 @@ public class VinylFutureImportService {
         req.setAnio(preview.getAnio());
         req.setPrecioVenta(preview.getPrecioVenta());
         req.setCosto(preview.getCosto());
+        req.setCantidadCopias(preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1);
         req.setTracklist(preview.getTracklist());
         req.setImagenUrl(preview.getImagenUrl());
         req.setPreviewUrl(preview.getPreviewUrl());
@@ -256,6 +274,18 @@ public class VinylFutureImportService {
         }
 
         return req;
+    }
+
+    private Integer parseQuantity(String value, List<String> errores) {
+        if (value == null || value.isBlank()) return 1;
+        try {
+            int quantity = (int) Double.parseDouble(value);
+            if (quantity < 0) throw new NumberFormatException();
+            return quantity;
+        } catch (NumberFormatException ex) {
+            errores.add("Cantidad inválida: " + value);
+            return 1;
+        }
     }
 
     private boolean tieneErroresCriticos(DiscoImportPreviewDTO preview) {

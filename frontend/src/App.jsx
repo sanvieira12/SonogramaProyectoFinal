@@ -8,10 +8,9 @@ import NuevaVenta from './pages/NuevaVenta'
 import Importar from './pages/Importar'
 import Deudas from './pages/Deudas'
 import LibroVentas from './pages/LibroVentas'
-import ShippingOrders from './pages/ShippingOrders'
 import Pedidos from './pages/Pedidos'
 import PedidoDetalle from './pages/PedidoDetalle'
-import Deudores from './pages/Deudores'
+import Notas from './pages/Notas'
 import Navbar from './components/Navbar'
 import { api } from './api/sonograma'
 
@@ -70,10 +69,11 @@ export default function App() {
             <Route path="/importar" element={<Importar />} />
             <Route path="/deudas" element={<Deudas />} />
             <Route path="/libro-ventas" element={<LibroVentas />} />
-            <Route path="/shipping-orders" element={<ShippingOrders />} />
             <Route path="/pedidos" element={<Pedidos />} />
             <Route path="/pedidos/:id" element={<PedidoDetalle />} />
-            <Route path="/deudores" element={<Deudores />} />
+            <Route path="/notas" element={<Notas />} />
+            <Route path="/shipping-orders" element={<Navigate to="/pedidos" replace />} />
+            <Route path="/deudores" element={<Navigate to="/deudas" replace />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

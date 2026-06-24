@@ -278,6 +278,23 @@ export default function PedidoDetalle() {
     }
   }
 
+  async function handlePdf() {
+    setActionMsg('')
+    try {
+      const blob = await api.pedidos.descargarPdf(id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = pedido.pdfOriginalFilename || `pedido-${id}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setActionMsg('Error: ' + e.message)
+    }
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center min-h-[50vh]">
       <Spinner text="Cargando pedido…" />
@@ -314,6 +331,12 @@ export default function PedidoDetalle() {
           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusCls}`}>
             {IMPORT_STATUS_LABEL[pedido.importStatus] || pedido.importStatus}
           </span>
+          {pedido.pdfDisponible && (
+            <button onClick={handlePdf}
+              className="px-4 py-2 rounded-lg border border-stone-700 text-stone-300 hover:bg-stone-900 text-sm font-medium transition-colors">
+              PDF original
+            </button>
+          )}
           {['PARSED','AWAITING_REVIEW','PARTIALLY_COMPLETED'].includes(pedido.importStatus) && (
             <button onClick={handleEnriquecer}
               className="px-4 py-2 rounded-lg border border-[#7E9FA8]/40 text-[#7E9FA8] hover:bg-[#7E9FA8]/10 text-sm font-medium transition-colors">

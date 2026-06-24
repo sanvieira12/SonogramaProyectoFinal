@@ -12,11 +12,17 @@ import com.sonograma.repository.PedidoRepository;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +44,9 @@ public class PedidoService {
     private final CatalogPricingService catalogPricingService;
 
     private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
+
+    @Value("${sonograma.pedidos.pdf-directory:./data/pedidos-pdf}")
+    private String pdfDirectory;
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
@@ -69,6 +78,8 @@ public class PedidoService {
             .codigoArancel(invoice.codigoArancel())
             .eoriNo(invoice.eoriNo())
             .nombreArchivo(file.getOriginalFilename())
+            .pdfOriginalFilename(file.getOriginalFilename())
+            .pdfContentType(file.getContentType() != null ? file.getContentType() : "application/pdf")
             .textoExtraido(invoice.rawExtractText())
             .franqueo(invoice.franqueo())
             .tarifas(invoice.tarifas())
@@ -78,6 +89,9 @@ public class PedidoService {
             .cantidadTotalPdf(invoice.cantidadTotalPdf())
             .importStatus(ImportStatus.PARSED)
             .build();
+
+        pedido.setPdfStoragePath(guardarPdfOriginal(file));
+        pedido.setPdfUploadedAt(java.time.LocalDateTime.now());
 
         pedido = pedidoRepository.save(pedido);
 
@@ -134,6 +148,30 @@ public class PedidoService {
         Pedido pedido = pedidoRepository.findById(id)
             .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
         return toDTO(pedido, true);
+    }
+
+    @Transactional(readOnly = true)
+    public Resource obtenerPdfOriginal(Long id) {
+        Pedido pedido = pedidoRepository.findById(id)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+        if (isBlank(pedido.getPdfStoragePath())) {
+            throw new RecursoNoEncontradoException("PDF del pedido", id);
+        }
+        try {
+            Resource resource = new UrlResource(Path.of(pedido.getPdfStoragePath()).toUri());
+            if (!resource.exists() || !resource.isReadable()) {
+                throw new RecursoNoEncontradoException("PDF del pedido", id);
+            }
+            return resource;
+        } catch (java.net.MalformedURLException e) {
+            throw new RecursoNoEncontradoException("PDF del pedido", id);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Pedido obtenerEntidad(Long id) {
+        return pedidoRepository.findById(id)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
     }
 
     // ── Settings + Recalc ─────────────────────────────────────────────────────
@@ -399,6 +437,10 @@ public class PedidoService {
             p.getCodigoArancel(),
             p.getEoriNo(),
             p.getNombreArchivo(),
+            p.getPdfOriginalFilename(),
+            p.getPdfContentType(),
+            p.getPdfUploadedAt(),
+            !isBlank(p.getPdfStoragePath()),
             includeItems ? p.getTextoExtraido() : null,
             p.getFranqueo(),
             p.getTarifas(),
@@ -441,6 +483,19 @@ public class PedidoService {
             i.getDisco() != null ? i.getDisco().getIdDisco() : null,
             i.getEnrichStatus() != null ? i.getEnrichStatus().name() : null
         );
+    }
+
+    private String guardarPdfOriginal(MultipartFile file) {
+        try {
+            Files.createDirectories(Path.of(pdfDirectory));
+            String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "pedido.pdf";
+            String extension = original.toLowerCase().endsWith(".pdf") ? ".pdf" : "";
+            Path destino = Path.of(pdfDirectory, UUID.randomUUID() + extension).toAbsolutePath().normalize();
+            Files.copy(file.getInputStream(), destino, StandardCopyOption.REPLACE_EXISTING);
+            return destino.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("No se pudo guardar el PDF original: " + e.getMessage());
+        }
     }
 
     @PreDestroy

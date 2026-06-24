@@ -19,6 +19,8 @@ public class ClienteMapper {
                 .instagramUsuario(cliente.getInstagramUsuario())
                 .direccion(cliente.getDireccion())
                 .localidad(cliente.getLocalidad())
+                .departamento(cliente.getDepartamento())
+                .sucursalDac(cliente.getSucursalDac())
                 .observaciones(cliente.getObservaciones())
                 .ultimaCompra(cliente.getUltimaCompra())
                 .fechaAlta(cliente.getFechaAlta())
@@ -35,6 +37,8 @@ public class ClienteMapper {
         cliente.setInstagramUsuario(request.getInstagramUsuario());
         cliente.setDireccion(request.getDireccion());
         cliente.setLocalidad(request.getLocalidad());
+        cliente.setDepartamento(request.getDepartamento());
+        cliente.setSucursalDac(request.getSucursalDac());
         cliente.setObservaciones(request.getObservaciones());
         cliente.setUltimaCompra(request.getUltimaCompra());
         return cliente;
@@ -49,6 +53,8 @@ public class ClienteMapper {
         if (request.getInstagramUsuario() != null) cliente.setInstagramUsuario(request.getInstagramUsuario());
         if (request.getDireccion() != null) cliente.setDireccion(request.getDireccion());
         if (request.getLocalidad() != null) cliente.setLocalidad(request.getLocalidad());
+        if (request.getDepartamento() != null) cliente.setDepartamento(request.getDepartamento());
+        if (request.getSucursalDac() != null) cliente.setSucursalDac(request.getSucursalDac());
         if (request.getObservaciones() != null) cliente.setObservaciones(request.getObservaciones());
         if (request.getUltimaCompra() != null) cliente.setUltimaCompra(request.getUltimaCompra());
     }

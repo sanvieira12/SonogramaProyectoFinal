@@ -42,6 +42,12 @@ public class Cliente {
     @Column(name = "localidad", length = 150)
     private String localidad;
 
+    @Column(name = "departamento", length = 100)
+    private String departamento;
+
+    @Column(name = "sucursal_dac", length = 180)
+    private String sucursalDac;
+
     @Column(name = "observaciones")
     private String observaciones;
 

@@ -18,9 +18,16 @@ import com.sonograma.repository.DireccionClienteRepository;
 import com.sonograma.repository.EnvioRepository;
 import com.sonograma.repository.VentaRepository;
 import lombok.RequiredArgsConstructor;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Month;
@@ -52,7 +59,7 @@ public class ClienteService {
         cliente.setActivo(true);
         cliente = clienteRepository.save(cliente);
         if (request.getDireccion() != null) {
-            guardarDireccion(cliente, request.getDireccion(), null, null, false);
+            guardarDireccion(cliente, request.getDireccion(), request.getDepartamento(), request.getSucursalDac(), false);
         }
         return ClienteMapper.toDTO(cliente);
     }
@@ -91,6 +98,69 @@ public class ClienteService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public byte[] exportarClientesXlsx() {
+        List<Cliente> clientes = clienteRepository.findByActivoTrue();
+        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("Clientes");
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font font = workbook.createFont();
+            font.setBold(true);
+            headerStyle.setFont(font);
+
+            String[] headers = {
+                    "Nombre", "Mail", "Instagram", "CI", "Telefono", "Direccion",
+                    "Departamento", "DAC / Sucursal DAC", "Notas", "Ultima compra",
+                    "Total compras", "Total gastado", "Deuda pendiente"
+            };
+            Row header = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                header.createCell(i).setCellValue(headers[i]);
+                header.getCell(i).setCellStyle(headerStyle);
+            }
+
+            int rowIndex = 1;
+            for (Cliente cliente : clientes) {
+                List<Venta> ventas = ventaRepository.findByClienteIdClienteOrderByFechaVentaDesc(cliente.getIdCliente());
+                BigDecimal totalGastado = ventas.stream()
+                        .map(this::totalVenta)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal deudaPendiente = ventas.stream()
+                        .map(Venta::getMontoDeuda)
+                        .filter(Objects::nonNull)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                java.time.LocalDateTime ultima = fechaMasReciente(cliente.getUltimaCompra(), ventas.stream()
+                        .map(Venta::getFechaVenta)
+                        .filter(Objects::nonNull)
+                        .max(Comparator.naturalOrder())
+                        .orElse(null));
+
+                Row row = sheet.createRow(rowIndex++);
+                row.createCell(0).setCellValue(nombreCompleto(cliente));
+                row.createCell(1).setCellValue(texto(cliente.getEmail(), ""));
+                row.createCell(2).setCellValue(texto(cliente.getInstagramUsuario(), ""));
+                row.createCell(3).setCellValue(texto(cliente.getCedula(), ""));
+                row.createCell(4).setCellValue(texto(cliente.getTelefono(), ""));
+                row.createCell(5).setCellValue(texto(cliente.getDireccion(), ""));
+                row.createCell(6).setCellValue(texto(cliente.getDepartamento(), texto(cliente.getLocalidad(), "")));
+                row.createCell(7).setCellValue(texto(cliente.getSucursalDac(), ""));
+                row.createCell(8).setCellValue(texto(cliente.getObservaciones(), ""));
+                row.createCell(9).setCellValue(ultima != null ? ultima.toLocalDate().toString() : "");
+                row.createCell(10).setCellValue(ventas.size());
+                row.createCell(11).setCellValue(totalGastado.doubleValue());
+                row.createCell(12).setCellValue(deudaPendiente.doubleValue());
+            }
+
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo exportar clientes: " + e.getMessage());
+        }
+    }
+
     public ClienteDTO actualizarCliente(Long id, ClienteRequest request) {
         limpiarCamposVacios(request);
         Cliente cliente = clienteRepository.findById(id)
@@ -106,7 +176,7 @@ public class ClienteService {
         ClienteMapper.updateFromRequest(cliente, request);
         cliente = clienteRepository.save(cliente);
         if (request.getDireccion() != null) {
-            guardarDireccion(cliente, request.getDireccion(), null, null, false);
+            guardarDireccion(cliente, request.getDireccion(), request.getDepartamento(), request.getSucursalDac(), false);
         }
         return ClienteMapper.toDTO(cliente);
     }
@@ -243,6 +313,8 @@ public class ClienteService {
                 || contiene(cliente.getCedula(), query)
                 || contiene(cliente.getInstagramUsuario(), query)
                 || contiene(cliente.getDireccion(), query)
+                || contiene(cliente.getDepartamento(), query)
+                || contiene(cliente.getSucursalDac(), query)
                 || contiene(cliente.getLocalidad(), query)
                 || contiene(cliente.getTelefono(), query)
                 || contiene(cliente.getEmail(), query);
@@ -359,6 +431,8 @@ public class ClienteService {
         request.setInstagramUsuario(textoNulo(request.getInstagramUsuario()));
         request.setDireccion(textoNulo(request.getDireccion()));
         request.setLocalidad(textoNulo(request.getLocalidad()));
+        request.setDepartamento(textoNulo(request.getDepartamento()));
+        request.setSucursalDac(textoNulo(request.getSucursalDac()));
     }
 
     private boolean contiene(String valor, String query) {
@@ -371,6 +445,10 @@ public class ClienteService {
 
     private String texto(String valor, String fallback) {
         return valor == null || valor.isBlank() ? fallback : valor.trim();
+    }
+
+    private String nombreCompleto(Cliente cliente) {
+        return (texto(cliente.getNombre(), "") + " " + texto(cliente.getApellido(), "")).trim();
     }
 
     private String textoNulo(String valor) {

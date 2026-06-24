@@ -351,6 +351,9 @@ function ExcelLinks() {
               ['Rate limited', job.rateLimited],
               ['Importadas', job.imported],
               ['Portadas', job.coversDownloaded],
+              ['MP3', job.mp3PreviewsFound],
+              ['YouTube', job.youtubeLinksFound],
+              ['QR creados', job.qrEntriesCreated],
               ['Pendientes', job.pending],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-slate-200 dark:border-stone-800 px-3 py-2">

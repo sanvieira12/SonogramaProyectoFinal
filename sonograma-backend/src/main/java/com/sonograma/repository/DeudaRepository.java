@@ -25,9 +25,15 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
 
     @Query("""
         SELECT d FROM Deuda d
+        LEFT JOIN d.cliente c
+        LEFT JOIN d.venta v
         WHERE d.estadoPago <> com.sonograma.enums.EstadoPago.PAGADO
-          AND (LOWER(CONCAT(d.cliente.nombre, ' ', COALESCE(d.cliente.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
-            OR LOWER(COALESCE(d.venta.numeroFactura, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+          AND (LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.nombreDeudorManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.mailManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.instagramManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.ciManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.numeroFactura, COALESCE(v.numeroFactura, ''))) LIKE LOWER(CONCAT('%', :q, '%')))
         ORDER BY d.fechaCreacion DESC
         """)
     List<Deuda> buscarPendientes(String q);

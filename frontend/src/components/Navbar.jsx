@@ -81,9 +81,8 @@ export default function Navbar({ usuario }) {
             <NavLink to="/importar" className={navLinkClass}>Importar</NavLink>
             <NavLink to="/deudas" className={navLinkClass}>Deudas</NavLink>
             <NavLink to="/libro-ventas" className={navLinkClass}>Libro de ventas</NavLink>
-            <NavLink to="/shipping-orders" className={navLinkClass}>Órdenes</NavLink>
             <NavLink to="/pedidos" className={navLinkClass}>Pedidos</NavLink>
-            <NavLink to="/deudores" className={navLinkClass}>Deudores</NavLink>
+            <NavLink to="/notas" className={navLinkClass}>Notas</NavLink>
           </div>
         </div>
 
@@ -105,7 +104,6 @@ export default function Navbar({ usuario }) {
             </div>
             <div className="hidden sm:block">
               <div className="text-slate-700 dark:text-stone-300 text-sm font-medium leading-none">{usuario?.nombreUsuario}</div>
-              <div className="text-[#7E9FA8] text-xs mt-0.5">{usuario?.rol}</div>
             </div>
           </div>
 

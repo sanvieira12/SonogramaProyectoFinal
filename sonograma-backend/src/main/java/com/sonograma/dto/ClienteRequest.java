@@ -38,6 +38,12 @@ public class ClienteRequest {
     @Size(max = 150)
     private String localidad;
 
+    @Size(max = 100)
+    private String departamento;
+
+    @Size(max = 180)
+    private String sucursalDac;
+
     private String observaciones;
 
     private java.time.LocalDate ultimaCompra;

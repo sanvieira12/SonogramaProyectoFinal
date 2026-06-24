@@ -58,7 +58,7 @@ public class DiscogsImportService {
         Disco disco = DiscoMapper.toEntity(toRequest(preview));
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
-        disco.setCantidadCopias(1);
+        disco.setCantidadCopias(preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1);
         disco = discoRepository.save(disco);
         qrCopyService.synchronize(disco);
         audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
@@ -108,6 +108,7 @@ public class DiscogsImportService {
                 .discogsUrl(normalizedUrl)
                 .estado(EstadoDisco.DISPONIBLE.name())
                 .condicion(CondicionDisco.USADO.name())
+                .cantidadCopias(1)
                 .notas(cover.warning() == null ? null : "Portada: " + cover.warning())
                 .errores(new ArrayList<>())
                 .build();
@@ -131,6 +132,7 @@ public class DiscogsImportService {
         request.setAnio(preview.getAnio());
         request.setPrecioVenta(preview.getPrecioVenta());
         request.setCosto(preview.getCosto());
+        request.setCantidadCopias(preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1);
         request.setTracklist(preview.getTracklist());
         request.setImagenUrl(preview.getImagenUrl());
         request.setPreviewUrl(preview.getPreviewUrl());

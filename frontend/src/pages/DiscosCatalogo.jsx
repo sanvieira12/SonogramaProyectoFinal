@@ -126,7 +126,9 @@ function QrModal({ disco, onClose }) {
         <div className="grid sm:grid-cols-2 gap-4 p-6">
           {copies.map(copy => (
             <article key={copy.id || copy.codigoQr} className="border border-slate-200 dark:border-stone-700 rounded-xl p-4 text-center break-inside-avoid">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3">Copia {copy.copyNumber}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3">
+                Copia {copy.copyNumber} de {copies.length}
+              </p>
               <div className="bg-white p-3 rounded-lg inline-block">
                 <QRCode value={copy.content || copy.codigoQr} size={180} />
               </div>

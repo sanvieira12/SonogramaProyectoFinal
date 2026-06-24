@@ -1,5 +1,6 @@
 package com.sonograma.controller;
 
+import com.sonograma.dto.DeudaRequestDTO;
 import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
@@ -48,6 +49,23 @@ public class DeudaController {
         return deudaService.obtenerPorCliente(idCliente);
     }
 
+    @GetMapping("/{idDeuda}")
+    public ResponseEntity<DeudaResponseDTO> obtener(@PathVariable Long idDeuda) {
+        return ResponseEntity.ok(deudaService.obtenerPorId(idDeuda));
+    }
+
+    @PostMapping
+    public ResponseEntity<DeudaResponseDTO> crear(@RequestBody DeudaRequestDTO request) {
+        return ResponseEntity.ok(deudaService.crear(request));
+    }
+
+    @PutMapping("/{idDeuda}")
+    public ResponseEntity<DeudaResponseDTO> actualizar(
+            @PathVariable Long idDeuda,
+            @RequestBody DeudaRequestDTO request) {
+        return ResponseEntity.ok(deudaService.actualizar(idDeuda, request));
+    }
+
     @PostMapping("/{idDeuda}/registrar-pago")
     public ResponseEntity<DeudaResponseDTO> registrarPago(
             @PathVariable Long idDeuda,
@@ -55,6 +73,13 @@ public class DeudaController {
         BigDecimal monto = new BigDecimal(body.get("monto").toString());
         String notas = body.containsKey("notas") ? body.get("notas").toString() : null;
         return ResponseEntity.ok(deudaService.registrarPago(idDeuda, monto, notas));
+    }
+
+    @PostMapping("/{idDeuda}/pagos")
+    public ResponseEntity<DeudaResponseDTO> registrarPagoAlias(
+            @PathVariable Long idDeuda,
+            @RequestBody Map<String, Object> body) {
+        return registrarPago(idDeuda, body);
     }
 
     @PostMapping("/importar-excel")

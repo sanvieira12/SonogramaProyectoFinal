@@ -27,6 +27,9 @@ public class DiscogsImportJobDTO {
     private int rateLimited;
     private int imported;
     private int coversDownloaded;
+    private int mp3PreviewsFound;
+    private int youtubeLinksFound;
+    private int qrEntriesCreated;
     private int pending;
     private List<DiscogsImportRowDTO> rows;
 }

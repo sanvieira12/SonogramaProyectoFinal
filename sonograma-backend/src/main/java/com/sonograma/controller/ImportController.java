@@ -3,6 +3,7 @@ package com.sonograma.controller;
 import com.sonograma.dto.InvoiceItem;
 import com.sonograma.dto.ParsedInvoice;
 import com.sonograma.dto.VinylPageData;
+import com.sonograma.dto.VinylFutureImportSummaryDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
@@ -10,6 +11,7 @@ import com.sonograma.enums.TipoDisco;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CsvExportService;
 import com.sonograma.service.AudioPreviewService;
+import com.sonograma.service.CatalogPricingService;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
@@ -26,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -62,147 +65,46 @@ public class ImportController {
     private final ShippingOrderService shippingOrderService;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
+    private final CatalogPricingService catalogPricingService;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
 
     /**
-     * Parses a deejay.de invoice PDF, searches each item on vinylfuture.com,
-     * then scrapes the product page for cover images and MP3 preview tracks.
-     * Returns a ZIP containing import.csv plus one folder per album with images/ and audio/.
+     * Primary PDF flow: imports complete records into the catalog without forcing a download.
+     */
+    @PostMapping("/vinylfuture-catalogo")
+    @Transactional
+    public ResponseEntity<VinylFutureImportSummaryDTO> importarFacturaAlCatalogo(
+            @RequestParam MultipartFile file) {
+        try {
+            return ResponseEntity.ok(processImport(file).summary());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + ex.getMessage(), ex);
+        }
+    }
+
+    /**
+     * Secondary export flow. It keeps the historical CSV/assets ZIP available on demand.
      */
     @PostMapping("/vinylfuture-csv")
     @Transactional
     public ResponseEntity<StreamingResponseBody> procesarFactura(@RequestParam MultipartFile file) {
-        if (file.isEmpty()) {
-            return errorResponse(HttpStatus.BAD_REQUEST, "Archivo vacío");
-        }
-
-        log.info("Recibido PDF '{}' ({} bytes). Iniciando procesamiento.", file.getOriginalFilename(), file.getSize());
-
-        // Read bytes once — reused for both text parsing and link extraction
-        byte[] pdfBytes;
+        ImportProcessingResult result;
         try {
-            pdfBytes = file.getBytes();
+            result = processImport(file);
+        } catch (IllegalArgumentException ex) {
+            return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IOException e) {
             return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
-        ParsedInvoice invoice;
-        try {
-            invoice = pdfParser.parseInvoice(pdfBytes);
-        } catch (IOException e) {
-            log.warn("No se pudo parsear el PDF: {}", e.getMessage());
-            return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
-        }
-
-        List<InvoiceItem> items = invoice.items();
-        if (items.isEmpty()) {
-            log.warn("No se extrajeron ítems del PDF.");
-        }
-
-        long searchStarted = System.nanoTime();
-        Map<InvoiceItem, Optional<String>> searchResults = parallelMap(
-            items,
-            vinylFutureSearch::buscar
-        );
-
-        long found = searchResults.values().stream().filter(Optional::isPresent).count();
-        log.info("Búsqueda completada en {} ms. {}/{} ítems encontrados en vinylfuture.",
-            elapsedMillis(searchStarted), found, items.size());
-
-        long scrapeStarted = System.nanoTime();
-        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap = parallelMap(
-            items,
-            item -> searchResults.getOrDefault(item, Optional.empty())
-                .flatMap(vinylFutureScraper::scrape)
-        );
-        log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
-
-        // 3. Persist to DB
-        List<Disco> discosGuardados = new ArrayList<>();
-        for (Map.Entry<InvoiceItem, Optional<VinylPageData>> entry : pageDataMap.entrySet()) {
-            InvoiceItem item = entry.getKey();
-            Optional<VinylPageData> pageData = entry.getValue();
-            try {
-                if (item.codigoCatalogo() != null
-                        && !item.codigoCatalogo().isBlank()
-                        && discoRepository.findByCodigoInterno(item.codigoCatalogo()).isPresent()) {
-                    log.info("Disco ya importado, se omite: {} / {}", item.codigoCatalogo(), item.album());
-                    continue;
-                }
-
-                Disco disco = new Disco();
-                disco.setArtista(item.artista());
-                disco.setAlbum(item.album());
-                disco.setCodigoInterno(item.codigoCatalogo());
-                disco.setEstado(EstadoDisco.DISPONIBLE);
-                disco.setCodigoQr(UUID.randomUUID().toString());
-                disco.setProcedencia("IMPORTADO");
-                disco.setTipoDisco(TipoDisco.VINILO);
-                disco.setCondicion(CondicionDisco.NUEVO);
-                disco.setCantidadCopias(item.cantidad() != null ? item.cantidad() : 1);
-                disco.setCosto(item.precioUnitario());
-                if (pageData.isPresent()) {
-                    VinylPageData page = pageData.get();
-                    disco.setImagenUrl(page.frontImageUrl());
-                    if (!page.tracks().isEmpty()) {
-                        String tracklist = page.tracks().stream()
-                            .map(t -> t.label() + ". " + t.name())
-                            .collect(java.util.stream.Collectors.joining("\n"));
-                        disco.setTracklist(tracklist);
-                    }
-                }
-                disco = discoRepository.save(disco);
-                qrCopyService.synchronize(disco);
-                if (pageData.isPresent()) {
-                    audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), pageData.get().tracks());
-                }
-                discosGuardados.add(discoRepository.save(disco));
-                log.info("Disco guardado en BD: {} - {}", item.artista(), item.album());
-            } catch (Exception e) {
-                log.warn("No se pudo guardar en BD: {} - {}: {}", item.artista(), item.album(), e.getMessage());
-            }
-        }
-        long coversFound = pageDataMap.values().stream()
-            .flatMap(Optional::stream)
-            .filter(page -> page.frontImageUrl() != null && !page.frontImageUrl().isBlank())
-            .count();
-        long previewsFound = pageDataMap.values().stream()
-            .flatMap(Optional::stream)
-            .flatMap(page -> page.tracks().stream())
-            .filter(track -> track.mp3Url() != null && !track.mp3Url().isBlank())
-            .count();
-        List<String> failedLinks = searchResults.entrySet().stream()
-            .filter(entry -> entry.getValue().isEmpty())
-            .map(entry -> firstNonBlank(
-                entry.getKey().codigoCatalogo(),
-                entry.getKey().artista() + " - " + entry.getKey().album()
-            ))
-            .toList();
-        log.info(
-            "Resumen importación Vinyl Future: importados={}, portadas={}, previews={}, links fallidos={}",
-            discosGuardados.size(), coversFound, previewsFound, failedLinks
-        );
-
-        // 3b. Auto-create ShippingOrder for imported discos
-        if (!discosGuardados.isEmpty()) {
-            try {
-                shippingOrderService.crearDesdeImport(
-                    discosGuardados,
-                    invoice.items(),
-                    invoice.total()
-                );
-                log.info("ShippingOrder creada con {} ítems.", discosGuardados.size());
-            } catch (Exception e) {
-                log.warn("No se pudo crear ShippingOrder: {}", e.getMessage());
-            }
-        }
-
-        // 4. Build CSV + ZIP
-        String csv = csvExport.buildCsv(searchResults);
+        String csv = csvExport.buildCsv(result.searchResults());
 
         Path zipPath;
         try {
-            zipPath = zipBundle.buildZip(csv, pageDataMap);
+            zipPath = zipBundle.buildZip(csv, result.pageDataMap());
         } catch (Exception e) {
             log.error("Error al construir el ZIP: {}", e.getMessage(), e);
             return errorResponse(
@@ -244,6 +146,178 @@ public class ImportController {
             .contentLength(zipSize)
             .body(body);
     }
+
+    private ImportProcessingResult processImport(MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Archivo vacío");
+        }
+
+        log.info("Recibido PDF '{}' ({} bytes). Iniciando importación al catálogo.",
+            file.getOriginalFilename(), file.getSize());
+        ParsedInvoice invoice = pdfParser.parseInvoice(file.getBytes());
+        List<InvoiceItem> items = invoice.items();
+
+        long searchStarted = System.nanoTime();
+        Map<InvoiceItem, Optional<String>> searchResults = parallelMap(items, vinylFutureSearch::buscar);
+        long found = searchResults.values().stream().filter(Optional::isPresent).count();
+        log.info("Búsqueda completada en {} ms. {}/{} ítems encontrados en Vinyl Future.",
+            elapsedMillis(searchStarted), found, items.size());
+
+        long scrapeStarted = System.nanoTime();
+        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap = parallelMap(
+            items,
+            item -> searchResults.getOrDefault(item, Optional.empty()).flatMap(vinylFutureScraper::scrape)
+        );
+        log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
+
+        List<Disco> imported = new ArrayList<>();
+        int skippedDuplicates = 0;
+        int qrEntriesCreated = 0;
+        for (Map.Entry<InvoiceItem, Optional<VinylPageData>> entry : pageDataMap.entrySet()) {
+            InvoiceItem item = entry.getKey();
+            Optional<VinylPageData> pageData = entry.getValue();
+            String catalogCode = pageData.map(VinylPageData::code)
+                .filter(value -> !value.isBlank())
+                .orElse(item.codigoCatalogo());
+            if (catalogCode != null && !catalogCode.isBlank()
+                    && discoRepository.findByCodigoInterno(catalogCode).isPresent()) {
+                skippedDuplicates++;
+                log.info("Disco ya importado, se omite: {} / {}", catalogCode, item.album());
+                continue;
+            }
+
+            try {
+                Disco disco = buildDisco(item, pageData.orElse(null), catalogCode);
+                disco = discoRepository.save(disco);
+                qrEntriesCreated += qrCopyService.synchronize(disco).size();
+                Disco savedDisco = disco;
+                pageData.ifPresent(page ->
+                    audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
+                imported.add(discoRepository.save(disco));
+                log.info("Disco guardado en BD: {} - {}", disco.getArtista(), disco.getAlbum());
+            } catch (Exception ex) {
+                log.warn("No se pudo guardar en BD: {} - {}: {}",
+                    item.artista(), item.album(), ex.getMessage());
+            }
+        }
+
+        if (!imported.isEmpty()) {
+            try {
+                shippingOrderService.crearDesdeImport(imported, invoice.items(), invoice.total());
+                log.info("ShippingOrder creada con {} ítems.", imported.size());
+            } catch (Exception ex) {
+                log.warn("No se pudo crear ShippingOrder: {}", ex.getMessage());
+            }
+        }
+
+        int coversFound = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .filter(page -> !blank(page.frontImageUrl()))
+            .count();
+        int mp3Found = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .flatMap(page -> page.tracks().stream())
+            .filter(track -> !blank(track.mp3Url()))
+            .count();
+        int youtubeFound = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .flatMap(page -> page.tracks().stream())
+            .filter(track -> !blank(track.youtubeUrl()))
+            .count();
+        List<String> failedLinks = items.stream()
+            .filter(item -> searchResults.getOrDefault(item, Optional.empty()).isEmpty()
+                || pageDataMap.getOrDefault(item, Optional.empty()).isEmpty())
+            .map(item -> firstNonBlank(
+                item.codigoCatalogo(), item.artista() + " - " + item.album()))
+            .distinct()
+            .toList();
+
+        VinylFutureImportSummaryDTO summary = new VinylFutureImportSummaryDTO(
+            items.size(),
+            imported.size(),
+            coversFound,
+            mp3Found,
+            youtubeFound,
+            qrEntriesCreated,
+            failedLinks.size(),
+            skippedDuplicates,
+            0,
+            failedLinks
+        );
+        log.info(
+            "Resumen Vinyl Future: detectados={}, importados={}, portadas={}, mp3={}, youtube={}, "
+                + "qr={}, fallidos={}, duplicados={}, rateLimit={}",
+            summary.recordsDetected(), summary.recordsImported(), summary.coversFound(),
+            summary.mp3PreviewsFound(), summary.youtubeLinksFound(), summary.qrEntriesCreated(),
+            summary.failedLinks(), summary.skippedDuplicates(), summary.rateLimitFailures()
+        );
+        return new ImportProcessingResult(summary, searchResults, pageDataMap);
+    }
+
+    private Disco buildDisco(InvoiceItem item, VinylPageData page, String catalogCode) {
+        String format = page != null ? firstNonBlank(page.format(), item.formato()) : item.formato();
+        java.math.BigDecimal cost = item.precioUnitario() != null
+            ? item.precioUnitario()
+            : (page != null ? page.purchasePrice() : null);
+        CatalogPricingService.PricingResult pricing = catalogPricingService.calcular(cost, format);
+
+        Disco disco = new Disco();
+        disco.setArtista(page != null ? firstNonBlank(page.artist(), item.artista()) : item.artista());
+        disco.setAlbum(page != null ? firstNonBlank(page.title(), item.album()) : item.album());
+        disco.setCodigoInterno(catalogCode);
+        disco.setEstado(EstadoDisco.DISPONIBLE);
+        disco.setCodigoQr(UUID.randomUUID().toString());
+        disco.setProcedencia("VINYL_FUTURE");
+        disco.setTipoDisco(parseFormat(format));
+        disco.setCondicion(parseCondition(page != null ? page.condition() : null));
+        disco.setCantidadCopias(item.cantidad() != null ? item.cantidad() : 1);
+        disco.setCosto(cost);
+        disco.setPrecioVenta(pricing != null ? pricing.salePriceUyu() : null);
+        if (page != null) {
+            disco.setSelloDiscografico(page.label());
+            disco.setGenero(page.genre());
+            disco.setAnio(page.year());
+            disco.setPais(page.country());
+            disco.setDescripcion(page.description());
+            disco.setImagenUrl(page.frontImageUrl());
+            disco.setDiscogsUrl(page.sourceUrl());
+            if (page.tracks() != null && !page.tracks().isEmpty()) {
+                disco.setTracklist(page.tracks().stream()
+                    .map(track -> firstNonBlank(track.label(), "") + " "
+                        + firstNonBlank(track.name(), "Track"))
+                    .map(String::strip)
+                    .collect(Collectors.joining("\n")));
+            }
+        }
+        return disco;
+    }
+
+    private TipoDisco parseFormat(String value) {
+        if (blank(value)) return TipoDisco.VINILO;
+        String normalized = value.toUpperCase(java.util.Locale.ROOT);
+        if (normalized.contains("CD")) return TipoDisco.CD;
+        if (normalized.contains("CASSETTE") || normalized.contains("TAPE")) return TipoDisco.CASSETTE;
+        if (normalized.contains("DIGITAL")) return TipoDisco.DIGITAL;
+        return TipoDisco.VINILO;
+    }
+
+    private CondicionDisco parseCondition(String value) {
+        if (blank(value)) return CondicionDisco.NUEVO;
+        String normalized = value.toUpperCase(java.util.Locale.ROOT);
+        return normalized.contains("USED") || normalized.contains("USADO")
+            ? CondicionDisco.USADO
+            : CondicionDisco.NUEVO;
+    }
+
+    private boolean blank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private record ImportProcessingResult(
+        VinylFutureImportSummaryDTO summary,
+        Map<InvoiceItem, Optional<String>> searchResults,
+        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap
+    ) {}
 
     private <T> Map<InvoiceItem, T> parallelMap(
             List<InvoiceItem> items,

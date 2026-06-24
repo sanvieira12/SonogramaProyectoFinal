@@ -81,6 +81,14 @@ export const api = {
     crear: (cliente) => request('POST', '/clientes', cliente),
     crearDireccion: (id, direccion) => request('POST', `/clientes/${id}/direcciones`, direccion),
     actualizar: (id, cliente) => request('PUT', `/clientes/${id}`, cliente),
+    exportar: async () => {
+      const res = await fetch(`${BASE}/clientes/exportar`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Sesión vencida')
+      if (!res.ok) throw new Error('No se pudo exportar clientes')
+      return res.blob()
+    },
     importarExcel: async (file, hoja) => {
       const fd = new FormData(); fd.append('file', file)
       const query = hoja ? `?hoja=${encodeURIComponent(hoja)}` : ''
@@ -126,7 +134,10 @@ export const api = {
   deudas: {
     listar: (q) => request('GET', `/deudas${q ? `?q=${encodeURIComponent(q)}` : ''}`),
     resumen: () => request('GET', '/deudas/resumen'),
+    porId: (id) => request('GET', `/deudas/${id}`),
     porCliente: (id) => request('GET', `/deudas/cliente/${id}`),
+    crear: (deuda) => request('POST', '/deudas', deuda),
+    actualizar: (id, deuda) => request('PUT', `/deudas/${id}`, deuda),
     importarExcel: async (file) => {
       const fd = new FormData(); fd.append('file', file)
       const res = await fetch(`${BASE}/deudas/importar-excel`, {
@@ -167,6 +178,21 @@ export const api = {
   },
 
   importar: {
+    vinylfutureCatalogo: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/importar/vinylfuture-catalogo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const text = await res.text()
+      let data
+      try { data = text ? JSON.parse(text) : null } catch { data = null }
+      if (!res.ok) throw new Error(data?.message || text || 'Error procesando PDF')
+      return data
+    },
     vinylfutureCsv: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
@@ -190,7 +216,7 @@ export const api = {
     uploadControl: async (pdf, template) => {
       const fd = new FormData()
       fd.append('pdf', pdf)
-      fd.append('template', template)
+      if (template) fd.append('template', template)
       const res = await fetch(`${BASE}/pedidos/upload-control`, {
         method: 'POST',
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
@@ -229,6 +255,23 @@ export const api = {
     enriquecer: (id) => request('POST', `/pedidos/${id}/enriquecer`),
     importarCatalogo: (id) => request('POST', `/pedidos/${id}/importar-catalogo`),
     retryItem: (pedidoId, itemId) => request('POST', `/pedidos/${pedidoId}/items/${itemId}/retry-enrich`),
+    pdfUrl: (id) => `${BASE}/pedidos/${id}/pdf`,
+    descargarPdf: async (id) => {
+      const res = await fetch(`${BASE}/pedidos/${id}/pdf`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) throw new Error('No se pudo descargar el PDF original')
+      return res.blob()
+    },
+  },
+
+  notas: {
+    listar: (search) => request('GET', `/notas${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+    porId: (id) => request('GET', `/notas/${id}`),
+    crear: (nota) => request('POST', '/notas', nota),
+    actualizar: (id, nota) => request('PUT', `/notas/${id}`, nota),
+    archivar: (id) => request('DELETE', `/notas/${id}`),
   },
 
   deudores: {

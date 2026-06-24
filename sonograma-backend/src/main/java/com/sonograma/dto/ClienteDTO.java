@@ -18,6 +18,8 @@ public class ClienteDTO {
     private String instagramUsuario;
     private String direccion;
     private String localidad;
+    private String departamento;
+    private String sucursalDac;
     private String observaciones;
     private LocalDate ultimaCompra;
     private LocalDateTime fechaAlta;

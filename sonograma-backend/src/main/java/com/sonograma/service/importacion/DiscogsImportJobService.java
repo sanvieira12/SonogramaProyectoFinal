@@ -416,6 +416,7 @@ public class DiscogsImportJobService {
     }
 
     private DiscogsImportJobDTO toDto(DiscogsImportJob job) {
+        List<DiscogsImportRow> entityRows = job.getRows();
         List<DiscogsImportRowDTO> rows = job.getRows().stream().map(this::toRowDto).toList();
         return DiscogsImportJobDTO.builder()
                 .id(job.getIdDiscogsImportJob())
@@ -440,6 +441,23 @@ public class DiscogsImportJobService {
                 .coversDownloaded(count(rows, row ->
                         row.getImageUrl() != null
                                 && row.getImageUrl().contains("/discogs/covers/")))
+                .mp3PreviewsFound(entityRows.stream()
+                        .flatMap(row -> parseTracks(row.getTracksJson()).stream())
+                        .mapToInt(track -> blank(track.mp3Url()) ? 0 : 1)
+                        .sum())
+                .youtubeLinksFound(entityRows.stream()
+                        .flatMap(row -> parseTracks(row.getTracksJson()).stream())
+                        .mapToInt(track -> blank(track.youtubeUrl()) ? 0 : 1)
+                        .sum())
+                .qrEntriesCreated(entityRows.stream()
+                        .map(DiscogsImportRow::getImportedCatalogProduct)
+                        .filter(Objects::nonNull)
+                        .collect(java.util.stream.Collectors.toMap(
+                                Disco::getIdDisco,
+                                disco -> qrCopyService.listDtos(disco).size(),
+                                Integer::max
+                        ))
+                        .values().stream().mapToInt(Integer::intValue).sum())
                 .pending(count(rows, row -> Set.of(
                         "pending", "parsed", "fetching_discogs", "pending_retry"
                 ).contains(row.getStatus()) && row.getResolvedReleaseId() == null))

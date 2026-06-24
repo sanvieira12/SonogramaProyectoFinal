@@ -31,6 +31,7 @@ public class DiscoImportPreviewDTO {
     private List<TrackInfo> tracks;
     private BigDecimal precioVenta;
     private BigDecimal costo;
+    private Integer cantidadCopias;
     private String estado;
     private String procedencia;
     private String notas;

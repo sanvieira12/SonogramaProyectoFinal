@@ -9,11 +9,15 @@ import com.sonograma.service.ClienteExcelImportService;
 import com.sonograma.service.ClienteService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -52,6 +56,19 @@ public class ClienteController {
     @GetMapping("/buscar")
     public ResponseEntity<List<ClienteDTO>> buscar(@RequestParam String q) {
         return ResponseEntity.ok(clienteService.buscar(q));
+    }
+
+    @GetMapping("/exportar")
+    public ResponseEntity<byte[]> exportar() {
+        byte[] content = clienteService.exportarClientesXlsx();
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename("clientes-sonograma.xlsx", StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(content);
     }
 
     @PostMapping

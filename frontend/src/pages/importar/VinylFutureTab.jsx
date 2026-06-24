@@ -239,8 +239,8 @@ function ExcelImport() {
 function PdfExport() {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle')
-  const [blobUrl, setBlobUrl] = useState(null)
-  const [filename, setFilename] = useState('')
+  const [resumen, setResumen] = useState(null)
+  const [exportando, setExportando] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [segundos, setSegundos] = useState(0)
 
@@ -261,22 +261,36 @@ function PdfExport() {
     setSegundos(0)
     setEstado('loading')
     setErrorMsg('')
-    setBlobUrl(null)
     try {
-      const blob = await api.importar.vinylfutureCsv(archivo)
-      const url = URL.createObjectURL(blob)
-      const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
-      const name = `vinylfuture-import-${ts}.zip`
-      setBlobUrl(url); setFilename(name); setEstado('done')
-      const a = document.createElement('a'); a.href = url; a.download = name; a.click()
+      setResumen(await api.importar.vinylfutureCatalogo(archivo))
+      setEstado('done')
     } catch (err) {
       setErrorMsg(err.message || 'Error al procesar el PDF')
       setEstado('error')
     }
   }
 
+  async function exportarZip() {
+    setExportando(true)
+    setErrorMsg('')
+    try {
+      const blob = await api.importar.vinylfutureCsv(archivo)
+      const url = URL.createObjectURL(blob)
+      const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `vinylfuture-export-${ts}.zip`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setErrorMsg(err.message || 'Error al exportar el ZIP')
+    } finally {
+      setExportando(false)
+    }
+  }
+
   function reset() {
-    setArchivo(null); setBlobUrl(null); setFilename('')
+    setArchivo(null); setResumen(null)
     setEstado('idle'); setErrorMsg(''); setSegundos(0)
   }
 
@@ -310,12 +324,38 @@ function PdfExport() {
       )}
       {estado === 'done' && (
         <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-          <p className="font-medium text-emerald-700 dark:text-emerald-400 text-sm mb-2">ZIP generado</p>
-          <a href={blobUrl} download={filename}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition-colors">
-            Descargar ZIP
-          </a>
+          <p className="font-medium text-emerald-700 dark:text-emerald-400 text-sm mb-3">
+            Importación completada: {resumen?.recordsImported || 0} discos agregados al catálogo
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+            {[
+              ['Detectados', resumen?.recordsDetected],
+              ['Importados', resumen?.recordsImported],
+              ['Portadas', resumen?.coversFound],
+              ['MP3', resumen?.mp3PreviewsFound],
+              ['YouTube', resumen?.youtubeLinksFound],
+              ['QR creados', resumen?.qrEntriesCreated],
+              ['Duplicados', resumen?.skippedDuplicates],
+              ['Links fallidos', resumen?.failedLinks],
+              ['Rate limit', resumen?.rateLimitFailures],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-emerald-200 dark:border-emerald-800 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-emerald-600/70 dark:text-emerald-500">{label}</p>
+                <p className="text-lg font-bold text-emerald-800 dark:text-emerald-300">{value || 0}</p>
+              </div>
+            ))}
+          </div>
+          {resumen?.failedLinkDetails?.length > 0 && (
+            <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+              Sin metadata externa: {resumen.failedLinkDetails.join(', ')}
+            </p>
+          )}
+          <button onClick={exportarZip} disabled={exportando}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500 text-emerald-700 dark:text-emerald-300 text-sm font-medium disabled:opacity-50">
+            {exportando ? 'Preparando ZIP…' : 'Exportar CSV, portadas y audio (opcional)'}
+          </button>
           <button onClick={reset} className="ml-3 text-xs underline text-emerald-600 dark:text-emerald-400">Nueva importación</button>
+          {errorMsg && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
         </div>
       )}
       {estado === 'error' && (

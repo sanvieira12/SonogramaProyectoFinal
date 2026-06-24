@@ -60,6 +60,18 @@ public class Pedido {
     @Column(name = "nombre_archivo")
     private String nombreArchivo;
 
+    @Column(name = "pdf_original_filename")
+    private String pdfOriginalFilename;
+
+    @Column(name = "pdf_content_type")
+    private String pdfContentType;
+
+    @Column(name = "pdf_storage_path")
+    private String pdfStoragePath;
+
+    @Column(name = "pdf_uploaded_at")
+    private LocalDateTime pdfUploadedAt;
+
     @Column(name = "texto_extraido", columnDefinition = "TEXT")
     private String textoExtraido;
 
