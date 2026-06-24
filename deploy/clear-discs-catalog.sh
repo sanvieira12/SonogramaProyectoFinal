@@ -87,6 +87,12 @@ BEGIN
   GET DIAGNOSTICS affected = ROW_COUNT;
   RAISE NOTICE 'shipping_order_item desvinculados: %', affected;
 
+  UPDATE discogs_import_row
+  SET imported_catalog_product_id = NULL
+  WHERE imported_catalog_product_id IN (SELECT id_disco FROM target_discos);
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RAISE NOTICE 'discogs_import_row desvinculados: %', affected;
+
   DELETE FROM disco
   WHERE id_disco IN (SELECT id_disco FROM target_discos);
   GET DIAGNOSTICS affected = ROW_COUNT;
