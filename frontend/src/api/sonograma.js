@@ -7,6 +7,22 @@ export function normalizeApiBase(value) {
 
 const BASE = normalizeApiBase(import.meta.env.VITE_API_URL)
 
+export function resolveApiUrl(path) {
+  if (!path) return ''
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:') || path.startsWith('blob:')) {
+    return path
+  }
+  const origin = (() => {
+    try {
+      return new URL(BASE, typeof window !== 'undefined' ? window.location.origin : 'http://localhost').origin
+    } catch {
+      return typeof window !== 'undefined' ? window.location.origin : ''
+    }
+  })()
+  if (!origin) return path
+  return path.startsWith('/') ? `${origin}${path}` : `${origin}/${path}`
+}
+
 function token() {
   return localStorage.getItem('token')
 }
@@ -81,6 +97,7 @@ export const api = {
     crear: (cliente) => request('POST', '/clientes', cliente),
     crearDireccion: (id, direccion) => request('POST', `/clientes/${id}/direcciones`, direccion),
     actualizar: (id, cliente) => request('PUT', `/clientes/${id}`, cliente),
+    eliminar: (id) => request('DELETE', `/clientes/${id}`),
     exportar: async () => {
       const res = await fetch(`${BASE}/clientes/exportar`, {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},

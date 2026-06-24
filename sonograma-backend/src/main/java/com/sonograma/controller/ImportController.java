@@ -54,8 +54,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.PreDestroy;
-import jakarta.servlet.http.HttpServletRequest;
-
 @RestController
 @RequestMapping("/importar")
 @RequiredArgsConstructor
@@ -454,21 +452,18 @@ public class ImportController {
         return firstNonBlank(item.codigoCatalogo(), item.artista() + " - " + item.album());
     }
 
-    @GetMapping("/vinylfuture/media/**")
-    public ResponseEntity<Resource> vinylFutureMedia(HttpServletRequest request) throws IOException {
-        String filename = mediaPath(request);
+    @GetMapping("/vinylfuture/media/{*filename}")
+    public ResponseEntity<Resource> vinylFutureMedia(@PathVariable String filename) throws IOException {
+        filename = decodeMediaPath(filename);
         Resource resource = vinylFutureAssetService.load(filename);
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
             .body(resource);
     }
 
-    private String mediaPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String marker = "/vinylfuture/media/";
-        int index = uri.indexOf(marker);
-        String path = index >= 0 ? uri.substring(index + marker.length()) : "";
-        return URLDecoder.decode(path, StandardCharsets.UTF_8);
+    private String decodeMediaPath(String path) {
+        String decoded = URLDecoder.decode(path, StandardCharsets.UTF_8);
+        return decoded.startsWith("/") ? decoded.substring(1) : decoded;
     }
 
     @PreDestroy

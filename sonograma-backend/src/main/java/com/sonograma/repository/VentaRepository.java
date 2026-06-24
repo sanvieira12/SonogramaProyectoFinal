@@ -15,6 +15,8 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
 
     List<Venta> findByClienteIdClienteOrderByFechaVentaDesc(Long idCliente);
 
+    long countByClienteIdCliente(Long idCliente);
+
     List<Venta> findByEstado(EstadoVenta estado);
 
     @Query(value =

@@ -6,7 +6,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import Paginacion from '../components/Paginacion'
 import CompactPlayer from '../components/CompactPlayer'
 import { stopAllPreviews } from '../components/audioPreviewPlayback'
-import { api } from '../api/sonograma'
+import { api, resolveApiUrl } from '../api/sonograma'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
 
@@ -211,7 +211,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
           {/* Portada o imagen */}
           {disco.imagenUrl ? (
             <img
-              src={disco.imagenUrl}
+              src={resolveApiUrl(disco.imagenUrl)}
               alt={`${disco.artista} - ${disco.album}`}
               className="w-full aspect-square max-w-[200px] mx-auto rounded-xl object-cover bg-slate-100 dark:bg-stone-800"
             />
@@ -333,7 +333,7 @@ function CatalogPreview({ disco, onEditar, onDarBaja, onViewQr }) {
   return (
     <aside className="card sticky top-24 hidden lg:block overflow-hidden">
       {disco.imagenUrl ? (
-        <img src={disco.imagenUrl} alt={`${disco.artista} - ${disco.album}`}
+        <img src={resolveApiUrl(disco.imagenUrl)} alt={`${disco.artista} - ${disco.album}`}
           className="w-full aspect-square object-cover bg-slate-100 dark:bg-stone-800" />
       ) : (
         <div className="w-full aspect-square bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-sm text-slate-400 dark:text-stone-600">
@@ -571,7 +571,7 @@ export default function DiscosCatalogo() {
                         <div className="flex items-center gap-3">
                           {d.imagenUrl ? (
                             <img
-                              src={d.imagenUrl}
+                              src={resolveApiUrl(d.imagenUrl)}
                               alt={`${d.artista} - ${d.album}`}
                               className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-slate-100 dark:bg-stone-800"
                             />

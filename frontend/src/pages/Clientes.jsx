@@ -203,7 +203,7 @@ function DetailStat({ label, value }) {
   )
 }
 
-function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, compras, onClose, onSaved }) {
+function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, compras, onClose, onSaved, onDelete }) {
   const cliente = detalleCliente?.cliente || clienteDetalle
   const direcciones = detalleCliente?.direcciones || []
   const envios = detalleCliente?.historialEnvios || []
@@ -277,6 +277,7 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
           <p className="text-sm text-slate-400 dark:text-stone-500">{cliente.email || 'Sin mail registrado'}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => onDelete(cliente)} className="btn-secondary text-sm text-red-600 dark:text-red-400">Borrar</button>
           <button onClick={() => setEditing(v => !v)} className="btn-secondary text-sm">{editing ? 'Ver ficha' : 'Editar'}</button>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800">✕</button>
         </div>
@@ -429,6 +430,7 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
 export default function Clientes() {
   const [clientes, setClientes] = useState([])
   const [ventas, setVentas] = useState([])
+  const [deudas, setDeudas] = useState([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [clienteDetalle, setClienteDetalle] = useState(null)
@@ -440,11 +442,13 @@ export default function Clientes() {
   const [exporting, setExporting] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
   const [exportError, setExportError] = useState('')
+  const [actionMsg, setActionMsg] = useState('')
+  const [actionError, setActionError] = useState('')
   const debounceRef = useRef(null)
 
   useEffect(() => {
-    Promise.all([api.clientes.todos(), api.ventas.todas()])
-      .then(([cs, vs]) => { setClientes(cs); setVentas(vs) })
+    Promise.all([api.clientes.todos(), api.ventas.todas(), api.deudas.listar()])
+      .then(([cs, vs, ds]) => { setClientes(cs); setVentas(vs); setDeudas(ds) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -457,6 +461,15 @@ export default function Clientes() {
     })
     return map
   }, [ventas])
+
+  const deudaPorCliente = useMemo(() => {
+    const map = {}
+    deudas.forEach(d => {
+      if (!d.idCliente) return
+      map[d.idCliente] = (map[d.idCliente] || 0) + Number(d.montoPendiente || 0)
+    })
+    return map
+  }, [deudas])
 
   function onBusquedaChange(e) {
     const q = e.target.value
@@ -523,6 +536,27 @@ export default function Clientes() {
     setDetalleCliente(prev => prev ? { ...prev, cliente: saved } : prev)
   }
 
+  async function handleEliminarCliente(cliente) {
+    if (!cliente) return
+    if (!window.confirm(`¿Borrar a ${cliente.nombre} ${cliente.apellido || ''}?`)) {
+      return
+    }
+    setActionMsg('')
+    setActionError('')
+    try {
+      await api.clientes.eliminar(cliente.idCliente)
+      setClientes(prev => prev.filter(c => c.idCliente !== cliente.idCliente))
+      setDeudas(prev => prev.filter(d => d.idCliente !== cliente.idCliente))
+      if (clienteDetalle?.idCliente === cliente.idCliente) {
+        setClienteDetalle(null)
+        setDetalleCliente(null)
+      }
+      setActionMsg('Cliente borrado')
+    } catch (e) {
+      setActionError(e.message || 'No se pudo borrar el cliente')
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
@@ -563,6 +597,18 @@ export default function Clientes() {
           <button onClick={() => setExportError('')} className="text-xs hover:underline">Cerrar</button>
         </div>
       )}
+      {actionMsg && (
+        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm text-emerald-700 dark:text-emerald-400 flex items-center justify-between">
+          <span>{actionMsg}</span>
+          <button onClick={() => setActionMsg('')} className="text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-xs hover:underline">Cerrar</button>
+        </div>
+      )}
 
       {modalNuevo && (
         <NuevoClienteModal
@@ -599,18 +645,20 @@ export default function Clientes() {
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-stone-800">
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Nombre</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Email</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Cédula</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden lg:table-cell">Instagram</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden xl:table-cell">Dirección</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Deuda</th>
                     <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Compras</th>
                     <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Total gastado</th>
                     <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Última compra</th>
-                    <th className="px-5 py-3"></th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
                   {clientes.slice((pagina - 1) * porPagina, pagina * porPagina).map(c => {
                     const vs = ventasPorCliente[c.idCliente] || []
+                    const deudaActual = Number(deudaPorCliente[c.idCliente] || 0)
                     const totalGastado = vs.reduce((sum, v) => sum + Number(v.total || 0), 0)
                     const ultimaVenta = vs.length > 0
                       ? vs.reduce((latest, v) => v.fechaVenta > latest ? v.fechaVenta : latest, vs[0].fechaVenta)
@@ -626,14 +674,15 @@ export default function Clientes() {
                           <div className="font-semibold text-slate-900 dark:text-white">{c.nombre} {c.apellido}</div>
                           <div className="text-slate-400 dark:text-stone-500 text-xs mt-0.5">{c.telefono || '—'}</div>
                         </td>
+                        <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden md:table-cell">{c.email || '—'}</td>
                         <td className="px-5 py-4 text-slate-600 dark:text-stone-400 font-mono text-xs hidden md:table-cell">{c.cedula || '—'}</td>
                         <td className="px-5 py-4 hidden lg:table-cell">
                           {c.instagramUsuario
                             ? <span className="text-[#5C7D87] dark:text-[#7E9FA8] text-xs">{c.instagramUsuario}</span>
                             : <span className="text-slate-300 dark:text-stone-600">—</span>}
                         </td>
-                        <td className="px-5 py-4 text-slate-500 dark:text-stone-400 text-xs hidden xl:table-cell max-w-[200px] truncate">
-                          {c.direccion || '—'}
+                        <td className={`px-5 py-4 text-right font-semibold tabular-nums ${deudaActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          {`$${deudaActual.toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
@@ -652,10 +701,11 @@ export default function Clientes() {
                         <td className="px-5 py-4 text-right text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">
                           {formatFecha(ultimaCompra)}
                         </td>
-                        <td className="px-5 py-4 text-right">
-                          <svg className={`w-4 h-4 text-slate-300 dark:text-stone-600 transition-transform ${clienteDetalle?.idCliente === c.idCliente ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
-                          </svg>
+                        <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-3">
+                            <button onClick={() => abrirDetalle(c)} className="text-xs text-[#5C7D87] hover:underline font-medium">Ver</button>
+                            <button onClick={() => handleEliminarCliente(c)} className="text-xs text-red-600 dark:text-red-400 hover:underline font-medium">Borrar</button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -687,6 +737,7 @@ export default function Clientes() {
           compras={detalleCliente?.historialCompras || ventasPorCliente[clienteDetalle.idCliente] || []}
           onClose={() => { setClienteDetalle(null); setDetalleCliente(null) }}
           onSaved={onClienteSaved}
+          onDelete={handleEliminarCliente}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../api/sonograma'
+import { api, resolveApiUrl } from '../api/sonograma'
 import CompactPlayer from './CompactPlayer'
 import { stopAllPreviews } from './audioPreviewPlayback'
 
@@ -72,7 +72,7 @@ function CoverUpload({ value, onChange }) {
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
       {value && (
-        <img src={value} alt="Portada" className="h-16 w-16 object-cover rounded-lg border border-slate-200 dark:border-stone-700" />
+        <img src={resolveApiUrl(value)} alt="Portada" className="h-16 w-16 object-cover rounded-lg border border-slate-200 dark:border-stone-700" />
       )}
     </div>
   )

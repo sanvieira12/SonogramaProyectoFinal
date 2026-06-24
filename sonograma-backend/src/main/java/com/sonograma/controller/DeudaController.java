@@ -5,6 +5,7 @@ import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
 import com.sonograma.enums.EstadoPago;
+import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.repository.DeudaRepository;
 import com.sonograma.service.DeudaService;
@@ -70,8 +71,8 @@ public class DeudaController {
     public ResponseEntity<DeudaResponseDTO> registrarPago(
             @PathVariable Long idDeuda,
             @RequestBody Map<String, Object> body) {
-        BigDecimal monto = new BigDecimal(body.get("monto").toString());
-        String notas = body.containsKey("notas") ? body.get("notas").toString() : null;
+        BigDecimal monto = requiredBigDecimal(body, "monto", "El monto del pago es obligatorio");
+        String notas = optionalString(body, "notas");
         return ResponseEntity.ok(deudaService.registrarPago(idDeuda, monto, notas));
     }
 
@@ -171,5 +172,25 @@ public class DeudaController {
         if (s == null) return "";
         return s.trim().toLowerCase()
             .replace("ó","o").replace("é","e").replace("á","a").replace("í","i").replace("ú","u");
+    }
+
+    private BigDecimal requiredBigDecimal(Map<String, Object> body, String field, String message) {
+        Object raw = body != null ? body.get(field) : null;
+        if (raw == null || raw.toString().isBlank()) {
+            throw new NegocioException(message);
+        }
+        try {
+            return new BigDecimal(raw.toString().trim());
+        } catch (NumberFormatException ex) {
+            throw new NegocioException("El monto del pago no es válido");
+        }
+    }
+
+    private String optionalString(Map<String, Object> body, String field) {
+        if (body == null) {
+            return null;
+        }
+        Object raw = body.get(field);
+        return raw == null ? null : raw.toString();
     }
 }

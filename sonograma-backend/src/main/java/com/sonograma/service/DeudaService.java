@@ -19,9 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -37,7 +39,7 @@ public class DeudaService {
     public List<DeudaResponseDTO> obtenerPendientes(String q) {
         List<Deuda> deudas = (q != null && !q.isBlank())
                 ? deudaRepository.buscarPendientes(q)
-                : deudaRepository.findByEstadoPagoNot(EstadoPago.PAGADO);
+                : deudaRepository.findAllByOrderByFechaDeudaDescFechaCreacionDesc();
         return deudas.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
@@ -132,19 +134,21 @@ public class DeudaService {
     }
 
     private void aplicarRequest(Deuda deuda, DeudaRequestDTO request, boolean creando) {
-        if (request.getIdCliente() != null) {
-            Cliente cliente = clienteRepository.findById(request.getIdCliente())
-                    .filter(Cliente::getActivo)
-                    .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", request.getIdCliente()));
+        Cliente cliente = resolveCliente(request);
+        if (cliente != null) {
             deuda.setCliente(cliente);
+            deuda.setNombreDeudorManual(null);
+            deuda.setMailManual(textoNulo(request.getMailManual()) != null ? textoNulo(request.getMailManual()) : textoNulo(cliente.getEmail()));
+            deuda.setInstagramManual(textoNulo(request.getInstagramManual()) != null ? textoNulo(request.getInstagramManual()) : textoNulo(cliente.getInstagramUsuario()));
+            deuda.setCiManual(textoNulo(request.getCiManual()) != null ? textoNulo(request.getCiManual()) : textoNulo(cliente.getCedula()));
         } else if (creando || request.getNombreDeudorManual() != null) {
             deuda.setCliente(null);
+            if (request.getNombreDeudorManual() != null) deuda.setNombreDeudorManual(textoNulo(request.getNombreDeudorManual()));
+            if (request.getMailManual() != null) deuda.setMailManual(textoNulo(request.getMailManual()));
+            if (request.getInstagramManual() != null) deuda.setInstagramManual(textoNulo(request.getInstagramManual()));
+            if (request.getCiManual() != null) deuda.setCiManual(textoNulo(request.getCiManual()));
         }
 
-        if (request.getNombreDeudorManual() != null) deuda.setNombreDeudorManual(textoNulo(request.getNombreDeudorManual()));
-        if (request.getMailManual() != null) deuda.setMailManual(textoNulo(request.getMailManual()));
-        if (request.getInstagramManual() != null) deuda.setInstagramManual(textoNulo(request.getInstagramManual()));
-        if (request.getCiManual() != null) deuda.setCiManual(textoNulo(request.getCiManual()));
         if (request.getDescripcion() != null) deuda.setDescripcion(textoNulo(request.getDescripcion()));
         if (request.getNumeroFactura() != null) deuda.setNumeroFactura(textoNulo(request.getNumeroFactura()));
         if (request.getNotas() != null) deuda.setNotas(textoNulo(request.getNotas()));
@@ -210,9 +214,9 @@ public class DeudaService {
                 .idCliente(d.getCliente() != null ? d.getCliente().getIdCliente() : null)
                 .nombreCliente(nombreDeudor(d))
                 .nombreDeudorManual(d.getNombreDeudorManual())
-                .mailManual(d.getMailManual())
-                .instagramManual(d.getInstagramManual())
-                .ciManual(d.getCiManual())
+                .mailManual(!isBlank(d.getMailManual()) ? d.getMailManual() : (d.getCliente() != null ? d.getCliente().getEmail() : null))
+                .instagramManual(!isBlank(d.getInstagramManual()) ? d.getInstagramManual() : (d.getCliente() != null ? d.getCliente().getInstagramUsuario() : null))
+                .ciManual(!isBlank(d.getCiManual()) ? d.getCiManual() : (d.getCliente() != null ? d.getCliente().getCedula() : null))
                 .descripcion(d.getDescripcion())
                 .montoTotal(d.getMontoTotal())
                 .montoPagado(d.getMontoPagado())
@@ -244,6 +248,53 @@ public class DeudaService {
                 + (d.getCliente().getApellido() != null ? " " + d.getCliente().getApellido() : "")).trim();
     }
 
+    private Cliente resolveCliente(DeudaRequestDTO request) {
+        if (request.getIdCliente() != null) {
+            return clienteRepository.findById(request.getIdCliente())
+                    .filter(Cliente::getActivo)
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", request.getIdCliente()));
+        }
+
+        String nombre = textoNulo(request.getNombreDeudorManual());
+        String email = textoNulo(request.getMailManual());
+        String cedula = textoNulo(request.getCiManual());
+        String instagram = textoNulo(request.getInstagramManual());
+        if (isBlank(nombre) && isBlank(email) && isBlank(cedula) && isBlank(instagram)) {
+            return null;
+        }
+
+        if (!isBlank(cedula)) {
+            Cliente byCedula = clienteRepository.findByCedulaAndActivoTrue(cedula).orElse(null);
+            if (byCedula != null) {
+                return byCedula;
+            }
+        }
+
+        String normalizedName = normalizarNombre(nombre);
+        Cliente existing = clienteRepository.findByActivoTrue().stream()
+                .filter(cliente -> !isBlank(email) && email.equalsIgnoreCase(textoNulo(cliente.getEmail()))
+                        || !normalizedName.isBlank() && normalizedName.equals(normalizarNombre(nombreCompleto(cliente))))
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+
+        if (isBlank(nombre)) {
+            throw new NegocioException("Ingresá el nombre del cliente para registrar la deuda");
+        }
+
+        String[] parts = splitNombre(nombre);
+        Cliente nuevo = new Cliente();
+        nuevo.setNombre(parts[0]);
+        nuevo.setApellido(parts[1]);
+        nuevo.setCedula(cedula);
+        nuevo.setEmail(email);
+        nuevo.setInstagramUsuario(instagram);
+        nuevo.setActivo(true);
+        return clienteRepository.save(nuevo);
+    }
+
     private String deudorKey(Deuda d) {
         if (d.getCliente() != null) return "cliente:" + d.getCliente().getIdCliente();
         return "manual:" + Objects.toString(d.getNombreDeudorManual(), d.getIdDeuda().toString()).toLowerCase();
@@ -255,5 +306,23 @@ public class DeudaService {
 
     private String textoNulo(String value) {
         return isBlank(value) ? null : value.trim();
+    }
+
+    private String nombreCompleto(Cliente cliente) {
+        return ((cliente.getNombre() == null ? "" : cliente.getNombre()) + " "
+                + (cliente.getApellido() == null ? "" : cliente.getApellido())).trim();
+    }
+
+    private String normalizarNombre(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private String[] splitNombre(String nombreCompleto) {
+        String[] parts = Arrays.stream(nombreCompleto.trim().split("\\s+"))
+                .filter(part -> !part.isBlank())
+                .toArray(String[]::new);
+        String nombre = parts.length == 0 ? null : parts[0];
+        String apellido = parts.length <= 1 ? null : String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+        return new String[] { nombre, apellido };
     }
 }

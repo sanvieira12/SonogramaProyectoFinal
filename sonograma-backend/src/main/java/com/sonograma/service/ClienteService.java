@@ -14,6 +14,7 @@ import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.mapper.ClienteMapper;
 import com.sonograma.repository.ClienteRepository;
+import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.DireccionClienteRepository;
 import com.sonograma.repository.EnvioRepository;
 import com.sonograma.repository.VentaRepository;
@@ -47,6 +48,7 @@ public class ClienteService {
 
     private final ClienteRepository clienteRepository;
     private final VentaRepository ventaRepository;
+    private final DeudaRepository deudaRepository;
     private final EnvioRepository envioRepository;
     private final DireccionClienteRepository direccionClienteRepository;
 
@@ -185,6 +187,11 @@ public class ClienteService {
         Cliente cliente = clienteRepository.findById(id)
                 .filter(Cliente::getActivo)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", id));
+        long ventasAsociadas = ventaRepository.countByClienteIdCliente(id);
+        long deudasAsociadas = deudaRepository.countByClienteIdCliente(id);
+        if (ventasAsociadas > 0 || deudasAsociadas > 0) {
+            throw new NegocioException("No se puede borrar el cliente porque tiene ventas o deudas asociadas");
+        }
         cliente.setActivo(false);
         clienteRepository.save(cliente);
     }

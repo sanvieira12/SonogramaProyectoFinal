@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/sonograma'
 
 const ESTADO_STYLES = {
@@ -311,35 +311,20 @@ export default function Deudas() {
   function upsert(updated) {
     setDeudas(prev => {
       const exists = prev.some(d => d.idDeuda === updated.idDeuda)
-      const next = exists ? prev.map(d => d.idDeuda === updated.idDeuda ? updated : d) : [updated, ...prev]
-      return next.filter(d => d.estadoPago !== 'PAGADO')
+      return exists ? prev.map(d => d.idDeuda === updated.idDeuda ? updated : d) : [updated, ...prev]
     })
     setPanelDeuda(updated)
     setCreating(false)
     api.deudas.resumen().then(setResumen).catch(() => {})
+    api.clientes.todos().then(setClientes).catch(() => {})
   }
-
-  const grouped = useMemo(() => {
-    const map = new Map()
-    deudas.forEach(d => {
-      const key = d.idCliente ? `c-${d.idCliente}` : `m-${d.nombreCliente || d.idDeuda}`
-      const group = map.get(key) || { nombre: d.nombreCliente || 'Sin nombre', deudas: [], total: 0, ultimoPago: null, estado: 'PAGADO' }
-      group.deudas.push(d)
-      group.total += Number(d.montoPendiente || 0)
-      if (d.fechaUltimoPago && (!group.ultimoPago || d.fechaUltimoPago > group.ultimoPago)) group.ultimoPago = d.fechaUltimoPago
-      if (d.estadoPago === 'PENDIENTE') group.estado = 'PENDIENTE'
-      else if (group.estado !== 'PENDIENTE' && d.estadoPago === 'PARCIAL') group.estado = 'PARCIAL'
-      map.set(key, group)
-    })
-    return [...map.values()]
-  }, [deudas])
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white">Deudas</h1>
-          <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Cuentas corrientes, deudores y pagos pendientes</p>
+          <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Registro individual de deudas y pagos</p>
         </div>
         <button onClick={() => { setCreating(true); setPanelDeuda(null) }} className="btn-primary text-sm">Nueva deuda</button>
       </div>
@@ -377,51 +362,38 @@ export default function Deudas() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Cliente / Deudor', 'Total adeudado', 'Cantidad', 'Último pago', 'Estado', 'Acciones'].map(h => (
+                {['Fecha', 'Cliente', 'Factura / Descripción', 'Total', 'Pagado', 'Deuda actual', 'Estado', 'Acciones'].map(h => (
                   <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {loading ? (
-                <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-400">Cargando…</td></tr>
-              ) : grouped.length === 0 ? (
-                <tr><td colSpan={6} className="px-5 py-16 text-center text-slate-400 dark:text-stone-500 text-sm">{search ? 'No se encontraron deudas para esa búsqueda' : 'No hay deudas pendientes'}</td></tr>
-              ) : grouped.map(group => (
-                <tr key={group.nombre} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-slate-800 dark:text-stone-200">{group.nombre}</td>
-                  <td className="px-5 py-3 tabular-nums font-semibold text-red-600 dark:text-red-400">{fmt(group.total)}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400">{group.deudas.length}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400">{fmtDate(group.ultimoPago)}</td>
-                  <td className="px-5 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[group.estado] || ''}`}>{group.estado}</span>
+                <tr><td colSpan={8} className="px-5 py-12 text-center text-slate-400">Cargando…</td></tr>
+              ) : deudas.length === 0 ? (
+                <tr><td colSpan={8} className="px-5 py-16 text-center text-slate-400 dark:text-stone-500 text-sm">{search ? 'No se encontraron deudas para esa búsqueda' : 'No hay deudas registradas'}</td></tr>
+              ) : deudas.map(d => (
+                <tr key={d.idDeuda} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
+                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">{fmtDate(d.fechaDeuda || d.fechaVenta)}</td>
+                  <td className="px-5 py-3 font-medium text-slate-800 dark:text-stone-200">{d.nombreCliente || 'Sin cliente'}</td>
+                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400">
+                    <div className="max-w-[260px]">
+                      <p className="font-mono text-xs text-slate-500">{d.numeroFactura || '—'}</p>
+                      <p className="truncate" title={d.descripcion || ''}>{d.descripcion || 'Sin descripción'}</p>
+                    </div>
                   </td>
-                  <td className="px-5 py-3">
-                    <button onClick={() => { setPanelDeuda(group.deudas[0]); setCreating(false) }} className="text-xs text-[#5C7D87] hover:underline font-medium">Ver detalle</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-100 dark:border-stone-800">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Deudas individuales</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {deudas.map(d => (
-                <tr key={d.idDeuda} onClick={() => { setPanelDeuda(d); setCreating(false) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
-                  <td className="px-5 py-3 font-medium text-slate-800 dark:text-stone-200">{d.nombreCliente}</td>
-                  <td className="px-5 py-3 font-mono text-xs text-slate-500">{d.numeroFactura || '—'}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400">{fmtDate(d.fechaDeuda || d.fechaVenta)}</td>
                   <td className="px-5 py-3 tabular-nums text-slate-700 dark:text-stone-300">{fmt(d.montoTotal)}</td>
                   <td className="px-5 py-3 tabular-nums text-emerald-600 dark:text-emerald-400">{fmt(d.montoPagado)}</td>
                   <td className="px-5 py-3 tabular-nums font-semibold text-red-600 dark:text-red-400">{fmt(d.montoPendiente)}</td>
                   <td className="px-5 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[d.estadoPago] || ''}`}>{d.estadoPago}</span></td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-[#5C7D87] hover:underline font-medium">Editar</button>
+                      {d.estadoPago !== 'PAGADO' && (
+                        <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-medium">Registrar pago</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

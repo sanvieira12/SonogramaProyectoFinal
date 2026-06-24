@@ -27,7 +27,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/importaciones")
@@ -65,21 +64,18 @@ public class ImportacionController {
         return ResponseEntity.ok(guardados);
     }
 
-    @GetMapping("/vinylfuture/media/**")
-    public ResponseEntity<Resource> vinylfutureMedia(HttpServletRequest request) throws IOException {
-        String filename = mediaPath(request);
+    @GetMapping("/vinylfuture/media/{*filename}")
+    public ResponseEntity<Resource> vinylfutureMedia(@PathVariable String filename) throws IOException {
+        filename = decodeMediaPath(filename);
         Resource resource = vinylFutureAssetService.load(filename);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(vinylFutureAssetService.contentType(filename)))
                 .body(resource);
     }
 
-    private String mediaPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String marker = "/vinylfuture/media/";
-        int index = uri.indexOf(marker);
-        String path = index >= 0 ? uri.substring(index + marker.length()) : "";
-        return URLDecoder.decode(path, StandardCharsets.UTF_8);
+    private String decodeMediaPath(String path) {
+        String decoded = URLDecoder.decode(path, StandardCharsets.UTF_8);
+        return decoded.startsWith("/") ? decoded.substring(1) : decoded;
     }
 
     // ── Discogs — link único ──────────────────────────────────────────────────

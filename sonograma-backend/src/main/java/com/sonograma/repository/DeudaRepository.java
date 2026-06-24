@@ -13,6 +13,10 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
 
     List<Deuda> findByClienteIdClienteOrderByFechaCreacionDesc(Long idCliente);
 
+    long countByClienteIdCliente(Long idCliente);
+
+    List<Deuda> findAllByOrderByFechaDeudaDescFechaCreacionDesc();
+
     List<Deuda> findByEstadoPagoNot(EstadoPago estadoPago);
 
     Optional<Deuda> findByVentaIdVenta(Long idVenta);
@@ -27,14 +31,13 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
         SELECT d FROM Deuda d
         LEFT JOIN d.cliente c
         LEFT JOIN d.venta v
-        WHERE d.estadoPago <> com.sonograma.enums.EstadoPago.PAGADO
-          AND (LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
+        WHERE LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.nombreDeudorManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.mailManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.instagramManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.ciManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
-            OR LOWER(COALESCE(d.numeroFactura, COALESCE(v.numeroFactura, ''))) LIKE LOWER(CONCAT('%', :q, '%')))
-        ORDER BY d.fechaCreacion DESC
+            OR LOWER(COALESCE(d.numeroFactura, COALESCE(v.numeroFactura, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
+        ORDER BY COALESCE(d.fechaDeuda, d.fechaVenta) DESC, d.fechaCreacion DESC
         """)
     List<Deuda> buscarPendientes(String q);
 }
