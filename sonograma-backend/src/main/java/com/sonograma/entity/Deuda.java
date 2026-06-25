@@ -81,4 +81,8 @@ public class Deuda {
 
     @Column(name = "notas")
     private String notas;
+
+    @Column(name = "activa", nullable = false, columnDefinition = "boolean default true")
+    @Builder.Default
+    private Boolean activa = true;
 }

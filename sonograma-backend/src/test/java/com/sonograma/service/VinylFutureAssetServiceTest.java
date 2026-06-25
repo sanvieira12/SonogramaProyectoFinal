@@ -126,4 +126,41 @@ class VinylFutureAssetServiceTest {
             server.stop(0);
         }
     }
+
+    @Test
+    void failedDownloadsAreCountedAndDoNotFallbackToRemoteUrls() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/missing-cover.jpg", exchange -> {
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
+        server.createContext("/missing-a1.mp3", exchange -> {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String baseUrl = "http://localhost:" + server.getAddress().getPort();
+            VinylFutureAssetService service = new VinylFutureAssetService(tempDir.toString());
+            InvoiceItem item = new InvoiceItem(
+                "CAT-3", "Fail Artist", "Fail Album", "12", BigDecimal.ONE, 1, BigDecimal.ONE);
+            VinylPageData page = new VinylPageData(
+                baseUrl + "/release",
+                "Fail Artist", "Fail Album", "CAT-3", "Label", "Genre", 2026,
+                "Germany", "12", "New", "Desc", BigDecimal.ONE,
+                baseUrl + "/missing-cover.jpg", null,
+                List.of(new TrackInfo("A1", "Missing Track", baseUrl + "/missing-a1.mp3", null))
+            );
+
+            VinylFutureAssetService.AssetStoreResult result = service.storeAssetsWithResult(item, page);
+
+            assertThat(result.coversDownloaded()).isZero();
+            assertThat(result.mp3Downloaded()).isZero();
+            assertThat(result.failedMediaDownloads()).isEqualTo(2);
+            assertThat(result.page().frontImageUrl()).isNull();
+            assertThat(result.page().tracks().get(0).mp3Url()).isNull();
+        } finally {
+            server.stop(0);
+        }
+    }
 }

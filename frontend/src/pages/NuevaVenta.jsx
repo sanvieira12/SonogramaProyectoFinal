@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../api/sonograma'
+import { api, resolveApiUrl } from '../api/sonograma'
 
 const DEPARTAMENTOS_FALLBACK = [
   'Artigas','Canelones','Cerro Largo','Colonia','Durazno','Flores','Florida',
@@ -38,6 +38,54 @@ function ResumenLinea({ label, value, strong, muted }) {
   )
 }
 
+function DiscoDetallePanel({ disco, onClose, onAgregar }) {
+  if (!disco) return null
+  const previews = disco.audioPreviews || []
+  return (
+    <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto">
+      <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-slate-900 dark:text-white">{disco.artista || '—'}</h2>
+          <p className="text-sm text-slate-500 dark:text-stone-400">{disco.album || '—'}</p>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
+      </div>
+      <div className="p-5 space-y-4">
+        {disco.imagenUrl ? (
+          <img src={resolveApiUrl(disco.imagenUrl)} alt={`${disco.artista} - ${disco.album}`} className="w-full max-w-56 mx-auto aspect-square rounded-xl object-cover bg-slate-100 dark:bg-stone-800" />
+        ) : (
+          <div className="w-full max-w-56 mx-auto aspect-square rounded-xl bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-sm text-slate-400">Sin portada</div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            ['Código', disco.codigoInterno],
+            ['Condición', disco.condicion],
+            ['Stock', disco.cantidadCopias ?? 0],
+            ['Precio venta', disco.precioVenta ? money(disco.precioVenta) : null],
+            ['Formato', disco.tipoDisco],
+            ['Sello', disco.selloDiscografico],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+              <p className="text-sm text-slate-700 dark:text-stone-300 truncate">{value || '—'}</p>
+            </div>
+          ))}
+        </div>
+        {(disco.previewUrl || previews.length > 0) && (
+          <div className="space-y-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">Audio</p>
+            {disco.previewUrl && <audio controls src={resolveApiUrl(disco.previewUrl)} className="w-full h-9" />}
+            {previews.map(p => (
+              <audio key={p.id || p.audioUrl} controls src={resolveApiUrl(p.audioUrl)} className="w-full h-9" />
+            ))}
+          </div>
+        )}
+        <button onClick={() => onAgregar(disco)} className="btn-primary w-full">Agregar a venta</button>
+      </div>
+    </aside>
+  )
+}
+
 export default function NuevaVenta() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -68,27 +116,20 @@ export default function NuevaVenta() {
   const [cargandoSucursales, setCargandoSucursales] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState('')
   const [descuentoPct, setDescuentoPct] = useState(0)
-
-  const [porcentajeImpuesto, setPorcentajeImpuesto] = useState('0')
-  const [otrosCostos, setOtrosCostos] = useState('0')
+  const [medioPago, setMedioPago] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [montoPagado, setMontoPagado] = useState('')
 
   const [errores, setErrores] = useState({})
   const [enviando, setEnviando] = useState(false)
   const [mostrarModalCliente, setMostrarModalCliente] = useState(false)
+  const [discoDetalle, setDiscoDetalle] = useState(null)
 
   useEffect(() => {
     api.envios.departamentosDac()
       .then(ds => ds.length && setDepartamentos(ds))
       .catch(() => setDepartamentos(DEPARTAMENTOS_FALLBACK))
 
-    api.ventas.configuracionCostos()
-      .then(cfg => {
-        setPorcentajeImpuesto(String(cfg.porcentajeImpuesto ?? 0))
-        setOtrosCostos(String(cfg.otrosCostos ?? 0))
-      })
-      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -120,14 +161,11 @@ export default function NuevaVenta() {
     const descuento = subtotal * descuentoPct / 100
     const base = subtotal - descuento
     const envio = tipoEntrega === 'ENVIO' ? toNumber(costoEnvio) : 0
-    const otros = toNumber(otrosCostos)
-    const impuestoPct = toNumber(porcentajeImpuesto)
-    const impuesto = (base + envio + otros) * impuestoPct / 100
-    const totalFinal = base + envio + otros + impuesto
+    const totalFinal = base + envio
     const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo), 0)
-    const ganancia = totalFinal - costoDisco - envio - otros - impuesto
-    return { subtotal, descuento, base, envio, otros, impuestoPct, impuesto, totalFinal, ganancia }
-  }, [carrito, descuentoPct, costoEnvio, tipoEntrega, otrosCostos, porcentajeImpuesto])
+    const ganancia = totalFinal - costoDisco - envio
+    return { subtotal, descuento, base, envio, totalFinal, ganancia }
+  }, [carrito, descuentoPct, costoEnvio, tipoEntrega])
 
   async function cargarDiscosVendibles() {
     const ds = await api.discos.todos()
@@ -137,7 +175,7 @@ export default function NuevaVenta() {
   function agregarAlCarrito(d) {
     if (carrito.some(item => item.disco.idDisco === d.idDisco)) return
     setCarrito(prev => [...prev, { disco: d, precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '' }])
-    setBusquedaDisco('')
+    setDiscoDetalle(null)
   }
 
   function quitarDelCarrito(idDisco) {
@@ -228,7 +266,6 @@ export default function NuevaVenta() {
     if (totales.base <= 0) e.total = 'Ingresá un precio de venta válido'
     if (tipoEntrega === 'ENVIO') {
       if (!departamento) e.departamento = 'Seleccioná el departamento'
-      if (!direccionEnvio.trim()) e.direccionEnvio = 'Ingresá la dirección de envío'
       if (sucursalesDac.length > 0 && !sucursalDacCodigo) e.sucursal = 'Seleccioná una sucursal DAC'
     }
     return e
@@ -250,15 +287,15 @@ export default function NuevaVenta() {
           total: Number(totales.totalFinal.toFixed(2)),
           precioVenta: Number(totales.base.toFixed(2)),
           costoEnvio: Number(totales.envio.toFixed(2)),
-          porcentajeImpuesto: Number(totales.impuestoPct.toFixed(2)),
-          otrosCostos: Number(totales.otros.toFixed(2)),
           tipoEntrega,
+          medioPago: medioPago || null,
           observaciones: observaciones || null,
           montoPagado: montoP,
           ...(tipoEntrega === 'ENVIO' && {
             idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
-            direccionEnvio, departamento,
-            guardarNuevaDireccion: direccionModo === 'NUEVA' || !direccionSeleccionadaId,
+            direccionEnvio: direccionEnvio.trim() || null,
+            departamento,
+            guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
             sucursalDacCodigo: sucursalDacCodigo || null,
             sucursalDacNombre: sucursalDacNombre || null,
           }),
@@ -274,15 +311,15 @@ export default function NuevaVenta() {
           canalVenta,
           total: Number(totales.totalFinal.toFixed(2)),
           costoEnvio: Number(totales.envio.toFixed(2)),
-          porcentajeImpuesto: Number(totales.impuestoPct.toFixed(2)),
-          otrosCostos: Number(totales.otros.toFixed(2)),
           tipoEntrega,
+          medioPago: medioPago || null,
           observaciones: observaciones || null,
           montoPagado: montoP,
           ...(tipoEntrega === 'ENVIO' && {
             idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
-            direccionEnvio, departamento,
-            guardarNuevaDireccion: direccionModo === 'NUEVA' || !direccionSeleccionadaId,
+            direccionEnvio: direccionEnvio.trim() || null,
+            departamento,
+            guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
             sucursalDacCodigo: sucursalDacCodigo || null,
             sucursalDacNombre: sucursalDacNombre || null,
           }),
@@ -317,7 +354,7 @@ export default function NuevaVenta() {
               {carrito.map(item => (
                 <div key={item.disco.idDisco} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-stone-700 px-3 py-2.5">
                   {item.disco.imagenUrl && (
-                    <img src={item.disco.imagenUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                    <img src={resolveApiUrl(item.disco.imagenUrl)} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">{item.disco.artista} — {item.disco.album}</div>
@@ -358,24 +395,23 @@ export default function NuevaVenta() {
                   className="input pl-9"
                 />
               </div>
-              {(busquedaDisco || carrito.length === 0) && (
-                <div className="space-y-1 max-h-52 overflow-y-auto">
+              <div className="space-y-1 max-h-52 overflow-y-auto">
                   {discosParaMostrar.map(d => (
-                    <button key={d.idDisco} type="button" onClick={() => agregarAlCarrito(d)}
-                      className="w-full text-left px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-stone-950 hover:bg-[#7E9FA8]/10 border border-transparent hover:border-[#7E9FA8]/30 transition-all flex items-center gap-3">
-                      {d.imagenUrl && <img src={d.imagenUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
+                    <div key={d.idDisco}
+                      className="w-full px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-stone-950 hover:bg-[#7E9FA8]/10 border border-transparent hover:border-[#7E9FA8]/30 transition-all flex items-center gap-3">
+                      {d.imagenUrl && <img src={resolveApiUrl(d.imagenUrl)} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-slate-800 dark:text-stone-200 text-sm truncate">{d.artista} — {d.album}</div>
                         <div className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno && `${d.codigoInterno} · `}{ESTADO_LABELS[d.estado] || d.estado} · {d.precioVenta ? money(d.precioVenta) : '—'}</div>
                       </div>
-                      <span className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">+ Agregar</span>
-                    </button>
+                      <button type="button" onClick={() => setDiscoDetalle(d)} className="text-xs text-slate-500 dark:text-stone-400 hover:text-slate-900 dark:hover:text-white font-medium flex-shrink-0">Ver</button>
+                      <button type="button" onClick={() => agregarAlCarrito(d)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">+ Agregar</button>
+                    </div>
                   ))}
                   {discosParaMostrar.length === 0 && (
                     <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Sin discos disponibles</p>
                   )}
-                </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -473,11 +509,11 @@ export default function NuevaVenta() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">
-                    Dirección {direccionModo === 'NUEVA' ? 'nueva' : 'seleccionada'}
+                    Dirección {direccionModo === 'NUEVA' ? 'nueva opcional' : 'seleccionada'}
                   </label>
                   <input value={direccionEnvio}
                     onChange={e => { setDireccionEnvio(e.target.value); setDireccionModo('NUEVA'); setDireccionSeleccionadaId('') }}
-                    placeholder="Calle y número..." className="input" />
+                    placeholder="Calle y número (opcional)..." className="input" />
                   {errores.direccionEnvio && <p className="text-red-500 text-xs mt-1">{errores.direccionEnvio}</p>}
                 </div>
                 <div>
@@ -513,12 +549,15 @@ export default function NuevaVenta() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Impuesto %</label>
-              <input type="number" step="0.01" min="0" value={porcentajeImpuesto} onChange={e => setPorcentajeImpuesto(e.target.value)} className="input" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Otros costos</label>
-              <input type="number" step="0.01" min="0" value={otrosCostos} onChange={e => setOtrosCostos(e.target.value)} className="input" />
+              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Método de pago</label>
+              <select value={medioPago} onChange={e => setMedioPago(e.target.value)} className="input">
+                <option value="">Sin definir</option>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+                <option value="MERCADOPAGO">Mercado Pago</option>
+                <option value="TARJETA">Tarjeta</option>
+                <option value="OTRO">Otro</option>
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Monto pagado</label>
@@ -532,8 +571,6 @@ export default function NuevaVenta() {
             {descuentoPct > 0 && <ResumenLinea label={`Descuento ${descuentoPct}%`} value={`-${money(totales.descuento)}`} />}
             <ResumenLinea label="Precio neto" value={money(totales.base)} />
             {tipoEntrega === 'ENVIO' && <ResumenLinea label="Costo de envío" value={money(totales.envio)} />}
-            {totales.impuesto > 0 && <ResumenLinea label="Impuestos" value={money(totales.impuesto)} />}
-            {totales.otros > 0 && <ResumenLinea label="Otros costos" value={money(totales.otros)} />}
             <div className="border-t border-slate-200 dark:border-stone-800 pt-2">
               <ResumenLinea label="Total a cobrar" value={money(totales.totalFinal)} strong />
             </div>
@@ -568,6 +605,11 @@ export default function NuevaVenta() {
           onCreado={(c) => { seleccionarCliente(c); setMostrarModalCliente(false) }}
         />
       )}
+      <DiscoDetallePanel
+        disco={discoDetalle}
+        onClose={() => setDiscoDetalle(null)}
+        onAgregar={agregarAlCarrito}
+      />
     </div>
   )
 }

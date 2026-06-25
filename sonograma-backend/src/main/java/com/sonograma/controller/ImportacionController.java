@@ -19,8 +19,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -74,8 +72,7 @@ public class ImportacionController {
     }
 
     private String decodeMediaPath(String path) {
-        String decoded = URLDecoder.decode(path, StandardCharsets.UTF_8);
-        return decoded.startsWith("/") ? decoded.substring(1) : decoded;
+        return path.startsWith("/") ? path.substring(1) : path;
     }
 
     // ── Discogs — link único ──────────────────────────────────────────────────

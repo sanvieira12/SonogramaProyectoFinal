@@ -38,11 +38,15 @@ public class EstadisticasService {
                 .toList();
         List<Disco> discos = discoRepository.findAll();
 
+        List<VentaDiscoItem> itemsVendidos = ventas.stream()
+                .flatMap(venta -> ventaItems(venta).stream())
+                .toList();
+
         return EstadisticasResponseDTO.builder()
-                .aniosMusicaMasVendidos(agruparVentas(ventas, v -> valor(v.getDisco().getAnio()), v -> etiqueta(v.getDisco().getAnio()), true))
-                .generosMasVendidos(agruparVentas(ventas, v -> texto(v.getDisco().getGenero(), "Sin género"), v -> texto(v.getDisco().getGenero(), "Sin género"), true))
-                .artistasMasVendidos(agruparVentas(ventas, v -> texto(v.getDisco().getArtista(), "Sin artista"), v -> texto(v.getDisco().getArtista(), "Sin artista"), true))
-                .sellosMasVendidos(agruparVentas(ventas, v -> texto(v.getDisco().getSelloDiscografico(), "Sin sello"), v -> texto(v.getDisco().getSelloDiscografico(), "Sin sello"), true))
+                .aniosMusicaMasVendidos(agruparItemsVendidos(itemsVendidos, i -> valor(i.disco().getAnio()), i -> etiqueta(i.disco().getAnio()), true))
+                .generosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getGenero(), "Sin género"), i -> texto(i.disco().getGenero(), "Sin género"), true))
+                .artistasMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getArtista(), "Sin artista"), i -> texto(i.disco().getArtista(), "Sin artista"), true))
+                .sellosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), true))
                 .ventasPorMes(agruparVentas(ventas, v -> claveMes(v.getFechaVenta()), v -> claveMes(v.getFechaVenta()), false))
                 .ventasPorSemana(agruparVentas(ventas, v -> claveSemana(v.getFechaVenta()), v -> claveSemana(v.getFechaVenta()), false))
                 .ventasPorAnio(agruparVentas(ventas, v -> claveAnio(v.getFechaVenta()), v -> claveAnio(v.getFechaVenta()), false))
@@ -73,6 +77,23 @@ public class EstadisticasService {
         return ordenar(acumulado, ordenarPorCantidad);
     }
 
+    private List<EstadisticaItemDTO> agruparItemsVendidos(
+            List<VentaDiscoItem> items,
+            Function<VentaDiscoItem, String> claveFn,
+            Function<VentaDiscoItem, String> etiquetaFn,
+            boolean ordenarPorCantidad
+    ) {
+        Map<String, Acumulador> acumulado = new LinkedHashMap<>();
+        for (VentaDiscoItem item : items) {
+            String clave = claveFn.apply(item);
+            Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, etiquetaFn.apply(item)));
+            acc.cantidad++;
+            acc.totalMonto = acc.totalMonto.add(item.precio());
+            acc.gananciaEstimada = acc.gananciaEstimada.add(item.gananciaEstimada());
+        }
+        return ordenar(acumulado, ordenarPorCantidad);
+    }
+
     private List<EstadisticaItemDTO> agruparDiscos(
             List<Disco> discos,
             Function<Disco, String> claveFn,
@@ -83,9 +104,26 @@ public class EstadisticasService {
         for (Disco disco : discos) {
             String clave = claveFn.apply(disco);
             Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, etiquetaFn.apply(disco)));
-            acc.cantidad++;
+            acc.cantidad += Math.max(0, disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1);
         }
         return ordenar(acumulado, ordenarPorCantidad);
+    }
+
+    private List<VentaDiscoItem> ventaItems(Venta venta) {
+        if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
+            BigDecimal gananciaPorItem = venta.getDetalles().isEmpty()
+                    ? BigDecimal.ZERO
+                    : gananciaVenta(venta).divide(BigDecimal.valueOf(venta.getDetalles().size()), 2, java.math.RoundingMode.HALF_UP);
+            return venta.getDetalles().stream()
+                    .filter(detalle -> detalle.getDisco() != null)
+                    .map(detalle -> new VentaDiscoItem(
+                            detalle.getDisco(),
+                            detalle.getPrecioUnitario() != null ? detalle.getPrecioUnitario() : BigDecimal.ZERO,
+                            gananciaPorItem))
+                    .toList();
+        }
+        if (venta.getDisco() == null) return List.of();
+        return List.of(new VentaDiscoItem(venta.getDisco(), totalVenta(venta), gananciaVenta(venta)));
     }
 
     private List<EstadisticaItemDTO> ordenar(Map<String, Acumulador> acumulado, boolean ordenarPorCantidad) {
@@ -164,4 +202,6 @@ public class EstadisticasService {
                     .build();
         }
     }
+
+    private record VentaDiscoItem(Disco disco, BigDecimal precio, BigDecimal gananciaEstimada) {}
 }

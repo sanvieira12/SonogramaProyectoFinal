@@ -8,7 +8,7 @@ import java.math.RoundingMode;
 @Service
 public class CatalogPricingService {
 
-    public static final BigDecimal TIPO_CAMBIO = new BigDecimal("49");
+    public static final BigDecimal TIPO_CAMBIO = new BigDecimal("50");
     public static final BigDecimal EXTRA_SIMPLE = new BigDecimal("5");
     public static final BigDecimal EXTRA_DOBLE = new BigDecimal("8");
     public static final BigDecimal MARKUP_SIMPLE = new BigDecimal("1.6");

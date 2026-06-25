@@ -2,6 +2,8 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.InvoiceItem;
 import com.sonograma.dto.ParsedInvoice;
+import com.sonograma.dto.AudioPreviewDTO;
+import com.sonograma.dto.TrackInfo;
 import com.sonograma.dto.VinylPageData;
 import com.sonograma.dto.VinylFutureImportSummaryDTO;
 import com.sonograma.entity.Disco;
@@ -18,6 +20,7 @@ import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.VinylFutureAssetService;
+import com.sonograma.service.VinylFutureImportBatchService;
 import com.sonograma.service.ZipBundleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,7 +36,6 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -71,6 +73,7 @@ public class ImportController {
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
+    private final VinylFutureImportBatchService importBatchService;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
 
     /**
@@ -81,7 +84,12 @@ public class ImportController {
     public ResponseEntity<VinylFutureImportSummaryDTO> importarFacturaAlCatalogo(
             @RequestParam MultipartFile file) {
         try {
-            return ResponseEntity.ok(processImport(file).summary());
+            ImportProcessingResult result = processImport(file);
+            String importId = importBatchService.store(
+                csvExport.buildCsv(result.searchResults()),
+                result.pageDataMap()
+            );
+            return ResponseEntity.ok(result.summary().withImportId(importId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IOException ex) {
@@ -105,11 +113,26 @@ public class ImportController {
             return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
-        String csv = csvExport.buildCsv(result.searchResults());
+        return buildZipResponse(csvExport.buildCsv(result.searchResults()), result.pageDataMap());
+    }
 
+    @GetMapping("/vinylfuture/{importId}/zip")
+    @Transactional(readOnly = true)
+    public ResponseEntity<StreamingResponseBody> exportarZipDesdeImport(@PathVariable String importId) {
+        VinylFutureImportBatchService.ImportBatch batch = importBatchService.find(importId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "No se encontró la importación solicitada. Volvé a procesar el PDF."
+            ));
+        return buildZipResponse(batch.csv(), batch.pageDataMap());
+    }
+
+    private ResponseEntity<StreamingResponseBody> buildZipResponse(
+            String csv,
+            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) {
         Path zipPath;
         try {
-            zipPath = zipBundle.buildZip(csv, result.pageDataMap());
+            zipPath = zipBundle.buildZip(csv, pageDataMap);
         } catch (Exception e) {
             log.error("Error al construir el ZIP: {}", e.getMessage(), e);
             return errorResponse(
@@ -117,7 +140,6 @@ public class ImportController {
                 "Error al generar el archivo: " + e.getMessage()
             );
         }
-
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         String filename = "vinylfuture-import-" + timestamp + ".zip";
 
@@ -183,7 +205,23 @@ public class ImportController {
         log.info("Scraping completado en {} ms.", elapsedMillis(scrapeStarted));
 
         long assetsStarted = System.nanoTime();
-        pageDataMap = storeAssetsWithProgress(pageDataMap);
+        int coversFound = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .filter(page -> !blank(page.frontImageUrl()))
+            .count();
+        int mp3Found = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .flatMap(page -> page.tracks() == null ? java.util.stream.Stream.empty() : page.tracks().stream())
+            .filter(track -> !blank(track.mp3Url()))
+            .count();
+        int youtubeFound = (int) pageDataMap.values().stream()
+            .flatMap(Optional::stream)
+            .flatMap(page -> page.tracks() == null ? java.util.stream.Stream.empty() : page.tracks().stream())
+            .filter(track -> !blank(track.youtubeUrl()))
+            .count();
+
+        AssetProcessingResult assetResult = storeAssetsWithProgress(pageDataMap);
+        pageDataMap = assetResult.pageDataMap();
         log.info("Assets Vinyl Future procesados en {} ms.", elapsedMillis(assetsStarted));
 
         List<Disco> imported = new ArrayList<>();
@@ -210,10 +248,10 @@ public class ImportController {
                 pageData.ifPresent(page ->
                     audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
                 imported.add(discoRepository.save(disco));
-                int mp3Count = pageData.map(page -> (int) page.tracks().stream()
+                int mp3Count = pageData.map(page -> (int) safeTracks(page).stream()
                     .filter(track -> !blank(track.mp3Url()))
                     .count()).orElse(0);
-                int youtubeCount = pageData.map(page -> (int) page.tracks().stream()
+                int youtubeCount = pageData.map(page -> (int) safeTracks(page).stream()
                     .filter(track -> !blank(track.youtubeUrl()))
                     .count()).orElse(0);
                 log.info(
@@ -240,20 +278,6 @@ public class ImportController {
             }
         }
 
-        int coversFound = (int) pageDataMap.values().stream()
-            .flatMap(Optional::stream)
-            .filter(page -> !blank(page.frontImageUrl()))
-            .count();
-        int mp3Found = (int) pageDataMap.values().stream()
-            .flatMap(Optional::stream)
-            .flatMap(page -> page.tracks().stream())
-            .filter(track -> !blank(track.mp3Url()))
-            .count();
-        int youtubeFound = (int) pageDataMap.values().stream()
-            .flatMap(Optional::stream)
-            .flatMap(page -> page.tracks().stream())
-            .filter(track -> !blank(track.youtubeUrl()))
-            .count();
         Map<InvoiceItem, Optional<VinylPageData>> finalPageDataMap = pageDataMap;
         List<String> failedLinks = items.stream()
             .filter(item -> searchResults.getOrDefault(item, Optional.empty()).isEmpty()
@@ -264,22 +288,27 @@ public class ImportController {
             .toList();
 
         VinylFutureImportSummaryDTO summary = new VinylFutureImportSummaryDTO(
+            null,
             items.size(),
             imported.size(),
             coversFound,
+            assetResult.coversDownloaded(),
             mp3Found,
+            assetResult.mp3Downloaded(),
             youtubeFound,
             qrEntriesCreated,
+            assetResult.failedMediaDownloads(),
             failedLinks.size(),
             skippedDuplicates,
             0,
             failedLinks
         );
         log.info(
-            "Resumen Vinyl Future: detectados={}, importados={}, portadas={}, mp3={}, youtube={}, "
-                + "qr={}, fallidos={}, duplicados={}, rateLimit={}",
+            "Resumen Vinyl Future: detectados={}, importados={}, portadasEncontradas={}, portadasDescargadas={}, "
+                + "mp3Encontrados={}, mp3Descargados={}, mediaFallida={}, youtube={}, qr={}, fallidos={}, duplicados={}, rateLimit={}",
             summary.recordsDetected(), summary.recordsImported(), summary.coversFound(),
-            summary.mp3PreviewsFound(), summary.youtubeLinksFound(), summary.qrEntriesCreated(),
+            summary.coversDownloaded(), summary.mp3PreviewsFound(), summary.mp3Downloaded(),
+            summary.failedMediaDownloads(), summary.youtubeLinksFound(), summary.qrEntriesCreated(),
             summary.failedLinks(), summary.skippedDuplicates(), summary.rateLimitFailures()
         );
         return new ImportProcessingResult(summary, searchResults, pageDataMap);
@@ -312,8 +341,8 @@ public class ImportController {
             disco.setDescripcion(page.description());
             disco.setImagenUrl(page.frontImageUrl());
             disco.setDiscogsUrl(page.sourceUrl());
-            if (page.tracks() != null && !page.tracks().isEmpty()) {
-                disco.setTracklist(page.tracks().stream()
+            if (!safeTracks(page).isEmpty()) {
+                disco.setTracklist(safeTracks(page).stream()
                     .map(track -> firstNonBlank(track.label(), "") + " "
                         + firstNonBlank(track.name(), "Track"))
                     .map(String::strip)
@@ -344,10 +373,21 @@ public class ImportController {
         return value == null || value.isBlank();
     }
 
+    private List<TrackInfo> safeTracks(VinylPageData page) {
+        return page.tracks() == null ? List.of() : page.tracks();
+    }
+
     private record ImportProcessingResult(
         VinylFutureImportSummaryDTO summary,
         Map<InvoiceItem, Optional<String>> searchResults,
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap
+    ) {}
+
+    private record AssetProcessingResult(
+        Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
+        int coversDownloaded,
+        int mp3Downloaded,
+        int failedMediaDownloads
     ) {}
 
     private <T> Map<InvoiceItem, T> parallelMap(
@@ -381,12 +421,12 @@ public class ImportController {
         return results;
     }
 
-    private Map<InvoiceItem, Optional<VinylPageData>> storeAssetsWithProgress(
+    private AssetProcessingResult storeAssetsWithProgress(
             Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) {
         int totalProducts = (int) pageDataMap.values().stream().flatMap(Optional::stream).count();
         if (totalProducts == 0) {
             log.info("Assets Vinyl Future: no hay productos con metadata para descargar.");
-            return pageDataMap;
+            return new AssetProcessingResult(pageDataMap, 0, 0, 0);
         }
 
         AtomicInteger productsProcessed = new AtomicInteger();
@@ -437,19 +477,68 @@ public class ImportController {
             mp3Downloaded.get(),
             failedMediaDownloads.get()
         );
-        return results;
+        return new AssetProcessingResult(
+            results,
+            coversDownloaded.get(),
+            mp3Downloaded.get(),
+            failedMediaDownloads.get()
+        );
     }
 
     private long elapsedMillis(long startedAt) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
-    private String firstNonBlank(String first, String fallback) {
-        return first == null || first.isBlank() ? fallback : first;
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
     }
 
     private String itemReference(InvoiceItem item) {
         return firstNonBlank(item.codigoCatalogo(), item.artista() + " - " + item.album());
+    }
+
+    @GetMapping("/vinylfuture/discos/{idDisco}/media-validation")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> validarMediaDisco(@PathVariable Long idDisco) {
+        Disco disco = discoRepository.findById(idDisco)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Disco no encontrado"));
+        List<String> missingFiles = new ArrayList<>();
+        List<String> badUrls = new ArrayList<>();
+        validateMediaUrl("cover", disco.getImagenUrl(), missingFiles, badUrls);
+        for (AudioPreviewDTO preview : audioPreviewService.listarPorDisco(idDisco)) {
+            validateMediaUrl(
+                "audio " + firstNonBlank(preview.trackPosition(), preview.trackName(), String.valueOf(preview.id())),
+                preview.audioUrl(),
+                missingFiles,
+                badUrls
+            );
+        }
+        return ResponseEntity.ok(Map.of(
+            "idDisco", idDisco,
+            "codigoInterno", disco.getCodigoInterno(),
+            "valid", missingFiles.isEmpty() && badUrls.isEmpty(),
+            "missingFiles", missingFiles,
+            "badUrls", badUrls
+        ));
+    }
+
+    private void validateMediaUrl(
+            String label,
+            String url,
+            List<String> missingFiles,
+            List<String> badUrls) {
+        if (blank(url)) return;
+        Path path = vinylFutureAssetService.localPath(url);
+        if (path == null) {
+            badUrls.add(label + ": " + url);
+            return;
+        }
+        if (!Files.isRegularFile(path)) {
+            missingFiles.add(label + ": " + path);
+        }
     }
 
     @GetMapping("/vinylfuture/media/{*filename}")
@@ -462,8 +551,7 @@ public class ImportController {
     }
 
     private String decodeMediaPath(String path) {
-        String decoded = URLDecoder.decode(path, StandardCharsets.UTF_8);
-        return decoded.startsWith("/") ? decoded.substring(1) : decoded;
+        return path.startsWith("/") ? path.substring(1) : path;
     }
 
     @PreDestroy

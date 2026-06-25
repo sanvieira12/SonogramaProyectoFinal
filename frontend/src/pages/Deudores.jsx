@@ -104,7 +104,10 @@ export default function Deudores() {
     }
   }, [])
 
-  useEffect(() => { cargar() }, [cargar])
+  useEffect(() => {
+    const timer = window.setTimeout(() => cargar(), 0)
+    return () => window.clearTimeout(timer)
+  }, [cargar])
 
   async function onFileChange(e) {
     const file = e.target.files[0]

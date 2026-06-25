@@ -54,8 +54,20 @@ public class ClienteService {
 
     public ClienteDTO crearCliente(ClienteRequest request) {
         limpiarCamposVacios(request);
-        if (request.getCedula() != null && clienteRepository.existsByCedula(request.getCedula())) {
-            throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
+        if (request.getCedula() != null) {
+            Cliente existente = clienteRepository.findByCedula(request.getCedula()).orElse(null);
+            if (existente != null && Boolean.TRUE.equals(existente.getActivo())) {
+                throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
+            }
+            if (existente != null) {
+                ClienteMapper.updateFromRequest(existente, request);
+                existente.setActivo(true);
+                Cliente cliente = clienteRepository.save(existente);
+                if (request.getDireccion() != null) {
+                    guardarDireccion(cliente, request.getDireccion(), request.getDepartamento(), request.getSucursalDac(), false);
+                }
+                return ClienteMapper.toDTO(cliente);
+            }
         }
         Cliente cliente = ClienteMapper.toEntity(request);
         cliente.setActivo(true);
@@ -171,7 +183,7 @@ public class ClienteService {
 
         if (request.getCedula() != null
                 && !request.getCedula().equals(cliente.getCedula())
-                && clienteRepository.existsByCedulaAndIdClienteNot(request.getCedula(), id)) {
+                && clienteRepository.existsByCedulaAndActivoTrueAndIdClienteNot(request.getCedula(), id)) {
             throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
         }
 
@@ -188,7 +200,7 @@ public class ClienteService {
                 .filter(Cliente::getActivo)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", id));
         long ventasAsociadas = ventaRepository.countByClienteIdCliente(id);
-        long deudasAsociadas = deudaRepository.countByClienteIdCliente(id);
+        long deudasAsociadas = deudaRepository.countByClienteIdClienteAndActivaTrue(id);
         if (ventasAsociadas > 0 || deudasAsociadas > 0) {
             throw new NegocioException("No se puede borrar el cliente porque tiene ventas o deudas asociadas");
         }

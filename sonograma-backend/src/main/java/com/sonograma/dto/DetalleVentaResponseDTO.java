@@ -14,5 +14,6 @@ public class DetalleVentaResponseDTO {
     private String artista;
     private String album;
     private String codigoInterno;
+    private String imagenUrl;
     private BigDecimal precioUnitario;
 }

@@ -14,9 +14,15 @@ public interface ClienteRepository extends JpaRepository<Cliente, Long> {
 
     Optional<Cliente> findByCedulaAndActivoTrue(String cedula);
 
+    Optional<Cliente> findByCedula(String cedula);
+
     boolean existsByCedula(String cedula);
 
     boolean existsByCedulaAndIdClienteNot(String cedula, Long idCliente);
+
+    boolean existsByCedulaAndActivoTrue(String cedula);
+
+    boolean existsByCedulaAndActivoTrueAndIdClienteNot(String cedula, Long idCliente);
 
     Optional<Cliente> findByTelefonoIgnoreCase(String telefono);
 

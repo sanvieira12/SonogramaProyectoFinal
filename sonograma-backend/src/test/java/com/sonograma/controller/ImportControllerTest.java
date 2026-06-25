@@ -17,6 +17,7 @@ import com.sonograma.service.ShippingOrderService;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.VinylFutureAssetService;
+import com.sonograma.service.VinylFutureImportBatchService;
 import com.sonograma.service.ZipBundleService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,6 +51,7 @@ class ImportControllerTest {
     @Mock private AudioPreviewService audioPreviewService;
     @Mock private DiscoQrCopyService qrCopyService;
     @Mock private CatalogPricingService pricingService;
+    @Mock private VinylFutureImportBatchService importBatchService;
 
     @InjectMocks private ImportController controller;
 
@@ -70,12 +72,19 @@ class ImportControllerTest {
             "https://cdn.example/cover.jpg", null,
             List.of(new TrackInfo("A1", "First Track", "https://cdn.example/a1.mp3", null))
         );
+        VinylPageData storedPage = new VinylPageData(
+            page.sourceUrl(),
+            page.artist(), page.title(), page.code(), page.label(), page.genre(), page.year(),
+            page.country(), page.format(), page.condition(), page.description(), page.purchasePrice(),
+            "/api/importar/vinylfuture/media/CAT-123/cover.jpg", null,
+            List.of(new TrackInfo("A1", "First Track", "/api/importar/vinylfuture/media/CAT-123/a1.mp3", null))
+        );
 
         when(pdfParser.parseInvoice(any(byte[].class))).thenReturn(invoice);
         when(searchService.buscar(item)).thenReturn(Optional.of(page.sourceUrl()));
         when(scraperService.scrape(page.sourceUrl())).thenReturn(Optional.of(page));
         when(assetService.storeAssetsWithResult(item, page))
-            .thenReturn(new VinylFutureAssetService.AssetStoreResult(page, 1, 1, 0));
+            .thenReturn(new VinylFutureAssetService.AssetStoreResult(storedPage, 1, 1, 0));
         when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.empty());
         when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);
@@ -91,6 +100,8 @@ class ImportControllerTest {
                 new BigDecimal("8"), new BigDecimal("20"), new BigDecimal("980"),
                 new BigDecimal("1.4"), new BigDecimal("1372")
             ));
+        when(csvExportService.buildCsv(any())).thenReturn("csv");
+        when(importBatchService.store(any(), any())).thenReturn("import-123");
 
         MockMultipartFile file = new MockMultipartFile(
             "file", "invoice.pdf", "application/pdf", "pdf".getBytes()
@@ -99,12 +110,15 @@ class ImportControllerTest {
             controller.importarFacturaAlCatalogo(file);
 
         assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().importId()).isEqualTo("import-123");
         assertThat(response.getBody().recordsDetected()).isEqualTo(1);
         assertThat(response.getBody().recordsImported()).isEqualTo(1);
         assertThat(response.getBody().coversFound()).isEqualTo(1);
+        assertThat(response.getBody().coversDownloaded()).isEqualTo(1);
         assertThat(response.getBody().mp3PreviewsFound()).isEqualTo(1);
+        assertThat(response.getBody().mp3Downloaded()).isEqualTo(1);
         assertThat(response.getBody().qrEntriesCreated()).isEqualTo(2);
-        verify(audioPreviewService).guardarDesdeTracks(10L, page.tracks());
+        verify(audioPreviewService).guardarDesdeTracks(10L, storedPage.tracks());
         verify(zipBundleService, never()).buildZip(any(), any());
     }
 }

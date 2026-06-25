@@ -132,6 +132,8 @@ export const api = {
     porId: (id) => request('GET', `/ventas/${id}`),
     porCliente: (idCliente) => request('GET', `/ventas/cliente/${idCliente}`),
     registrar: (venta) => request('POST', '/ventas', venta),
+    actualizar: (id, venta) => request('PUT', `/ventas/${id}`, venta),
+    cancelar: (id) => request('DELETE', `/ventas/${id}`),
     estadisticasPorMes: () => request('GET', '/ventas/estadisticas/por-mes'),
     configuracionCostos: () => request('GET', '/ventas/configuracion-costos'),
   },
@@ -155,6 +157,7 @@ export const api = {
     porCliente: (id) => request('GET', `/deudas/cliente/${id}`),
     crear: (deuda) => request('POST', '/deudas', deuda),
     actualizar: (id, deuda) => request('PUT', `/deudas/${id}`, deuda),
+    eliminar: (id) => request('DELETE', `/deudas/${id}`),
     importarExcel: async (file) => {
       const fd = new FormData(); fd.append('file', file)
       const res = await fetch(`${BASE}/deudas/importar-excel`, {
@@ -178,7 +181,7 @@ export const api = {
     },
     exportarUrl: (params = {}) => {
       const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
-      return `${import.meta.env.VITE_API_URL || '/api'}/ventas/libro/exportar${q ? `?${q}` : ''}`
+      return `${BASE}/ventas/libro/exportar${q ? `?${q}` : ''}`
     },
   },
 
@@ -222,6 +225,19 @@ export const api = {
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Error procesando PDF')
+      }
+      return res.blob()
+    },
+    vinylfutureZip: async (importId) => {
+      const res = await fetch(`${BASE}/importar/vinylfuture/${encodeURIComponent(importId)}/zip`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) {
+        const text = await res.text()
+        let data
+        try { data = text ? JSON.parse(text) : null } catch { data = null }
+        throw new Error(data?.message || data?.error || text || 'Error exportando ZIP')
       }
       return res.blob()
     },

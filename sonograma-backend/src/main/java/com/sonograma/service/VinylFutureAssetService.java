@@ -16,7 +16,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -56,13 +55,14 @@ public class VinylFutureAssetService {
         if (page == null) return null;
 
         String folder = discFolder(item, page);
+        String coverFilename = folder + "/cover." + extensionFromUrl(page.frontImageUrl(), "jpg");
         StoredAsset coverAsset = store(
             page.frontImageUrl(),
-            folder + "/cover." + extensionFromUrl(page.frontImageUrl(), "jpg"),
+            coverFilename,
             MAX_IMAGE_SIZE,
             "image/*"
         );
-        String coverUrl = coverAsset.publicUrlOrFallback(page.frontImageUrl());
+        String coverUrl = coverAsset.publicUrl();
         int coversDownloaded = coverAsset.downloaded() ? 1 : 0;
         int failedMediaDownloads = coverAsset.failed() ? 1 : 0;
         int mp3Downloaded = 0;
@@ -78,7 +78,7 @@ public class VinylFutureAssetService {
                 String filename = folder + "/" + sanitize(position, 12)
                     + " - " + sanitize(trackName, 80) + ".mp3";
                 StoredAsset audioAsset = store(track.mp3Url(), filename, MAX_AUDIO_SIZE, "audio/mpeg,*/*");
-                audioUrl = audioAsset.publicUrlOrFallback(track.mp3Url());
+                audioUrl = audioAsset.publicUrl();
                 if (audioAsset.downloaded()) {
                     mp3Downloaded++;
                 }
@@ -110,7 +110,7 @@ public class VinylFutureAssetService {
     }
 
     public Resource load(String filename) throws IOException {
-        Path file = safeFile(filename);
+        Path file = safeFile(decodePath(filename));
         if (!Files.isRegularFile(file)) {
             throw new IOException("Asset VinylFuture no encontrado");
         }
@@ -119,7 +119,7 @@ public class VinylFutureAssetService {
 
     public String contentType(String filename) {
         try {
-            String detected = Files.probeContentType(safeFile(filename));
+            String detected = Files.probeContentType(safeFile(decodePath(filename)));
             if (detected != null) return detected;
         } catch (IOException ignored) {
         }
@@ -145,16 +145,17 @@ public class VinylFutureAssetService {
 
     private StoredAsset store(String sourceUrl, String filename, int maxSize, String accept) {
         if (sourceUrl == null || sourceUrl.isBlank()) {
-            return StoredAsset.missing();
+            return StoredAsset.missing(sourceUrl);
         }
         if (localPath(sourceUrl) != null) {
-            return StoredAsset.success(sourceUrl, false);
+            return StoredAsset.success(sourceUrl, sourceUrl, false);
         }
+        Path target = null;
         try {
             Files.createDirectories(mediaDirectory);
-            Path target = safeFile(filename);
+            target = safeFile(filename);
             if (Files.isRegularFile(target) && Files.size(target) > 0) {
-                return StoredAsset.success(publicUrl(target), false);
+                return StoredAsset.success(sourceUrl, publicUrl(target), false);
             }
 
             Files.createDirectories(target.getParent());
@@ -166,10 +167,19 @@ public class VinylFutureAssetService {
                 Files.deleteIfExists(temporary);
             }
             log.info("Asset VinylFuture guardado: {} -> {}", sourceUrl, target);
-            return StoredAsset.success(publicUrl(target), true);
+            return StoredAsset.success(sourceUrl, publicUrl(target), true);
         } catch (Exception ex) {
-            log.warn("No se pudo guardar asset VinylFuture '{}': {}", sourceUrl, ex.getMessage());
-            return StoredAsset.failure();
+            Integer status = ex instanceof AssetDownloadException downloadException
+                ? downloadException.httpStatus()
+                : null;
+            log.warn(
+                "VinylFuture asset download failed sourceUrl='{}', targetPath='{}', httpStatus={}, error='{}'",
+                sourceUrl,
+                target,
+                status,
+                ex.getMessage()
+            );
+            return StoredAsset.failure(sourceUrl);
         }
     }
 
@@ -207,7 +217,7 @@ public class VinylFutureAssetService {
             connection.setRequestProperty("Accept", accept);
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
-                throw new IOException("HTTP " + status);
+                throw new AssetDownloadException("HTTP " + status, status);
             }
             long contentLength = connection.getContentLengthLong();
             if (contentLength > maxSize) {
@@ -274,7 +284,7 @@ public class VinylFutureAssetService {
 
     private String decodePath(String value) {
         try {
-            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+            return UriUtils.decode(value, StandardCharsets.UTF_8);
         } catch (IllegalArgumentException ex) {
             return value;
         }
@@ -303,21 +313,35 @@ public class VinylFutureAssetService {
         int failedMediaDownloads
     ) {}
 
-    private record StoredAsset(String publicUrl, boolean downloaded, boolean failed) {
-        static StoredAsset success(String publicUrl, boolean downloaded) {
-            return new StoredAsset(publicUrl, downloaded, false);
+    private record StoredAsset(
+        String sourceUrl,
+        String publicUrl,
+        boolean downloaded,
+        boolean failed
+    ) {
+        static StoredAsset success(String sourceUrl, String publicUrl, boolean downloaded) {
+            return new StoredAsset(sourceUrl, publicUrl, downloaded, false);
         }
 
-        static StoredAsset missing() {
-            return new StoredAsset(null, false, false);
+        static StoredAsset missing(String sourceUrl) {
+            return new StoredAsset(sourceUrl, null, false, false);
         }
 
-        static StoredAsset failure() {
-            return new StoredAsset(null, false, true);
+        static StoredAsset failure(String sourceUrl) {
+            return new StoredAsset(sourceUrl, null, false, true);
+        }
+    }
+
+    private static class AssetDownloadException extends IOException {
+        private final Integer httpStatus;
+
+        AssetDownloadException(String message, Integer httpStatus) {
+            super(message);
+            this.httpStatus = httpStatus;
         }
 
-        String publicUrlOrFallback(String fallback) {
-            return publicUrl != null && !publicUrl.isBlank() ? publicUrl : fallback;
+        Integer httpStatus() {
+            return httpStatus;
         }
     }
 }

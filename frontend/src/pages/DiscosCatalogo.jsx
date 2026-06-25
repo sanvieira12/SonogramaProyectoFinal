@@ -225,7 +225,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
           {disco.previewUrl && (
             <div>
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Preview</p>
-              <audio controls src={disco.previewUrl} className="w-full h-9" />
+              <audio controls src={resolveApiUrl(disco.previewUrl)} className="w-full h-9" />
             </div>
           )}
 
@@ -284,7 +284,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
   )
 }
 
-function CatalogPreview({ disco, onEditar, onDarBaja, onViewQr }) {
+function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr }) {
   const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
   const previews = loaded.discoId === disco?.idDisco
     ? loaded.previews
@@ -312,7 +312,7 @@ function CatalogPreview({ disco, onEditar, onDarBaja, onViewQr }) {
           </svg>
         </div>
         <p className="text-sm font-medium text-slate-600 dark:text-stone-300">Vista rápida</p>
-        <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Pasá el cursor por un disco para ver sus datos</p>
+        <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Pasá el cursor o seleccioná un disco para ver sus datos</p>
       </aside>
     )
   }
@@ -347,7 +347,10 @@ function CatalogPreview({ disco, onEditar, onDarBaja, onViewQr }) {
               <h2 className="font-bold text-slate-900 dark:text-white leading-tight">{disco.album || '—'}</h2>
               <p className="text-sm text-slate-500 dark:text-stone-400 mt-1">{disco.artista || '—'}</p>
             </div>
-            <EstadoBadge estado={disco.estado} />
+            <div className="flex flex-col items-end gap-2">
+              <EstadoBadge estado={disco.estado} />
+              {pinned && <button onClick={onUnpin} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-white">Desfijar</button>}
+            </div>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -401,6 +404,7 @@ export default function DiscosCatalogo() {
   const [eliminando, setEliminando] = useState(false)
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [hoveredDisco, setHoveredDisco] = useState(null)
+  const [selectedDisco, setSelectedDisco] = useState(null)
   const [qrDisco, setQrDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
@@ -449,6 +453,7 @@ export default function DiscosCatalogo() {
     if (discoForm && discoForm.idDisco) {
       const actualizado = await discoService.actualizar(discoForm.idDisco, payload)
       setDiscos(prev => prev.map(d => d.idDisco === discoForm.idDisco ? actualizado : d))
+      setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
     } else {
       const nuevo = await discoService.crear(payload)
       setDiscos(prev => [nuevo, ...prev])
@@ -461,11 +466,23 @@ export default function DiscosCatalogo() {
     try {
       await discoService.eliminar(discoEliminar.idDisco)
       setDiscos(prev => prev.filter(d => d.idDisco !== discoEliminar.idDisco))
+      setSelectedDisco(prev => prev?.idDisco === discoEliminar.idDisco ? null : prev)
       setDiscoEliminar(null)
     } catch (err) {
       alert(err.message)
     } finally {
       setEliminando(false)
+    }
+  }
+
+  async function abrirQr(disco) {
+    try {
+      const actualizado = await api.discos.porId(disco.idDisco)
+      setDiscos(prev => prev.map(d => d.idDisco === actualizado.idDisco ? actualizado : d))
+      setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
+      setQrDisco(actualizado)
+    } catch {
+      setQrDisco(disco)
     }
   }
 
@@ -489,27 +506,27 @@ export default function DiscosCatalogo() {
       </div>
 
       {/* Barra de búsqueda (ancho completo) + filtros de estado */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative w-full">
+      <div className="flex flex-col lg:flex-row gap-3">
+        <div className="relative w-full lg:max-w-md">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
           <input
             value={busqueda}
             onChange={onBusquedaChange}
-            placeholder="Buscar por disco, artista, género, año, sello, estado, código..."
+            placeholder="Buscar disco, artista o código..."
             className="input pl-9"
           />
         </div>
-        <div className="flex gap-2 flex-wrap sm:flex-nowrap overflow-x-auto">
+        <div className="flex gap-2 flex-wrap">
           {FILTROS.map(estado => (
             <button
               key={estado}
               onClick={() => cambiarFiltro(estado)}
-              className={`text-xs px-3 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+              className={`text-xs px-3 py-2 rounded-full border font-medium transition-colors ${
                 filtroEstado === estado
-                  ? 'bg-[#7E9FA8] text-white'
-                  : 'bg-slate-100 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-200 dark:hover:bg-stone-700'
+                  ? 'border-[#7E9FA8] bg-[#7E9FA8] text-white'
+                  : 'border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-100 dark:hover:bg-stone-800'
               }`}
             >
               {estado === 'TODOS' ? 'Todos' : ESTADO_LABELS[estado]}
@@ -534,7 +551,7 @@ export default function DiscosCatalogo() {
       {/* Tabla principal + vista rápida estable en escritorio */}
       <div
         className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start"
-        onMouseLeave={() => setHoveredDisco(null)}
+        onMouseLeave={() => { if (!selectedDisco) setHoveredDisco(null) }}
       >
       <div className="card overflow-hidden">
         {loading ? (
@@ -543,7 +560,6 @@ export default function DiscosCatalogo() {
           <EmptyState hayFiltro={hayFiltro} />
         ) : (
           <>
-            <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-stone-800">
@@ -560,12 +576,16 @@ export default function DiscosCatalogo() {
                       key={d.idDisco}
                       tabIndex={0}
                       onMouseEnter={() => setHoveredDisco(d)}
-                      onFocus={() => setHoveredDisco(d)}
+                      onFocus={() => { if (!selectedDisco) setHoveredDisco(d) }}
                       onClick={() => {
-                        setHoveredDisco(d)
-                        if (window.matchMedia('(max-width: 1023px)').matches) setSlideOverDisco(d)
+                        if (window.matchMedia('(max-width: 1023px)').matches) {
+                          setSlideOverDisco(d)
+                        } else {
+                          setSelectedDisco(d)
+                          setHoveredDisco(null)
+                        }
                       }}
-                      className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
+                      className={`hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer ${selectedDisco?.idDisco === d.idDisco ? 'bg-[#7E9FA8]/10' : ''}`}
                     >
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
@@ -603,6 +623,7 @@ export default function DiscosCatalogo() {
                             try {
                               const actualizado = await discoService.cambiarEstado(d.idDisco, nuevoEstado)
                               setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                              setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
                             } catch (err) {
                               alert('Error al cambiar estado: ' + err.message)
                             }
@@ -625,6 +646,7 @@ export default function DiscosCatalogo() {
                                 try {
                                   const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
                                   setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                                  setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
                                 } catch (err) { alert(err.message) }
                               }}
                               className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
@@ -638,6 +660,7 @@ export default function DiscosCatalogo() {
                                 try {
                                   const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
                                   setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
+                                  setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
                                 } catch (err) { alert(err.message) }
                               }}
                               className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
@@ -649,20 +672,12 @@ export default function DiscosCatalogo() {
                           >
                             Editar
                           </button>
-                          <button
-                            onClick={() => setDiscoEliminar(d)}
-                            className="text-xs bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
-                          >
-                            Dar de baja
-                          </button>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-
             {/* Paginación */}
             <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800">
               <Paginacion
@@ -677,10 +692,12 @@ export default function DiscosCatalogo() {
         )}
       </div>
       <CatalogPreview
-        disco={hoveredDisco}
+        disco={selectedDisco || hoveredDisco}
+        pinned={Boolean(selectedDisco)}
+        onUnpin={() => setSelectedDisco(null)}
         onEditar={setDiscoForm}
         onDarBaja={setDiscoEliminar}
-        onViewQr={setQrDisco}
+        onViewQr={abrirQr}
       />
       </div>
 
@@ -690,7 +707,7 @@ export default function DiscosCatalogo() {
         onCerrar={() => setSlideOverDisco(null)}
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
         onDarBaja={d => { setDiscoEliminar(d); setSlideOverDisco(null) }}
-        onViewQr={d => { setQrDisco(d); setSlideOverDisco(null) }}
+        onViewQr={d => { abrirQr(d); setSlideOverDisco(null) }}
       />
 
       <QrModal disco={qrDisco} onClose={() => setQrDisco(null)} />

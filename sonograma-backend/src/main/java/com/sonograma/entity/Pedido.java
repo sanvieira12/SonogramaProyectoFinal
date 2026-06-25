@@ -100,7 +100,7 @@ public class Pedido {
 
     @Column(name = "tipo_cambio", precision = 10, scale = 4)
     @Builder.Default
-    private BigDecimal tipoCambio = new BigDecimal("49");
+    private BigDecimal tipoCambio = new BigDecimal("50");
 
     @Column(name = "extra_costo_simple", precision = 10, scale = 2)
     @Builder.Default

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { resolveApiUrl } from '../api/sonograma'
 import { claimPreview, releasePreview } from './audioPreviewPlayback'
 
 function fmtTime(secs) {
@@ -13,30 +14,41 @@ export default function CompactPlayer({ audioUrl, youtubeUrl, trackName, trackPo
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [loadError, setLoadError] = useState('')
+  const resolvedAudioUrl = resolveApiUrl(audioUrl)
 
   useEffect(() => {
-    if (!audioUrl) return undefined
+    if (!resolvedAudioUrl) return undefined
     const audio = new Audio()
     audio.preload = 'none'
     audioRef.current = audio
+    const resetError = window.setTimeout(() => setLoadError(''), 0)
 
     const onTime = () => setCurrent(audio.currentTime)
     const onMeta = () => setDuration(audio.duration)
     const onEnd  = () => { setPlaying(false); setCurrent(0) }
+    const onError = () => {
+      setPlaying(false)
+      setLoadError('No se pudo cargar el audio')
+      releasePreview(localStop)
+    }
 
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
     audio.addEventListener('ended', onEnd)
+    audio.addEventListener('error', onError)
 
     return () => {
       audio.removeEventListener('timeupdate', onTime)
       audio.removeEventListener('loadedmetadata', onMeta)
       audio.removeEventListener('ended', onEnd)
+      audio.removeEventListener('error', onError)
+      window.clearTimeout(resetError)
       audio.pause()
       audio.src = ''
       releasePreview(localStop)
     }
-  }, [audioUrl])
+  }, [resolvedAudioUrl])
 
   if (!audioUrl && youtubeUrl) {
     return (
@@ -81,9 +93,11 @@ export default function CompactPlayer({ audioUrl, youtubeUrl, trackName, trackPo
     } else {
       claimPreview(localStop)
 
-      if (!audio.src) audio.src = audioUrl
+      setLoadError('')
+      if (!audio.src) audio.src = resolvedAudioUrl
       audio.play().catch(() => {
         setPlaying(false)
+        setLoadError('No se pudo cargar el audio')
         releasePreview(localStop)
       })
       setPlaying(true)
@@ -132,6 +146,9 @@ export default function CompactPlayer({ audioUrl, youtubeUrl, trackName, trackPo
             style={{ width: `${progress}%` }}
           />
         </div>
+        {loadError && (
+          <p className="mt-1 text-[10px] text-red-300">{loadError}</p>
+        )}
       </div>
     </div>
   )

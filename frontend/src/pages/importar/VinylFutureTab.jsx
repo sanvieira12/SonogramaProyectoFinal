@@ -264,12 +264,12 @@ function PdfExport() {
       : 'Preparando archivos y guardando el pedido…'
 
   const etapaZip = exportSegundos < 4
-    ? 'Preparando importación y validando catálogo…'
+    ? 'Validando archivos descargados…'
     : exportSegundos < 18
-      ? 'Procesando productos y descargando media…'
+      ? 'Armando el ZIP desde la importación reciente…'
       : exportSegundos < 45
-        ? 'Descargando portadas y MP3, luego se arma el ZIP final…'
-        : 'La descarga sigue en curso. Se mantiene abierta hasta completar todo el ZIP…'
+        ? 'Comprimiendo CSV, portadas y MP3 locales…'
+        : 'La descarga sigue en curso. Se mantiene abierta hasta completar el ZIP…'
 
   async function procesar() {
     if (!archivo) return
@@ -290,7 +290,9 @@ function PdfExport() {
     setExportando(true)
     setErrorMsg('')
     try {
-      const blob = await api.importar.vinylfutureCsv(archivo)
+      const blob = resumen?.importId
+        ? await api.importar.vinylfutureZip(resumen.importId)
+        : await api.importar.vinylfutureCsv(archivo)
       const url = URL.createObjectURL(blob)
       const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
       const link = document.createElement('a')
@@ -347,8 +349,11 @@ function PdfExport() {
             {[
               ['Detectados', resumen?.recordsDetected],
               ['Importados', resumen?.recordsImported],
-              ['Portadas', resumen?.coversFound],
-              ['MP3', resumen?.mp3PreviewsFound],
+              ['Portadas encontradas', resumen?.coversFound],
+              ['Portadas descargadas', resumen?.coversDownloaded],
+              ['MP3 encontrados', resumen?.mp3PreviewsFound],
+              ['MP3 descargados', resumen?.mp3Downloaded],
+              ['Media fallida', resumen?.failedMediaDownloads],
               ['YouTube', resumen?.youtubeLinksFound],
               ['QR creados', resumen?.qrEntriesCreated],
               ['Duplicados', resumen?.skippedDuplicates],
@@ -378,7 +383,7 @@ function PdfExport() {
                 <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-500" />
               </div>
               <p className="mt-2 text-center text-xs text-emerald-700/80 dark:text-emerald-300/80">
-                {exportSegundos}s · no se descarga ningún ZIP hasta terminar portadas, MP3 y compresión final
+                {exportSegundos}s · se usa la media local ya descargada en esta importación
               </p>
             </div>
           )}

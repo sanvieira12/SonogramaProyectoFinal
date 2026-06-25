@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/sonograma'
 
 const EMPTY_NOTA = {
@@ -105,16 +105,10 @@ function NotaPanel({ nota, onClose, onSaved, onArchived }) {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">ID relacionado</label>
-              <input type="number" min="1" className="input w-full" value={form.relatedId || ''} onChange={e => set('relatedId', e.target.value)} />
-            </div>
-            <label className="flex items-end gap-2 text-sm text-slate-600 dark:text-stone-300 pb-2">
-              <input type="checkbox" checked={Boolean(form.pinned)} onChange={e => set('pinned', e.target.checked)} />
-              Fijada
-            </label>
-          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-stone-300">
+            <input type="checkbox" checked={Boolean(form.pinned)} onChange={e => set('pinned', e.target.checked)} />
+            Fijada
+          </label>
           <div>
             <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Tags</label>
             <input className="input w-full" value={form.tags || ''} onChange={e => set('tags', e.target.value)} placeholder="proveedor, cliente, urgente" />
@@ -145,7 +139,7 @@ export default function Notas() {
   const [panelNota, setPanelNota] = useState(null)
   const [creating, setCreating] = useState(false)
 
-  async function load(q = search) {
+  const load = useCallback(async (q = '') => {
     setLoading(true)
     setError('')
     try {
@@ -155,9 +149,12 @@ export default function Notas() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { load('') }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => load(''), 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   function onSaved(saved) {
     setNotas(prev => {

@@ -11,32 +11,33 @@ import java.util.Optional;
 
 public interface DeudaRepository extends JpaRepository<Deuda, Long> {
 
-    List<Deuda> findByClienteIdClienteOrderByFechaCreacionDesc(Long idCliente);
+    List<Deuda> findByClienteIdClienteAndActivaTrueOrderByFechaCreacionDesc(Long idCliente);
 
-    long countByClienteIdCliente(Long idCliente);
+    long countByClienteIdClienteAndActivaTrue(Long idCliente);
 
-    List<Deuda> findAllByOrderByFechaDeudaDescFechaCreacionDesc();
+    List<Deuda> findAllByActivaTrueOrderByFechaDeudaDescFechaCreacionDesc();
 
-    List<Deuda> findByEstadoPagoNot(EstadoPago estadoPago);
+    List<Deuda> findByEstadoPagoNotAndActivaTrue(EstadoPago estadoPago);
 
-    Optional<Deuda> findByVentaIdVenta(Long idVenta);
+    Optional<Deuda> findByVentaIdVentaAndActivaTrue(Long idVenta);
 
-    @Query("SELECT SUM(d.montoPendiente) FROM Deuda d WHERE d.estadoPago <> 'PAGADO'")
+    @Query("SELECT SUM(d.montoPendiente) FROM Deuda d WHERE d.estadoPago <> 'PAGADO' AND d.activa = true")
     BigDecimal sumMontoPendiente();
 
-    @Query("SELECT COUNT(DISTINCT d.cliente.idCliente) FROM Deuda d WHERE d.estadoPago <> 'PAGADO'")
+    @Query("SELECT COUNT(DISTINCT d.cliente.idCliente) FROM Deuda d WHERE d.estadoPago <> 'PAGADO' AND d.activa = true")
     Long countDeudoresActivos();
 
     @Query("""
         SELECT d FROM Deuda d
         LEFT JOIN d.cliente c
         LEFT JOIN d.venta v
-        WHERE LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
+        WHERE d.activa = true
+          AND (LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.nombreDeudorManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.mailManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.instagramManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.ciManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
-            OR LOWER(COALESCE(d.numeroFactura, COALESCE(v.numeroFactura, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
+            OR LOWER(COALESCE(d.numeroFactura, COALESCE(v.numeroFactura, ''))) LIKE LOWER(CONCAT('%', :q, '%')))
         ORDER BY COALESCE(d.fechaDeuda, d.fechaVenta) DESC, d.fechaCreacion DESC
         """)
     List<Deuda> buscarPendientes(String q);

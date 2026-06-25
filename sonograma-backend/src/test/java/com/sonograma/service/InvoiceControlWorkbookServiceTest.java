@@ -50,11 +50,11 @@ class InvoiceControlWorkbookServiceTest {
                 assertNotEquals(CellType.ERROR, items.getRow(2).getCell(col).getCachedFormulaResultType());
             }
             assertEquals("Double", items.getRow(2).getCell(13).getStringCellValue());
-            assertEquals(2777.614, items.getRow(2).getCell(18).getNumericCellValue(), 0.001);
+            assertEquals(2834.3, items.getRow(2).getCell(18).getNumericCellValue(), 0.001);
 
             assertEquals("INV-42", summary.getRow(3).getCell(1).getStringCellValue());
             assertEquals(LocalDate.of(2026, 6, 12), summary.getRow(4).getCell(1).getLocalDateTimeCellValue().toLocalDate());
-            assertEquals(49, summary.getRow(34).getCell(1).getNumericCellValue());
+            assertEquals(50, summary.getRow(34).getCell(1).getNumericCellValue());
             assertEquals(5, summary.getRow(35).getCell(1).getNumericCellValue());
             assertEquals("SUM(Items!M3:M3)", summary.getRow(25).getCell(1).getCellFormula());
             assertEquals("SUM(Items!L3:L3)", summary.getRow(26).getCell(1).getCellFormula());

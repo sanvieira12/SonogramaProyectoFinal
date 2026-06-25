@@ -72,10 +72,7 @@ public class VentaService {
         String numeroFactura = generarNumeroFactura(fechaVenta.getYear());
         String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
 
-        MedioPago medioPago = null;
-        if (dto.getMedioPago() != null && !dto.getMedioPago().isBlank()) {
-            try { medioPago = MedioPago.valueOf(dto.getMedioPago()); } catch (IllegalArgumentException ignored) {}
-        }
+        MedioPago medioPago = parseMedioPago(dto.getMedioPago());
 
         ResultadoCostoVentaDTO costos;
         Disco discoLegacy = null;
@@ -88,10 +85,7 @@ public class VentaService {
             for (DetalleVentaDTO d : dto.getDetalles()) {
                 Disco disco = discoRepository.findById(d.getIdDisco())
                         .orElseThrow(() -> new RecursoNoEncontradoException("Disco", d.getIdDisco()));
-                if (disco.getEstado() == EstadoDisco.VENDIDO)
-                    throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' ya fue vendido");
-                if (disco.getEstado() == EstadoDisco.SIN_STOCK)
-                    throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' está sin stock");
+                validarStockDisponible(disco);
                 discosMulti.add(disco);
                 subtotalDetalles = subtotalDetalles.add(d.getPrecioUnitario() != null ? d.getPrecioUnitario() : BigDecimal.ZERO);
             }
@@ -105,8 +99,7 @@ public class VentaService {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
             discoLegacy = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
-            if (discoLegacy.getEstado() == EstadoDisco.VENDIDO) throw new NegocioException("El disco ya fue vendido");
-            if (discoLegacy.getEstado() == EstadoDisco.SIN_STOCK) throw new NegocioException("El disco está sin stock y no puede venderse");
+            validarStockDisponible(discoLegacy);
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
 
@@ -158,12 +151,10 @@ public class VentaService {
                         .codigoSnap(d.getCodigoInterno())
                         .build();
                 detalleVentaRepository.save(detalle);
-                d.setEstado(EstadoDisco.VENDIDO);
-                discoRepository.save(d);
+                descontarStock(d);
             }
         } else {
-            discoLegacy.setEstado(EstadoDisco.VENDIDO);
-            discoRepository.save(discoLegacy);
+            descontarStock(discoLegacy);
         }
 
         if (montoDeuda.compareTo(BigDecimal.ZERO) > 0) {
@@ -196,6 +187,126 @@ public class VentaService {
         }
 
         return mapearADTO(venta, envio);
+    }
+
+    public VentaResponseDTO actualizarVenta(Long id, VentaRequestDTO dto) {
+        Venta venta = ventaRepository.findById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Venta", id));
+        if (venta.getEstado() == EstadoVenta.CANCELADA) {
+            throw new NegocioException("No se puede editar una venta cancelada");
+        }
+
+        restaurarStockVenta(venta);
+        detalleVentaRepository.deleteAll(new ArrayList<>(venta.getDetalles()));
+        venta.getDetalles().clear();
+        venta.setDisco(null);
+
+        Cliente cliente = clienteRepository.findById(dto.getIdCliente())
+                .filter(Cliente::getActivo)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", dto.getIdCliente()));
+
+        boolean esMultiDisco = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
+        CanalVenta canal = parseCanal(dto.getCanalVenta());
+        TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
+        LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : venta.getFechaVenta();
+        String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
+        MedioPago medioPago = parseMedioPago(dto.getMedioPago());
+
+        ResultadoCostoVentaDTO costos;
+        Disco discoLegacy = null;
+        List<Disco> discosMulti = new ArrayList<>();
+        BigDecimal subtotalDetalles = BigDecimal.ZERO;
+        BigDecimal descuentoPct = dto.getDescuentoPorcentaje() != null ? dto.getDescuentoPorcentaje() : BigDecimal.ZERO;
+
+        if (esMultiDisco) {
+            for (DetalleVentaDTO d : dto.getDetalles()) {
+                Disco disco = discoRepository.findById(d.getIdDisco())
+                        .orElseThrow(() -> new RecursoNoEncontradoException("Disco", d.getIdDisco()));
+                validarStockDisponible(disco);
+                discosMulti.add(disco);
+                subtotalDetalles = subtotalDetalles.add(d.getPrecioUnitario() != null ? d.getPrecioUnitario() : BigDecimal.ZERO);
+            }
+            BigDecimal factor = CIEN.subtract(descuentoPct).divide(CIEN, 4, RoundingMode.HALF_UP);
+            BigDecimal precioVentaNet = subtotalDetalles.multiply(factor).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal costoDiscoTotal = discosMulti.stream()
+                    .map(d -> d.getCosto() != null ? d.getCosto() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            costos = costosVentaService.calcular(costoDiscoTotal, precioVentaNet, dto);
+        } else {
+            if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
+            discoLegacy = discoRepository.findById(dto.getIdDisco())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
+            validarStockDisponible(discoLegacy);
+            costos = costosVentaService.calcular(discoLegacy, dto);
+        }
+
+        BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : costos.getTotalFinal();
+        BigDecimal montoDeuda = costos.getTotalFinal().subtract(montoPagado);
+        if (montoDeuda.compareTo(BigDecimal.ZERO) < 0) montoDeuda = BigDecimal.ZERO;
+        EstadoPago estadoPago = montoDeuda.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PAGADO
+                : montoPagado.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PENDIENTE : EstadoPago.PARCIAL;
+
+        venta.setCliente(cliente);
+        venta.setDisco(discoLegacy);
+        venta.setFechaVenta(fechaVenta);
+        venta.setCanalVenta(canal);
+        venta.setTotal(costos.getTotalFinal());
+        venta.setCostoDisco(costos.getCostoDisco());
+        venta.setPrecioVenta(costos.getPrecioVenta());
+        venta.setCostoEnvio(costos.getCostoEnvio());
+        venta.setPorcentajeImpuesto(costos.getPorcentajeImpuesto());
+        venta.setMontoImpuesto(costos.getMontoImpuesto());
+        venta.setOtrosCostos(costos.getOtrosCostos());
+        venta.setTotalFinal(costos.getTotalFinal());
+        venta.setGananciaEstimada(costos.getGananciaEstimada());
+        venta.setSubtotal(esMultiDisco ? subtotalDetalles : null);
+        venta.setDescuentoPorcentaje(esMultiDisco ? descuentoPct : null);
+        venta.setTipoEntrega(entrega);
+        venta.setEstado(EstadoVenta.COMPLETADA);
+        venta.setObservaciones(dto.getObservaciones());
+        venta.setClienteNombreSnapshot(clienteSnapshot);
+        venta.setMedioPago(medioPago);
+        venta.setMontoPagado(montoPagado);
+        venta.setMontoDeuda(montoDeuda);
+        venta.setEstadoPago(estadoPago);
+        venta = ventaRepository.save(venta);
+
+        if (esMultiDisco) {
+            List<DetalleVentaDTO> dtos = dto.getDetalles();
+            for (int i = 0; i < dtos.size(); i++) {
+                Disco d = discosMulti.get(i);
+                DetalleVenta detalle = DetalleVenta.builder()
+                        .venta(venta)
+                        .disco(d)
+                        .precioUnitario(dtos.get(i).getPrecioUnitario())
+                        .artistaSnap(d.getArtista())
+                        .albumSnap(d.getAlbum())
+                        .codigoSnap(d.getCodigoInterno())
+                        .build();
+                venta.getDetalles().add(detalleVentaRepository.save(detalle));
+                descontarStock(d);
+            }
+        } else {
+            descontarStock(discoLegacy);
+        }
+
+        sincronizarDeuda(venta, cliente, costos.getTotalFinal(), montoPagado, montoDeuda, estadoPago, fechaVenta);
+        Envio envio = sincronizarEnvio(venta, cliente, dto, entrega, costos);
+        return mapearADTO(venta, envio);
+    }
+
+    public void cancelarVenta(Long id) {
+        Venta venta = ventaRepository.findById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Venta", id));
+        if (venta.getEstado() == EstadoVenta.CANCELADA) return;
+        restaurarStockVenta(venta);
+        venta.setEstado(EstadoVenta.CANCELADA);
+        ventaRepository.save(venta);
+        deudaRepository.findByVentaIdVentaAndActivaTrue(id).ifPresent(deuda -> {
+            deuda.setActiva(false);
+            deuda.setUpdatedAt(LocalDateTime.now());
+            deudaRepository.save(deuda);
+        });
     }
 
     @Transactional(readOnly = true)
@@ -309,6 +420,7 @@ public class VentaService {
                         .artista(d.getArtistaSnap() != null ? d.getArtistaSnap() : d.getDisco().getArtista())
                         .album(d.getAlbumSnap() != null ? d.getAlbumSnap() : d.getDisco().getAlbum())
                         .codigoInterno(d.getCodigoSnap() != null ? d.getCodigoSnap() : d.getDisco().getCodigoInterno())
+                        .imagenUrl(d.getDisco().getImagenUrl())
                         .precioUnitario(d.getPrecioUnitario())
                         .build())
                 .collect(Collectors.toList()) : List.of();
@@ -353,6 +465,105 @@ public class VentaService {
         return String.format("F-%d-%03d", anio, count);
     }
 
+    private void validarStockDisponible(Disco disco) {
+        int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
+        if (copias <= 0 || disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
+            throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' está sin stock");
+        }
+    }
+
+    private void descontarStock(Disco disco) {
+        int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
+        int restantes = Math.max(0, copias - 1);
+        disco.setCantidadCopias(restantes);
+        if (restantes == 0) {
+            disco.setEstado(EstadoDisco.VENDIDO);
+        }
+        discoRepository.save(disco);
+    }
+
+    private void restaurarStockVenta(Venta venta) {
+        if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
+            venta.getDetalles().stream()
+                    .map(DetalleVenta::getDisco)
+                    .forEach(this::restaurarStock);
+        } else if (venta.getDisco() != null) {
+            restaurarStock(venta.getDisco());
+        }
+    }
+
+    private void restaurarStock(Disco disco) {
+        int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 0;
+        disco.setCantidadCopias(copias + 1);
+        if (disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
+            disco.setEstado(EstadoDisco.DISPONIBLE);
+        }
+        discoRepository.save(disco);
+    }
+
+    private void sincronizarDeuda(
+            Venta venta,
+            Cliente cliente,
+            BigDecimal total,
+            BigDecimal montoPagado,
+            BigDecimal montoDeuda,
+            EstadoPago estadoPago,
+            LocalDateTime fechaVenta) {
+        Deuda deuda = deudaRepository.findByVentaIdVentaAndActivaTrue(venta.getIdVenta()).orElse(null);
+        if (montoDeuda.compareTo(BigDecimal.ZERO) <= 0) {
+            if (deuda != null) {
+                deuda.setActiva(false);
+                deuda.setUpdatedAt(LocalDateTime.now());
+                deudaRepository.save(deuda);
+            }
+            return;
+        }
+        if (deuda == null) {
+            deuda = new Deuda();
+            deuda.setVenta(venta);
+            deuda.setFechaCreacion(LocalDateTime.now());
+            deuda.setActiva(true);
+        }
+        deuda.setCliente(cliente);
+        deuda.setMontoTotal(total);
+        deuda.setMontoPagado(montoPagado);
+        deuda.setMontoPendiente(montoDeuda);
+        deuda.setFechaVenta(fechaVenta.toLocalDate());
+        deuda.setFechaDeuda(fechaVenta.toLocalDate());
+        deuda.setEstadoPago(estadoPago);
+        deuda.setUpdatedAt(LocalDateTime.now());
+        deudaRepository.save(deuda);
+    }
+
+    private Envio sincronizarEnvio(
+            Venta venta,
+            Cliente cliente,
+            VentaRequestDTO dto,
+            TipoEntrega entrega,
+            ResultadoCostoVentaDTO costos) {
+        Envio envio = envioRepository.findByVentaIdVenta(venta.getIdVenta()).orElse(null);
+        if (entrega != TipoEntrega.ENVIO) {
+            if (envio != null) {
+                envioRepository.delete(envio);
+            }
+            return null;
+        }
+        DireccionCliente direccionCliente = resolverDireccionCliente(cliente, dto);
+        String direccionCompleta = armarDireccionEnvio(direccionCliente, dto);
+        if (envio == null) {
+            envio = Envio.builder()
+                    .venta(venta)
+                    .estadoLogistico("PREPARANDO")
+                    .build();
+        }
+        envio.setDireccionEnvio(direccionCompleta);
+        envio.setDepartamento(dto.getDepartamento());
+        envio.setSucursalDacCodigo(dto.getSucursalDacCodigo());
+        envio.setSucursalDacNombre(dto.getSucursalDacNombre());
+        envio.setCostoEnvio(costos.getCostoEnvio());
+        return envioRepository.save(envio);
+    }
+
     private DireccionCliente resolverDireccionCliente(Cliente cliente, VentaRequestDTO dto) {
         if (dto.getDepartamento() == null || dto.getDepartamento().isBlank()) {
             throw new NegocioException("Seleccioná el departamento del envío");
@@ -368,31 +579,31 @@ public class VentaService {
             return direccionClienteRepository.save(direccion);
         }
 
-        return clienteService.guardarDireccion(
-                cliente,
-                dto.getDireccionEnvio(),
-                dto.getDepartamento(),
-                null,
-                true
-        );
+        String direccion = dto.getDireccionEnvio() != null ? dto.getDireccionEnvio().trim() : "";
+        if (direccion.isBlank()) {
+            return null;
+        }
+        return clienteService.guardarDireccion(cliente, direccion, dto.getDepartamento(), null, true);
     }
 
     private String armarDireccionEnvio(DireccionCliente direccionCliente, VentaRequestDTO dto) {
         String direccion = direccionCliente != null ? direccionCliente.getDireccion() : dto.getDireccionEnvio();
-        if (direccion == null || direccion.isBlank()) {
-            throw new NegocioException("Ingresá la dirección de envío");
-        }
         String departamento = dto.getDepartamento() != null ? dto.getDepartamento().trim() : null;
         String sucursal = dto.getSucursalDacNombre() != null ? dto.getSucursalDacNombre().trim() : null;
 
-        StringBuilder sb = new StringBuilder(direccion.trim());
+        StringBuilder sb = new StringBuilder();
+        if (direccion != null && !direccion.isBlank()) {
+            sb.append(direccion.trim());
+        }
         if (departamento != null && !departamento.isBlank()) {
-            sb.append(", ").append(departamento);
+            if (!sb.isEmpty()) sb.append(", ");
+            sb.append(departamento);
         }
         if (sucursal != null && !sucursal.isBlank()) {
-            sb.append(" - DAC ").append(sucursal);
+            if (!sb.isEmpty()) sb.append(" - ");
+            sb.append("DAC ").append(sucursal);
         }
-        return sb.toString();
+        return sb.isEmpty() ? null : sb.toString();
     }
 
     private CanalVenta parseCanal(String canalVenta) {
@@ -408,6 +619,15 @@ public class VentaService {
             return TipoEntrega.valueOf(tipoEntrega);
         } catch (IllegalArgumentException | NullPointerException ex) {
             throw new NegocioException("Tipo de entrega inválido: " + tipoEntrega);
+        }
+    }
+
+    private MedioPago parseMedioPago(String medioPago) {
+        if (medioPago == null || medioPago.isBlank()) return null;
+        try {
+            return MedioPago.valueOf(medioPago);
+        } catch (IllegalArgumentException ex) {
+            throw new NegocioException("Método de pago inválido: " + medioPago);
         }
     }
 }

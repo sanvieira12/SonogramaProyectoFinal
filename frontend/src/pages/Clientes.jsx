@@ -227,23 +227,26 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
 
   useEffect(() => {
     if (!cliente) return
-    setForm({
-      nombre: cliente.nombre || '',
-      apellido: cliente.apellido || '',
-      cedula: cliente.cedula || '',
-      instagramUsuario: cliente.instagramUsuario || '',
-      telefono: cliente.telefono || '',
-      email: cliente.email || '',
-      direccion: cliente.direccion || '',
-      departamento: cliente.departamento || '',
-      localidad: cliente.localidad || '',
-      sucursalDac: cliente.sucursalDac || '',
-      observaciones: cliente.observaciones || '',
-    })
-    setEditing(false)
-    setMessage('')
-    setError('')
-  }, [cliente?.idCliente])
+    const timer = window.setTimeout(() => {
+      setForm({
+        nombre: cliente.nombre || '',
+        apellido: cliente.apellido || '',
+        cedula: cliente.cedula || '',
+        instagramUsuario: cliente.instagramUsuario || '',
+        telefono: cliente.telefono || '',
+        email: cliente.email || '',
+        direccion: cliente.direccion || '',
+        departamento: cliente.departamento || '',
+        localidad: cliente.localidad || '',
+        sucursalDac: cliente.sucursalDac || '',
+        observaciones: cliente.observaciones || '',
+      })
+      setEditing(false)
+      setMessage('')
+      setError('')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [cliente])
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))

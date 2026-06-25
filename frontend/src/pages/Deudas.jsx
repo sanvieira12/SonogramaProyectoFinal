@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/sonograma'
+import ConfirmModal from '../components/ConfirmModal'
 
 const ESTADO_STYLES = {
   PENDIENTE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -59,11 +60,14 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    setForm(buildForm(deuda))
-    setMode(deuda?.idDeuda ? 'view' : 'edit')
-    setError('')
-    setMessage('')
-  }, [deuda?.idDeuda])
+    const timer = window.setTimeout(() => {
+      setForm(buildForm(deuda))
+      setMode(deuda?.idDeuda ? 'view' : 'edit')
+      setError('')
+      setMessage('')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [deuda])
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -280,6 +284,8 @@ export default function Deudas() {
   const [search, setSearch] = useState('')
   const [panelDeuda, setPanelDeuda] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [deudaEliminar, setDeudaEliminar] = useState(null)
+  const [eliminando, setEliminando] = useState(false)
   const [error, setError] = useState('')
 
   const cargar = useCallback(async (query = search) => {
@@ -301,7 +307,10 @@ export default function Deudas() {
     }
   }, [search])
 
-  useEffect(() => { cargar('') }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => cargar(''), 0)
+    return () => window.clearTimeout(timer)
+  }, [cargar])
 
   function buscar() {
     setSearch(q)
@@ -317,6 +326,25 @@ export default function Deudas() {
     setCreating(false)
     api.deudas.resumen().then(setResumen).catch(() => {})
     api.clientes.todos().then(setClientes).catch(() => {})
+  }
+
+  async function eliminarDeuda() {
+    if (!deudaEliminar) return
+    setEliminando(true)
+    setError('')
+    try {
+      await api.deudas.eliminar(deudaEliminar.idDeuda)
+      setDeudas(prev => prev.filter(d => d.idDeuda !== deudaEliminar.idDeuda))
+      setPanelDeuda(prev => prev?.idDeuda === deudaEliminar.idDeuda ? null : prev)
+      setDeudaEliminar(null)
+      const [r, c] = await Promise.all([api.deudas.resumen(), api.clientes.todos()])
+      setResumen(r)
+      setClientes(c)
+    } catch (e) {
+      setError(e.message || 'No se pudo eliminar la deuda')
+    } finally {
+      setEliminando(false)
+    }
   }
 
   return (
@@ -358,47 +386,42 @@ export default function Deudas() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Cliente', 'Factura / Descripción', 'Total', 'Pagado', 'Deuda actual', 'Estado', 'Acciones'].map(h => (
-                  <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                ))}
+        <table className="w-full table-fixed text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 dark:border-stone-800">
+              <th className="w-24 text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Fecha</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Cliente / deudor</th>
+              <th className="hidden md:table-cell text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Descripción</th>
+              <th className="w-32 text-right px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Deuda actual</th>
+              <th className="w-24 text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
+              <th className="w-32 text-right px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
+            {loading ? (
+              <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-400">Cargando…</td></tr>
+            ) : deudas.length === 0 ? (
+              <tr><td colSpan={6} className="px-5 py-16 text-center text-slate-400 dark:text-stone-500 text-sm">{search ? 'No se encontraron deudas para esa búsqueda' : 'No hay deudas registradas'}</td></tr>
+            ) : deudas.map(d => (
+              <tr key={d.idDeuda} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
+                <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{fmtDate(d.fechaDeuda || d.fechaVenta)}</td>
+                <td className="px-4 py-3 font-medium text-slate-800 dark:text-stone-200 truncate">{d.nombreCliente || 'Sin cliente'}</td>
+                <td className="hidden md:table-cell px-4 py-3 text-slate-600 dark:text-stone-400 truncate" title={d.descripcion || ''}>{d.descripcion || 'Sin descripción'}</td>
+                <td className="px-4 py-3 tabular-nums text-right font-semibold text-red-600 dark:text-red-400">{fmt(d.montoPendiente)}</td>
+                <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[d.estadoPago] || ''}`}>{d.estadoPago}</span></td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center justify-end gap-2 flex-wrap">
+                    <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-[#5C7D87] hover:underline font-medium">Ver</button>
+                    {d.estadoPago !== 'PAGADO' && (
+                      <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-medium">Pago</button>
+                    )}
+                    <button onClick={() => setDeudaEliminar(d)} className="text-xs text-red-600 dark:text-red-400 hover:underline font-medium">Eliminar</button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {loading ? (
-                <tr><td colSpan={8} className="px-5 py-12 text-center text-slate-400">Cargando…</td></tr>
-              ) : deudas.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-16 text-center text-slate-400 dark:text-stone-500 text-sm">{search ? 'No se encontraron deudas para esa búsqueda' : 'No hay deudas registradas'}</td></tr>
-              ) : deudas.map(d => (
-                <tr key={d.idDeuda} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
-                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">{fmtDate(d.fechaDeuda || d.fechaVenta)}</td>
-                  <td className="px-5 py-3 font-medium text-slate-800 dark:text-stone-200">{d.nombreCliente || 'Sin cliente'}</td>
-                  <td className="px-5 py-3 text-slate-600 dark:text-stone-400">
-                    <div className="max-w-[260px]">
-                      <p className="font-mono text-xs text-slate-500">{d.numeroFactura || '—'}</p>
-                      <p className="truncate" title={d.descripcion || ''}>{d.descripcion || 'Sin descripción'}</p>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 tabular-nums text-slate-700 dark:text-stone-300">{fmt(d.montoTotal)}</td>
-                  <td className="px-5 py-3 tabular-nums text-emerald-600 dark:text-emerald-400">{fmt(d.montoPagado)}</td>
-                  <td className="px-5 py-3 tabular-nums font-semibold text-red-600 dark:text-red-400">{fmt(d.montoPendiente)}</td>
-                  <td className="px-5 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[d.estadoPago] || ''}`}>{d.estadoPago}</span></td>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-[#5C7D87] hover:underline font-medium">Editar</button>
-                      {d.estadoPago !== 'PAGADO' && (
-                        <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-medium">Registrar pago</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {(panelDeuda || creating) && (
@@ -408,6 +431,15 @@ export default function Deudas() {
           onClose={() => { setPanelDeuda(null); setCreating(false) }}
           onSaved={upsert}
           onPaid={upsert}
+        />
+      )}
+      {deudaEliminar && (
+        <ConfirmModal
+          titulo="Eliminar deuda"
+          mensaje={`¿Seguro que querés eliminar la deuda de ${deudaEliminar.nombreCliente || 'este deudor'}? Se ocultará del listado sin borrar pagos ni ventas relacionadas.`}
+          onConfirmar={eliminarDeuda}
+          onCancelar={() => setDeudaEliminar(null)}
+          cargando={eliminando}
         />
       )}
     </div>

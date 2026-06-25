@@ -54,6 +54,19 @@ public class VentaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ventaService.registrarVenta(dto));
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<VentaResponseDTO> actualizarVenta(
+            @PathVariable Long id,
+            @Valid @RequestBody VentaRequestDTO dto) {
+        return ResponseEntity.ok(ventaService.actualizarVenta(id, dto));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> cancelarVenta(@PathVariable Long id) {
+        ventaService.cancelarVenta(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/libro")
     public ResponseEntity<List<VentaResponseDTO>> libro(
             @RequestParam(required = false) String desde,

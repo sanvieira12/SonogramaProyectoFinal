@@ -103,7 +103,7 @@ function TabResumen({ pedido }) {
         <h3 className="text-xs font-semibold text-stone-500 uppercase tracking-wider">Configuración de costos</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            ['Tipo cambio (€→$)', 49],
+            ['Tipo cambio (€→$)', 50],
             ['Extra costo Single (€)', 5],
             ['Extra costo Double (€)', 8],
             ['Markup Single (×)', 1.6],

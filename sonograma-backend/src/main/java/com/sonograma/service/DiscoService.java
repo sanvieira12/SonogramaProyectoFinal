@@ -34,14 +34,12 @@ public class DiscoService {
         return saveWithQr(disco);
     }
 
-    @Transactional(readOnly = true)
     public DiscoResponseDTO obtenerPorId(Long id) {
         return discoRepository.findById(id)
                 .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
     }
 
-    @Transactional(readOnly = true)
     public DiscoResponseDTO obtenerPorQR(String codigoQr) {
         DiscoQrCopy qrCopy = qrCopyService.findByCode(codigoQr);
         if (qrCopy != null) {
@@ -54,28 +52,24 @@ public class DiscoService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco no encontrado con QR: " + codigoQr));
     }
 
-    @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerTodos() {
         return discoRepository.findAll().stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerDisponibles() {
         return discoRepository.findByEstadoOrderByFechaIngresoDesc(EstadoDisco.DISPONIBLE).stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerPorEstado(EstadoDisco estado) {
         return discoRepository.findByEstado(estado).stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
     public List<DiscoResponseDTO> buscar(String q) {
         String query = normalizar(q);
         if (query.isBlank()) {
@@ -148,6 +142,10 @@ public class DiscoService {
     }
 
     private DiscoResponseDTO toDTO(Disco disco) {
+        if ((disco.getCantidadCopias() == null || disco.getCantidadCopias() > 0)
+                && qrCopyService.listDtos(disco).isEmpty()) {
+            qrCopyService.synchronize(disco);
+        }
         DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
         dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
         dto.setQrCopies(qrCopyService.listDtos(disco));

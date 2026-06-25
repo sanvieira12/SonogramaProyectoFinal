@@ -67,6 +67,12 @@ public class DeudaController {
         return ResponseEntity.ok(deudaService.actualizar(idDeuda, request));
     }
 
+    @DeleteMapping("/{idDeuda}")
+    public ResponseEntity<Void> eliminar(@PathVariable Long idDeuda) {
+        deudaService.eliminar(idDeuda);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{idDeuda}/registrar-pago")
     public ResponseEntity<DeudaResponseDTO> registrarPago(
             @PathVariable Long idDeuda,

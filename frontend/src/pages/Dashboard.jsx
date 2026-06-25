@@ -83,12 +83,14 @@ export default function Dashboard() {
   }, [])
 
   const stats = {
-    disponibles: discos.filter(d => d.estado === 'DISPONIBLE').length,
+    disponibles: discos
+      .filter(d => d.estado === 'DISPONIBLE')
+      .reduce((sum, d) => sum + Number(d.cantidadCopias ?? 1), 0),
   }
 
   const valorTotal = discos
     .filter(d => d.estado === 'DISPONIBLE' && d.precioVenta)
-    .reduce((sum, d) => sum + Number(d.precioVenta), 0)
+    .reduce((sum, d) => sum + Number(d.precioVenta) * Number(d.cantidadCopias ?? 1), 0)
 
   // Venta total del mes actual usando la clave "YYYY-MM" de estadisticas.ventasPorMes
   const mesActual = (() => {
@@ -290,7 +292,6 @@ export default function Dashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-stone-800">
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Factura</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Fecha</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Cliente</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Artista / Álbum</th>
@@ -310,7 +311,6 @@ export default function Dashboard() {
                         onClick={() => navigate('/libro-ventas')}
                         className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
                       >
-                        <td className="px-5 py-3 font-mono text-xs text-slate-600 dark:text-stone-400">{v.numeroFactura || '—'}</td>
                         <td className="px-5 py-3 text-slate-500 dark:text-stone-500 text-xs hidden sm:table-cell">{fmtDate(v.fechaVenta)}</td>
                         <td className="px-5 py-3 text-slate-700 dark:text-stone-300 font-medium">{nombreCliente}</td>
                         <td className="px-5 py-3 text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">

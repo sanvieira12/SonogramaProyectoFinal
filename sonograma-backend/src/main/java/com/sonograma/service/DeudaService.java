@@ -39,26 +39,27 @@ public class DeudaService {
     public List<DeudaResponseDTO> obtenerPendientes(String q) {
         List<Deuda> deudas = (q != null && !q.isBlank())
                 ? deudaRepository.buscarPendientes(q)
-                : deudaRepository.findAllByOrderByFechaDeudaDescFechaCreacionDesc();
+                : deudaRepository.findAllByActivaTrueOrderByFechaDeudaDescFechaCreacionDesc();
         return deudas.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<DeudaResponseDTO> obtenerPorCliente(Long idCliente) {
-        return deudaRepository.findByClienteIdClienteOrderByFechaCreacionDesc(idCliente)
+        return deudaRepository.findByClienteIdClienteAndActivaTrueOrderByFechaCreacionDesc(idCliente)
                 .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public DeudaResponseDTO obtenerPorId(Long idDeuda) {
         return deudaRepository.findById(idDeuda)
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
     }
 
     @Transactional(readOnly = true)
     public Map<String, Object> obtenerResumen() {
-        List<Deuda> pendientes = deudaRepository.findByEstadoPagoNot(EstadoPago.PAGADO);
+        List<Deuda> pendientes = deudaRepository.findByEstadoPagoNotAndActivaTrue(EstadoPago.PAGADO);
         BigDecimal totalPendiente = pendientes.stream()
                 .map(Deuda::getMontoPendiente)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -85,13 +86,24 @@ public class DeudaService {
 
     public DeudaResponseDTO actualizar(Long idDeuda, DeudaRequestDTO request) {
         Deuda deuda = deudaRepository.findById(idDeuda)
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
         aplicarRequest(deuda, request, false);
         return toDTO(deudaRepository.save(deuda));
     }
 
+    public void eliminar(Long idDeuda) {
+        Deuda deuda = deudaRepository.findById(idDeuda)
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
+        deuda.setActiva(false);
+        deuda.setUpdatedAt(LocalDateTime.now());
+        deudaRepository.save(deuda);
+    }
+
     public DeudaResponseDTO registrarPago(Long idDeuda, BigDecimal monto, String notas) {
         Deuda deuda = deudaRepository.findById(idDeuda)
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
 
         if (deuda.getEstadoPago() == EstadoPago.PAGADO) {

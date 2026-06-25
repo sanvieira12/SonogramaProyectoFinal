@@ -15,8 +15,8 @@ class CatalogPricingServiceTest {
         CatalogPricingService.PricingResult result = service.calcular(new BigDecimal("10.00"), "LP");
 
         assertEquals(new BigDecimal("15.00"), result.realCostEur());
-        assertEquals(new BigDecimal("735.00"), result.realCostUyu());
-        assertEquals(new BigDecimal("1176.00"), result.salePriceUyu());
+        assertEquals(new BigDecimal("750.00"), result.realCostUyu());
+        assertEquals(new BigDecimal("1200.00"), result.salePriceUyu());
     }
 
     @Test
@@ -24,7 +24,7 @@ class CatalogPricingServiceTest {
         CatalogPricingService.PricingResult result = service.calcular(new BigDecimal("10.00"), "2x12");
 
         assertEquals(new BigDecimal("18.00"), result.realCostEur());
-        assertEquals(new BigDecimal("882.00"), result.realCostUyu());
-        assertEquals(new BigDecimal("1234.80"), result.salePriceUyu());
+        assertEquals(new BigDecimal("900.00"), result.realCostUyu());
+        assertEquals(new BigDecimal("1260.00"), result.salePriceUyu());
     }
 }

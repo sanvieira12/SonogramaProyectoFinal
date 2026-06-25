@@ -158,7 +158,7 @@ public class InvoiceControlWorkbookService {
         setSummaryNumber(sheet, 24, pedido.getTarifas());
         setSummaryNumber(sheet, 25, pedido.getNeto());
 
-        setSummaryNumber(sheet, 35, new BigDecimal("49"));
+        setSummaryNumber(sheet, 35, CatalogPricingService.TIPO_CAMBIO);
         setSummaryNumber(sheet, 36, new BigDecimal("5"));
         setSummaryNumber(sheet, 37, new BigDecimal("8"));
         setSummaryNumber(sheet, 38, new BigDecimal("1.6"));

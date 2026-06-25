@@ -52,12 +52,8 @@ public class CostosVentaService {
         BigDecimal costoEnvio = TipoEntrega.ENVIO.name().equalsIgnoreCase(dto.getTipoEntrega())
                 ? nvl(dto.getCostoEnvio())
                 : BigDecimal.ZERO;
-        BigDecimal porcentajeImpuesto = dto.getPorcentajeImpuesto() != null
-                ? dto.getPorcentajeImpuesto()
-                : nvl(porcentajeImpuestoDefault);
-        BigDecimal otrosCostos = dto.getOtrosCostos() != null
-                ? dto.getOtrosCostos()
-                : nvl(otrosCostosDefault);
+        BigDecimal porcentajeImpuesto = BigDecimal.ZERO;
+        BigDecimal otrosCostos = BigDecimal.ZERO;
 
         BigDecimal subtotal = nvl(precioVenta).add(costoEnvio).add(otrosCostos);
         BigDecimal montoImpuesto = subtotal.multiply(porcentajeImpuesto).divide(CIEN, 4, RoundingMode.HALF_UP);

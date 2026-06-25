@@ -7,13 +7,9 @@ import com.sonograma.service.VinylFutureAssetService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,16 +37,7 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class ZipBundleService {
 
-    private static final String USER_AGENT =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
-    private static final int IMAGE_TIMEOUT_MS = 15_000;
-    private static final int MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-    private static final int MP3_TIMEOUT_MS = 30_000;
-    private static final int MAX_MP3_SIZE = 20 * 1024 * 1024;
     private static final int DOWNLOAD_THREADS = 4;
-    private static final int MAX_DOWNLOAD_ATTEMPTS = 3;
     private static final DateTimeFormatter EXPORT_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final ExecutorService downloadPool = Executors.newFixedThreadPool(DOWNLOAD_THREADS);
@@ -85,8 +72,6 @@ public class ZipBundleService {
             .map(entry -> CompletableFuture.supplyAsync(
                 () -> resolveAsset(
                     entry.getValue().frontImageUrl(),
-                    IMAGE_TIMEOUT_MS,
-                    MAX_IMAGE_SIZE,
                     "cover-",
                     MediaType.COVER,
                     coversReady,
@@ -114,8 +99,6 @@ public class ZipBundleService {
                 mp3Futures.add(CompletableFuture.supplyAsync(
                     () -> resolveAsset(
                         track.mp3Url(),
-                        MP3_TIMEOUT_MS,
-                        MAX_MP3_SIZE,
                         "track-",
                         MediaType.MP3,
                         coversReady,
@@ -205,8 +188,6 @@ public class ZipBundleService {
 
     private Path resolveAsset(
             String url,
-            int timeout,
-            int maxSize,
             String prefix,
             MediaType mediaType,
             AtomicInteger coversReady,
@@ -226,77 +207,8 @@ public class ZipBundleService {
                 return null;
             }
         }
-        Path downloaded = downloadToTemp(url, timeout, maxSize, prefix);
-        if (downloaded != null) {
-            incrementSuccessCounter(mediaType, coversReady, mp3Ready);
-        } else {
-            failedMediaDownloads.incrementAndGet();
-        }
-        return downloaded;
-    }
-
-    private Path downloadToTemp(String url, int timeout, int maxSize, String prefix) {
-        Exception lastError = null;
-        for (int attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
-            Path tempFile = null;
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
-                connection.setInstanceFollowRedirects(true);
-                connection.setConnectTimeout(timeout);
-                connection.setReadTimeout(timeout);
-                connection.setRequestProperty("User-Agent", USER_AGENT);
-
-                int status = connection.getResponseCode();
-                if (status < 200 || status >= 300) {
-                    throw new IOException("HTTP " + status);
-                }
-
-                long contentLength = connection.getContentLengthLong();
-                if (contentLength > maxSize) {
-                    throw new IOException("archivo supera el límite de " + maxSize + " bytes");
-                }
-
-                tempFile = Files.createTempFile(prefix, ".download");
-                try (InputStream input = new BufferedInputStream(connection.getInputStream());
-                     OutputStream output = new BufferedOutputStream(Files.newOutputStream(tempFile))) {
-                    byte[] buffer = new byte[16 * 1024];
-                    long total = 0;
-                    int read;
-                    while ((read = input.read(buffer)) != -1) {
-                        total += read;
-                        if (total > maxSize) {
-                            throw new IOException("archivo supera el límite de " + maxSize + " bytes");
-                        }
-                        output.write(buffer, 0, read);
-                    }
-                }
-                if (attempt > 1) {
-                    log.info("ZIP VinylFuture asset recovered on retry {}/{}: {}",
-                        attempt, MAX_DOWNLOAD_ATTEMPTS, url);
-                }
-                return tempFile;
-            } catch (Exception e) {
-                lastError = e;
-                if (tempFile != null) {
-                    try {
-                        Files.deleteIfExists(tempFile);
-                    } catch (IOException cleanupError) {
-                        log.debug("No se pudo limpiar '{}': {}", tempFile, cleanupError.getMessage());
-                    }
-                }
-                if (attempt < MAX_DOWNLOAD_ATTEMPTS) {
-                    log.warn("ZIP VinylFuture retry {}/{} for '{}': {}",
-                        attempt + 1, MAX_DOWNLOAD_ATTEMPTS, url, e.getMessage());
-                    sleepBeforeRetry(attempt);
-                }
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            }
-        }
-        log.warn("Asset download failed '{}': {}", url, lastError != null ? lastError.getMessage() : "unknown error");
+        log.warn("ZIP VinylFuture local asset unavailable. url='{}', resolvedPath='{}'", url, localPath);
+        failedMediaDownloads.incrementAndGet();
         return null;
     }
 
@@ -379,15 +291,6 @@ public class ZipBundleService {
             coversReady.incrementAndGet();
         } else {
             mp3Ready.incrementAndGet();
-        }
-    }
-
-    private void sleepBeforeRetry(int attempt) {
-        try {
-            Thread.sleep(500L * attempt);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("descarga de ZIP interrumpida", ex);
         }
     }
 
