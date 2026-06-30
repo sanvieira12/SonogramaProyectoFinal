@@ -114,8 +114,18 @@ public class CatalogPricingService {
     }
 
     @Transactional(readOnly = true)
+    public PricingResult calcular(BigDecimal unitPriceEur, String format) {
+        return calculate(unitPriceEur, format);
+    }
+
+    @Transactional(readOnly = true)
     public PricingResult calculate(BigDecimal unitPriceEur, Integer quantity, String format) {
         return calculate(unitPriceEur, quantity, format, getOrCreateSettings());
+    }
+
+    @Transactional(readOnly = true)
+    public PricingResult calcular(BigDecimal unitPriceEur, Integer quantity, String format) {
+        return calculate(unitPriceEur, quantity, format);
     }
 
     public PricingResult calculate(BigDecimal unitPriceEur, Integer quantity, String format, PricingSettings settings) {
@@ -334,5 +344,15 @@ public class CatalogPricingService {
         BigDecimal realUnitCostUyu,
         BigDecimal markup,
         BigDecimal finalPriceUyu
-    ) {}
+    ) {
+        public PricingResult(
+            BigDecimal extraCostEur,
+            BigDecimal realUnitCostEur,
+            BigDecimal realUnitCostUyu,
+            BigDecimal markup,
+            BigDecimal finalPriceUyu
+        ) {
+            this(RecordType.SINGLE, null, extraCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
+        }
+    }
 }

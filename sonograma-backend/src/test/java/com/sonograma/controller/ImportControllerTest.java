@@ -104,11 +104,6 @@ class ImportControllerTest {
             DiscoQrCopy.builder().idDisco(10L).copyNumber(1).codigoQr("qr-1").build(),
             DiscoQrCopy.builder().idDisco(10L).copyNumber(2).codigoQr("qr-2").build()
         ));
-        when(pricingService.calcular(new BigDecimal("12.00"), "2x12"))
-            .thenReturn(new CatalogPricingService.PricingResult(
-                new BigDecimal("8"), new BigDecimal("20"), new BigDecimal("980"),
-                new BigDecimal("1.4"), new BigDecimal("1372")
-            ));
         when(csvExportService.buildCsv(any())).thenReturn("csv");
         when(importBatchService.store(any(), any())).thenReturn("import-123");
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
