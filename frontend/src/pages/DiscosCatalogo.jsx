@@ -46,6 +46,46 @@ function Spinner() {
   )
 }
 
+function SortHeader({ label, sortKey, activeKey, direction, onSort }) {
+  const active = activeKey === sortKey
+  const arrow = active ? (direction === 'asc' ? '↑' : '↓') : '↕'
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider transition-colors ${
+        active ? 'text-[#5C7D87] dark:text-[#7E9FA8]' : 'text-slate-500 dark:text-stone-500 hover:text-slate-700 dark:hover:text-stone-300'
+      }`}
+    >
+      <span>{label}</span>
+      <span className="text-[11px] leading-none">{arrow}</span>
+    </button>
+  )
+}
+
+function parseSortValue(disco, sortKey) {
+  if (sortKey === 'price') {
+    const value = Number(disco.precioVenta)
+    return Number.isFinite(value) ? value : null
+  }
+  if (sortKey === 'importDate') {
+    const time = disco.fechaIngreso ? new Date(disco.fechaIngreso).getTime() : Number.NaN
+    return Number.isFinite(time) ? time : null
+  }
+  return null
+}
+
+function formatImportDate(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleDateString('es-UY', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
 function EmptyState({ hayFiltro }) {
   return (
     <div className="text-center py-20">
@@ -408,6 +448,8 @@ export default function DiscosCatalogo() {
   const [qrDisco, setQrDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
+  const [sortKey, setSortKey] = useState(null)
+  const [sortDirection, setSortDirection] = useState('desc')
   const debounceRef = useRef(null)
 
   useEffect(() => { cargarTodos() }, [])
@@ -447,6 +489,18 @@ export default function DiscosCatalogo() {
   function cambiarFiltro(estado) {
     setFiltroEstado(estado)
     setPagina(1)
+  }
+
+  function cambiarOrden(key) {
+    setPagina(1)
+    setSortKey(prevKey => {
+      if (prevKey === key) {
+        setSortDirection(prevDirection => prevDirection === 'desc' ? 'asc' : 'desc')
+        return prevKey
+      }
+      setSortDirection('desc')
+      return key
+    })
   }
 
   async function handleGuardar(payload) {
@@ -489,7 +543,21 @@ export default function DiscosCatalogo() {
   const discosFiltrados = discos.filter(d =>
     filtroEstado === 'TODOS' || d.estado === filtroEstado
   )
-  const discosPagina = discosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina)
+  const discosOrdenados = sortKey
+    ? discosFiltrados
+        .map((disco, index) => ({ disco, index }))
+        .sort((a, b) => {
+          const aValue = parseSortValue(a.disco, sortKey)
+          const bValue = parseSortValue(b.disco, sortKey)
+          if (aValue == null && bValue == null) return a.index - b.index
+          if (aValue == null) return 1
+          if (bValue == null) return -1
+          if (aValue === bValue) return a.index - b.index
+          return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+        })
+        .map(({ disco }) => disco)
+    : discosFiltrados
+  const discosPagina = discosOrdenados.slice((pagina - 1) * porPagina, pagina * porPagina)
   const hayFiltro = filtroEstado !== 'TODOS' || busqueda.trim() !== ''
 
   return (
@@ -565,7 +633,24 @@ export default function DiscosCatalogo() {
                   <tr className="border-b border-slate-100 dark:border-stone-800">
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Artista / Álbum</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Condición</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Precio</th>
+                    <th className="text-left px-5 py-3">
+                      <SortHeader
+                        label="Precio"
+                        sortKey="price"
+                        activeKey={sortKey}
+                        direction={sortDirection}
+                        onSort={cambiarOrden}
+                      />
+                    </th>
+                    <th className="text-left px-5 py-3 hidden md:table-cell">
+                      <SortHeader
+                        label="Fecha importación"
+                        sortKey="importDate"
+                        activeKey={sortKey}
+                        direction={sortDirection}
+                        onSort={cambiarOrden}
+                      />
+                    </th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
                     <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
                   </tr>
@@ -614,6 +699,9 @@ export default function DiscosCatalogo() {
                         {d.precioVenta
                           ? `UYU $${Number(d.precioVenta).toLocaleString('es-UY')}`
                           : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
+                      </td>
+                      <td className="px-5 py-4 text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
+                        {formatImportDate(d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
                       </td>
                       <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
                         <select

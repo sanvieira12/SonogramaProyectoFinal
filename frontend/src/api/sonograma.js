@@ -1,4 +1,5 @@
 import { redirectIfUnauthorized } from './session'
+import { filenameFromContentDisposition } from '../utils/downloadBlob'
 
 export function normalizeApiBase(value) {
   const base = (value || '/api').trim().replace(/\/+$/, '')
@@ -59,6 +60,59 @@ async function request(method, path, body) {
     throw new Error(data?.message || data?.error || 'Error en la solicitud')
   }
   return data
+}
+
+function isDevelopment() {
+  return import.meta.env.DEV
+}
+
+async function readResponseMessage(res, fallback) {
+  const text = await res.text()
+  if (!text) return fallback
+  try {
+    const data = JSON.parse(text)
+    return data?.message || data?.error || text
+  } catch {
+    return text
+  }
+}
+
+async function readZipResponse(res, { fallbackFilename, fallbackError, endpoint }) {
+  const contentType = res.headers.get('Content-Type') || ''
+  const disposition = res.headers.get('Content-Disposition') || ''
+
+  if (isDevelopment()) {
+    console.info('[sonograma.zip]', {
+      endpoint,
+      status: res.status,
+      contentType,
+    })
+  }
+
+  if (!res.ok) {
+    throw new Error(await readResponseMessage(res, fallbackError))
+  }
+
+  if (/json|text|html/i.test(contentType)) {
+    throw new Error(await readResponseMessage(res, fallbackError))
+  }
+
+  const blob = await res.blob()
+  if (isDevelopment()) {
+    console.info('[sonograma.zip]', {
+      endpoint,
+      blobSize: blob.size,
+      filename: filenameFromContentDisposition(disposition) || fallbackFilename,
+    })
+  }
+  if (!blob || blob.size === 0) {
+    throw new Error('El ZIP se generó vacío o no se pudo preparar.')
+  }
+  return {
+    blob,
+    filename: filenameFromContentDisposition(disposition) || fallbackFilename,
+    contentDisposition: disposition,
+  }
 }
 
 export const api = {
@@ -217,30 +271,30 @@ export const api = {
     vinylfutureCsv: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await fetch(`${BASE}/importar/vinylfuture-csv`, {
+      const endpoint = '/importar/vinylfuture-csv'
+      const res = await fetch(`${BASE}${endpoint}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         body: fd,
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'Error procesando PDF')
-      }
-      return res.blob()
+      return readZipResponse(res, {
+        endpoint,
+        fallbackFilename: 'vinylfuture-import.zip',
+        fallbackError: 'Error procesando PDF',
+      })
     },
     vinylfutureZip: async (importId) => {
-      const res = await fetch(`${BASE}/importar/vinylfuture/${encodeURIComponent(importId)}/zip`, {
+      const endpoint = `/importar/vinylfuture/${encodeURIComponent(importId)}/zip`
+      const res = await fetch(`${BASE}${endpoint}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
-      if (!res.ok) {
-        const text = await res.text()
-        let data
-        try { data = text ? JSON.parse(text) : null } catch { data = null }
-        throw new Error(data?.message || data?.error || text || 'Error exportando ZIP')
-      }
-      return res.blob()
+      return readZipResponse(res, {
+        endpoint,
+        fallbackFilename: `vinylfuture-${importId}.zip`,
+        fallbackError: 'Error exportando ZIP',
+      })
     },
   },
 
@@ -377,12 +431,16 @@ export const api = {
       request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),
 
     discogsCoversZip: async (jobId) => {
-      const res = await fetch(`${BASE}/importaciones/discogs/jobs/${jobId}/covers.zip`, {
+      const endpoint = `/importaciones/discogs/jobs/${jobId}/covers.zip`
+      const res = await fetch(`${BASE}${endpoint}`, {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
-      if (!res.ok) throw new Error('No se pudo generar el ZIP de portadas Discogs')
-      return res.blob()
+      return readZipResponse(res, {
+        endpoint,
+        fallbackFilename: `discogs-covers-${jobId}.zip`,
+        fallbackError: 'No se pudo generar el ZIP de portadas Discogs',
+      })
     },
 
     discogsGuardarLote: (previews) =>

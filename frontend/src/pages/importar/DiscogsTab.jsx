@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/sonograma'
+import { downloadBlob } from '../../utils/downloadBlob'
 
 function Spinner({ text }) {
   return (
@@ -324,13 +325,8 @@ function ExcelLinks() {
 
   async function descargarPortadas() {
     try {
-      const blob = await api.importaciones.discogsCoversZip(job.id)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `discogs-covers-${job.id}.zip`
-      link.click()
-      URL.revokeObjectURL(url)
+      const result = await api.importaciones.discogsCoversZip(job.id)
+      downloadBlob(result.blob, result.filename || `discogs-covers-${job.id}.zip`, result.contentDisposition)
     } catch (err) {
       setErrorMsg(err.message || 'No se pudo descargar el ZIP')
     }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/sonograma'
+import { downloadBlob } from '../../utils/downloadBlob'
 
 function Spinner({ text }) {
   return (
@@ -314,16 +315,11 @@ function PdfExport() {
     setErrorMsg('')
     try {
       const importId = job?.importId || job?.summary?.importId
-      const blob = importId
+      const result = importId
         ? await api.importar.vinylfutureZip(importId)
         : await api.importar.vinylfutureCsv(archivo)
-      const url = URL.createObjectURL(blob)
       const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `vinylfuture-export-${ts}.zip`
-      link.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(result.blob, result.filename || `vinylfuture-export-${ts}.zip`, result.contentDisposition)
     } catch (err) {
       setErrorMsg(err.message || 'Error al exportar el ZIP')
     } finally {
