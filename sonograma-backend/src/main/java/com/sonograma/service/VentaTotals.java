@@ -18,8 +18,7 @@ final class VentaTotals {
 
         if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
             BigDecimal subtotalDetalles = venta.getDetalles().stream()
-                    .map(DetalleVenta::getPrecioUnitario)
-                    .map(VentaTotals::nvl)
+                    .map(d -> nvl(d.getPrecioUnitario()).multiply(BigDecimal.valueOf(cantidad(d))))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             return aplicarDescuento(subtotalDetalles, venta.getDescuentoPorcentaje());
         }
@@ -49,6 +48,10 @@ final class VentaTotals {
 
     private static BigDecimal nvl(BigDecimal valor) {
         return valor != null ? valor : BigDecimal.ZERO;
+    }
+
+    private static int cantidad(DetalleVenta detalle) {
+        return detalle.getCantidad() != null && detalle.getCantidad() > 0 ? detalle.getCantidad() : 1;
     }
 
     private static BigDecimal moneda(BigDecimal valor) {

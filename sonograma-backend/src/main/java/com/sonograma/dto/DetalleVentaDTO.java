@@ -10,5 +10,11 @@ import java.math.BigDecimal;
 @Builder
 public class DetalleVentaDTO {
     private Long idDisco;
+    private String artista;
+    private String album;
+    private String descripcion;
+    private String codigo;
+    private Integer cantidad;
     private BigDecimal precioUnitario;
+    private Boolean manualItem;
 }

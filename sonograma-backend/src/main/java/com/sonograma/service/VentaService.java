@@ -14,6 +14,7 @@ import com.sonograma.entity.Deuda;
 import com.sonograma.entity.DireccionCliente;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Envio;
+import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.CanalVenta;
 import com.sonograma.enums.EstadoDisco;
@@ -29,6 +30,7 @@ import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.DireccionClienteRepository;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.EnvioRepository;
+import com.sonograma.repository.PagoDeudaRepository;
 import com.sonograma.repository.VentaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -39,7 +41,9 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -54,6 +58,7 @@ public class VentaService {
     private final DireccionClienteRepository direccionClienteRepository;
     private final DeudaRepository deudaRepository;
     private final DetalleVentaRepository detalleVentaRepository;
+    private final PagoDeudaRepository pagoDeudaRepository;
     private final ClienteService clienteService;
     private final CostosVentaService costosVentaService;
 
@@ -64,7 +69,7 @@ public class VentaService {
                 .filter(Cliente::getActivo)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", dto.getIdCliente()));
 
-        boolean esMultiDisco = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
+        boolean tieneDetalles = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
 
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
@@ -76,23 +81,23 @@ public class VentaService {
 
         ResultadoCostoVentaDTO costos;
         Disco discoLegacy = null;
-        List<Disco> discosMulti = new ArrayList<>();
+        List<PreparedDetalle> detallesPreparados = new ArrayList<>();
         BigDecimal subtotalDetalles = BigDecimal.ZERO;
         BigDecimal descuentoPct = BigDecimal.ZERO;
 
-        if (esMultiDisco) {
+        if (tieneDetalles) {
             descuentoPct = dto.getDescuentoPorcentaje() != null ? dto.getDescuentoPorcentaje() : BigDecimal.ZERO;
             for (DetalleVentaDTO d : dto.getDetalles()) {
-                Disco disco = discoRepository.findById(d.getIdDisco())
-                        .orElseThrow(() -> new RecursoNoEncontradoException("Disco", d.getIdDisco()));
-                validarStockDisponible(disco);
-                discosMulti.add(disco);
-                subtotalDetalles = subtotalDetalles.add(d.getPrecioUnitario() != null ? d.getPrecioUnitario() : BigDecimal.ZERO);
+                PreparedDetalle preparado = prepararDetalle(d);
+                detallesPreparados.add(preparado);
+                subtotalDetalles = subtotalDetalles.add(
+                        preparado.precioUnitario().multiply(BigDecimal.valueOf(preparado.cantidad()))
+                );
             }
             BigDecimal factor = CIEN.subtract(descuentoPct).divide(CIEN, 4, RoundingMode.HALF_UP);
             BigDecimal precioVentaNet = subtotalDetalles.multiply(factor).setScale(2, RoundingMode.HALF_UP);
-            BigDecimal costoDiTotal = discosMulti.stream()
-                    .map(d -> d.getCosto() != null ? d.getCosto() : BigDecimal.ZERO)
+            BigDecimal costoDiTotal = detallesPreparados.stream()
+                    .map(PreparedDetalle::costoTotal)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             costos = costosVentaService.calcular(costoDiTotal, precioVentaNet, dto);
         } else {
@@ -123,8 +128,8 @@ public class VentaService {
                 .otrosCostos(costos.getOtrosCostos())
                 .totalFinal(costos.getTotalFinal())
                 .gananciaEstimada(costos.getGananciaEstimada())
-                .subtotal(esMultiDisco ? subtotalDetalles : null)
-                .descuentoPorcentaje(esMultiDisco ? descuentoPct : null)
+                .subtotal(tieneDetalles ? subtotalDetalles : null)
+                .descuentoPorcentaje(tieneDetalles ? descuentoPct : null)
                 .tipoEntrega(entrega)
                 .estado(EstadoVenta.COMPLETADA)
                 .observaciones(dto.getObservaciones())
@@ -138,23 +143,14 @@ public class VentaService {
 
         venta = ventaRepository.save(venta);
 
-        if (esMultiDisco) {
-            List<DetalleVentaDTO> dtos = dto.getDetalles();
-            for (int i = 0; i < dtos.size(); i++) {
-                Disco d = discosMulti.get(i);
-                DetalleVenta detalle = DetalleVenta.builder()
-                        .venta(venta)
-                        .disco(d)
-                        .precioUnitario(dtos.get(i).getPrecioUnitario())
-                        .artistaSnap(d.getArtista())
-                        .albumSnap(d.getAlbum())
-                        .codigoSnap(d.getCodigoInterno())
-                        .build();
-                detalleVentaRepository.save(detalle);
-                descontarStock(d);
+        if (tieneDetalles) {
+            for (PreparedDetalle preparado : detallesPreparados) {
+                DetalleVenta detalle = detalleDesdePreparado(venta, preparado);
+                venta.getDetalles().add(detalleVentaRepository.save(detalle));
+                descontarStock(preparado.disco(), preparado.cantidad());
             }
         } else {
-            descontarStock(discoLegacy);
+            descontarStock(discoLegacy, 1);
         }
 
         if (montoDeuda.compareTo(BigDecimal.ZERO) > 0) {
@@ -205,7 +201,7 @@ public class VentaService {
                 .filter(Cliente::getActivo)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", dto.getIdCliente()));
 
-        boolean esMultiDisco = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
+        boolean tieneDetalles = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
         LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : venta.getFechaVenta();
@@ -214,22 +210,22 @@ public class VentaService {
 
         ResultadoCostoVentaDTO costos;
         Disco discoLegacy = null;
-        List<Disco> discosMulti = new ArrayList<>();
+        List<PreparedDetalle> detallesPreparados = new ArrayList<>();
         BigDecimal subtotalDetalles = BigDecimal.ZERO;
         BigDecimal descuentoPct = dto.getDescuentoPorcentaje() != null ? dto.getDescuentoPorcentaje() : BigDecimal.ZERO;
 
-        if (esMultiDisco) {
+        if (tieneDetalles) {
             for (DetalleVentaDTO d : dto.getDetalles()) {
-                Disco disco = discoRepository.findById(d.getIdDisco())
-                        .orElseThrow(() -> new RecursoNoEncontradoException("Disco", d.getIdDisco()));
-                validarStockDisponible(disco);
-                discosMulti.add(disco);
-                subtotalDetalles = subtotalDetalles.add(d.getPrecioUnitario() != null ? d.getPrecioUnitario() : BigDecimal.ZERO);
+                PreparedDetalle preparado = prepararDetalle(d);
+                detallesPreparados.add(preparado);
+                subtotalDetalles = subtotalDetalles.add(
+                        preparado.precioUnitario().multiply(BigDecimal.valueOf(preparado.cantidad()))
+                );
             }
             BigDecimal factor = CIEN.subtract(descuentoPct).divide(CIEN, 4, RoundingMode.HALF_UP);
             BigDecimal precioVentaNet = subtotalDetalles.multiply(factor).setScale(2, RoundingMode.HALF_UP);
-            BigDecimal costoDiscoTotal = discosMulti.stream()
-                    .map(d -> d.getCosto() != null ? d.getCosto() : BigDecimal.ZERO)
+            BigDecimal costoDiscoTotal = detallesPreparados.stream()
+                    .map(PreparedDetalle::costoTotal)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             costos = costosVentaService.calcular(costoDiscoTotal, precioVentaNet, dto);
         } else {
@@ -259,8 +255,8 @@ public class VentaService {
         venta.setOtrosCostos(costos.getOtrosCostos());
         venta.setTotalFinal(costos.getTotalFinal());
         venta.setGananciaEstimada(costos.getGananciaEstimada());
-        venta.setSubtotal(esMultiDisco ? subtotalDetalles : null);
-        venta.setDescuentoPorcentaje(esMultiDisco ? descuentoPct : null);
+        venta.setSubtotal(tieneDetalles ? subtotalDetalles : null);
+        venta.setDescuentoPorcentaje(tieneDetalles ? descuentoPct : null);
         venta.setTipoEntrega(entrega);
         venta.setEstado(EstadoVenta.COMPLETADA);
         venta.setObservaciones(dto.getObservaciones());
@@ -271,23 +267,14 @@ public class VentaService {
         venta.setEstadoPago(estadoPago);
         venta = ventaRepository.save(venta);
 
-        if (esMultiDisco) {
-            List<DetalleVentaDTO> dtos = dto.getDetalles();
-            for (int i = 0; i < dtos.size(); i++) {
-                Disco d = discosMulti.get(i);
-                DetalleVenta detalle = DetalleVenta.builder()
-                        .venta(venta)
-                        .disco(d)
-                        .precioUnitario(dtos.get(i).getPrecioUnitario())
-                        .artistaSnap(d.getArtista())
-                        .albumSnap(d.getAlbum())
-                        .codigoSnap(d.getCodigoInterno())
-                        .build();
+        if (tieneDetalles) {
+            for (PreparedDetalle preparado : detallesPreparados) {
+                DetalleVenta detalle = detalleDesdePreparado(venta, preparado);
                 venta.getDetalles().add(detalleVentaRepository.save(detalle));
-                descontarStock(d);
+                descontarStock(preparado.disco(), preparado.cantidad());
             }
         } else {
-            descontarStock(discoLegacy);
+            descontarStock(discoLegacy, 1);
         }
 
         sincronizarDeuda(venta, cliente, costos.getTotalFinal(), montoPagado, montoDeuda, estadoPago, fechaVenta);
@@ -350,17 +337,30 @@ public class VentaService {
 
     @Transactional(readOnly = true)
     public List<VentaResponseDTO> obtenerLibro(String desde, String hasta, String canal, String q) {
-        return obtenerVentasParaExportar(desde, hasta, canal, q).stream()
+        LocalDateTime desdeDate = parseDesde(desde);
+        LocalDateTime hastaDate = parseHasta(hasta);
+        String qLower = (q != null && !q.isBlank()) ? q.toLowerCase() : null;
+
+        List<VentaResponseDTO> movimientos = new ArrayList<>(obtenerVentasParaExportar(desde, hasta, canal, q).stream()
                 .map(v -> mapearADTO(v, envioRepository.findByVentaIdVenta(v.getIdVenta()).orElse(null)))
-                .collect(Collectors.toList());
+                .toList());
+
+        if (canal == null || canal.isBlank()) {
+            pagoDeudaRepository.findAll().stream()
+                    .filter(p -> pagoDentroDeRango(p, desdeDate, hastaDate))
+                    .map(this::mapearPagoDeudaADTO)
+                    .filter(v -> coincideMovimiento(v, qLower))
+                    .forEach(movimientos::add);
+        }
+
+        movimientos.sort(Comparator.comparing(VentaResponseDTO::getFechaVenta, Comparator.nullsLast(Comparator.naturalOrder())).reversed());
+        return movimientos;
     }
 
     @Transactional(readOnly = true)
     public List<com.sonograma.entity.Venta> obtenerVentasParaExportar(String desde, String hasta, String canal, String q) {
-        LocalDateTime desdeDate = desde != null && !desde.isBlank()
-                ? LocalDateTime.parse(desde + "T00:00:00") : null;
-        LocalDateTime hastaDate = hasta != null && !hasta.isBlank()
-                ? LocalDateTime.parse(hasta + "T23:59:59") : null;
+        LocalDateTime desdeDate = parseDesde(desde);
+        LocalDateTime hastaDate = parseHasta(hasta);
         CanalVenta canalEnum = null;
         if (canal != null && !canal.isBlank()) {
             try { canalEnum = CanalVenta.valueOf(canal); } catch (IllegalArgumentException ignored) {}
@@ -380,10 +380,68 @@ public class VentaService {
                             : (!v.getDetalles().isEmpty() && v.getDetalles().get(0).getArtistaSnap() != null ? v.getDetalles().get(0).getArtistaSnap().toLowerCase() : "");
                     String album = v.getDisco() != null && v.getDisco().getAlbum() != null ? v.getDisco().getAlbum().toLowerCase()
                             : (!v.getDetalles().isEmpty() && v.getDetalles().get(0).getAlbumSnap() != null ? v.getDetalles().get(0).getAlbumSnap().toLowerCase() : "");
+                    String detalle = v.getDetalles() != null ? v.getDetalles().stream()
+                            .map(d -> String.join(" ",
+                                    d.getDescripcionSnap() != null ? d.getDescripcionSnap() : "",
+                                    d.getCodigoSnap() != null ? d.getCodigoSnap() : ""))
+                            .collect(Collectors.joining(" ")).toLowerCase() : "";
                     String factura = v.getNumeroFactura() != null ? v.getNumeroFactura().toLowerCase() : "";
-                    return snapshot.contains(qLower) || artista.contains(qLower) || album.contains(qLower) || factura.contains(qLower);
+                    return snapshot.contains(qLower) || artista.contains(qLower) || album.contains(qLower)
+                            || detalle.contains(qLower) || factura.contains(qLower);
                 })
                 .collect(Collectors.toList());
+    }
+
+    private VentaResponseDTO mapearPagoDeudaADTO(PagoDeuda pago) {
+        Deuda deuda = pago.getDeuda();
+        Venta venta = deuda != null ? deuda.getVenta() : null;
+        Cliente cliente = deuda != null ? deuda.getCliente() : null;
+        String nombre = cliente != null
+                ? (cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "")).trim()
+                : (deuda != null ? deuda.getNombreDeudorManual() : null);
+        String numeroFactura = deuda != null && deuda.getNumeroFactura() != null
+                ? deuda.getNumeroFactura()
+                : (venta != null ? venta.getNumeroFactura() : null);
+        LocalDateTime fecha = pago.getCreatedAt() != null
+                ? pago.getCreatedAt()
+                : pago.getFechaPago().atStartOfDay();
+        return VentaResponseDTO.builder()
+                .idVenta(venta != null ? venta.getIdVenta() : null)
+                .idPagoDeuda(pago.getIdPagoDeuda())
+                .idDeuda(deuda != null ? deuda.getIdDeuda() : null)
+                .idCliente(cliente != null ? cliente.getIdCliente() : null)
+                .nombreCliente(nombre)
+                .fechaVenta(fecha)
+                .numeroFactura(numeroFactura)
+                .clienteNombreSnapshot(nombre)
+                .total(pago.getMonto())
+                .totalFinal(pago.getMonto())
+                .montoPagado(pago.getMonto())
+                .montoDeuda(BigDecimal.ZERO)
+                .estadoPago("PAGADO")
+                .tipoMovimiento("PAGO_DEUDA")
+                .descripcionMovimiento("Pago de deuda")
+                .observaciones(pago.getNotas())
+                .montoMovimiento(pago.getMonto())
+                .detalles(List.of())
+                .build();
+    }
+
+    private boolean pagoDentroDeRango(PagoDeuda pago, LocalDateTime desde, LocalDateTime hasta) {
+        LocalDateTime fecha = pago.getCreatedAt() != null
+                ? pago.getCreatedAt()
+                : pago.getFechaPago().atStartOfDay();
+        return (desde == null || !fecha.isBefore(desde))
+                && (hasta == null || !fecha.isAfter(hasta));
+    }
+
+    private boolean coincideMovimiento(VentaResponseDTO movimiento, String qLower) {
+        if (qLower == null) return true;
+        return contiene(movimiento.getClienteNombreSnapshot(), qLower)
+                || contiene(movimiento.getNombreCliente(), qLower)
+                || contiene(movimiento.getNumeroFactura(), qLower)
+                || contiene(movimiento.getDescripcionMovimiento(), qLower)
+                || contiene(movimiento.getObservaciones(), qLower);
     }
 
     private VentaResponseDTO mapearADTO(Venta venta, Envio envio) {
@@ -407,7 +465,7 @@ public class VentaService {
         DetalleVenta primerDetalle = (detalles != null && !detalles.isEmpty()) ? detalles.get(0) : null;
 
         Long idDisco = venta.getDisco() != null ? venta.getDisco().getIdDisco()
-                : (primerDetalle != null ? primerDetalle.getDisco().getIdDisco() : null);
+                : (primerDetalle != null && primerDetalle.getDisco() != null ? primerDetalle.getDisco().getIdDisco() : null);
         String artista = venta.getDisco() != null ? venta.getDisco().getArtista()
                 : (primerDetalle != null ? primerDetalle.getArtistaSnap() : null);
         String album = venta.getDisco() != null ? venta.getDisco().getAlbum()
@@ -416,12 +474,15 @@ public class VentaService {
         List<DetalleVentaResponseDTO> detallesDTO = detalles != null ? detalles.stream()
                 .map(d -> DetalleVentaResponseDTO.builder()
                         .idDetalle(d.getIdDetalle())
-                        .idDisco(d.getDisco().getIdDisco())
-                        .artista(d.getArtistaSnap() != null ? d.getArtistaSnap() : d.getDisco().getArtista())
-                        .album(d.getAlbumSnap() != null ? d.getAlbumSnap() : d.getDisco().getAlbum())
-                        .codigoInterno(d.getCodigoSnap() != null ? d.getCodigoSnap() : d.getDisco().getCodigoInterno())
-                        .imagenUrl(d.getDisco().getImagenUrl())
+                        .idDisco(d.getDisco() != null ? d.getDisco().getIdDisco() : null)
+                        .artista(d.getArtistaSnap() != null ? d.getArtistaSnap() : (d.getDisco() != null ? d.getDisco().getArtista() : null))
+                        .album(d.getAlbumSnap() != null ? d.getAlbumSnap() : (d.getDisco() != null ? d.getDisco().getAlbum() : null))
+                        .descripcion(d.getDescripcionSnap())
+                        .codigoInterno(d.getCodigoSnap() != null ? d.getCodigoSnap() : (d.getDisco() != null ? d.getDisco().getCodigoInterno() : null))
+                        .imagenUrl(d.getDisco() != null ? d.getDisco().getImagenUrl() : null)
+                        .cantidad(cantidadDetalle(d))
                         .precioUnitario(d.getPrecioUnitario())
+                        .manualItem(Boolean.TRUE.equals(d.getManualItem()) || d.getDisco() == null)
                         .build())
                 .collect(Collectors.toList()) : List.of();
 
@@ -457,6 +518,9 @@ public class VentaService {
                 .subtotal(venta.getSubtotal())
                 .descuentoPorcentaje(venta.getDescuentoPorcentaje())
                 .detalles(detallesDTO)
+                .tipoMovimiento("VENTA")
+                .descripcionMovimiento("Venta")
+                .montoMovimiento(venta.getMontoPagado() != null ? venta.getMontoPagado() : VentaTotals.totalProductos(venta))
                 .build();
     }
 
@@ -465,16 +529,83 @@ public class VentaService {
         return String.format("F-%d-%03d", anio, count);
     }
 
+    private PreparedDetalle prepararDetalle(DetalleVentaDTO dto) {
+        if (dto == null) {
+            throw new NegocioException("Detalle de venta inválido");
+        }
+        int cantidad = dto.getCantidad() != null ? dto.getCantidad() : 1;
+        if (cantidad <= 0) {
+            throw new NegocioException("La cantidad de cada ítem debe ser positiva");
+        }
+        BigDecimal precio = dto.getPrecioUnitario() != null ? dto.getPrecioUnitario() : BigDecimal.ZERO;
+        if (precio.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new NegocioException("Ingresá un precio unitario válido para cada ítem");
+        }
+
+        if (dto.getIdDisco() != null) {
+            Disco disco = discoRepository.findById(dto.getIdDisco())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
+            validarStockDisponible(disco, cantidad);
+            return new PreparedDetalle(
+                    disco,
+                    precio,
+                    cantidad,
+                    false,
+                    disco.getArtista(),
+                    disco.getAlbum(),
+                    descripcionDetalle(dto, disco),
+                    disco.getCodigoInterno(),
+                    (disco.getCosto() != null ? disco.getCosto() : BigDecimal.ZERO)
+                            .multiply(BigDecimal.valueOf(cantidad))
+            );
+        }
+
+        String descripcion = firstNonBlank(dto.getDescripcion(), descripcionManual(dto));
+        if (descripcion == null) {
+            throw new NegocioException("Ingresá una descripción para el disco fuera de catálogo");
+        }
+        return new PreparedDetalle(
+                null,
+                precio,
+                cantidad,
+                true,
+                textoNulo(dto.getArtista()),
+                textoNulo(dto.getAlbum()),
+                descripcion,
+                textoNulo(dto.getCodigo()),
+                BigDecimal.ZERO
+        );
+    }
+
+    private DetalleVenta detalleDesdePreparado(Venta venta, PreparedDetalle preparado) {
+        return DetalleVenta.builder()
+                .venta(venta)
+                .disco(preparado.disco())
+                .precioUnitario(preparado.precioUnitario())
+                .cantidad(preparado.cantidad())
+                .manualItem(preparado.manualItem())
+                .artistaSnap(preparado.artistaSnap())
+                .albumSnap(preparado.albumSnap())
+                .descripcionSnap(preparado.descripcionSnap())
+                .codigoSnap(preparado.codigoSnap())
+                .build();
+    }
+
     private void validarStockDisponible(Disco disco) {
+        validarStockDisponible(disco, 1);
+    }
+
+    private void validarStockDisponible(Disco disco, int cantidad) {
         int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
-        if (copias <= 0 || disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
+        if (copias < cantidad || disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
             throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' está sin stock");
         }
     }
 
-    private void descontarStock(Disco disco) {
+    private void descontarStock(Disco disco, int cantidad) {
+        if (disco == null) return;
         int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
-        int restantes = Math.max(0, copias - 1);
+        int restantes = Math.max(0, copias - Math.max(1, cantidad));
         disco.setCantidadCopias(restantes);
         if (restantes == 0) {
             disco.setEstado(EstadoDisco.VENDIDO);
@@ -485,16 +616,16 @@ public class VentaService {
     private void restaurarStockVenta(Venta venta) {
         if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
             venta.getDetalles().stream()
-                    .map(DetalleVenta::getDisco)
-                    .forEach(this::restaurarStock);
+                    .filter(d -> d.getDisco() != null)
+                    .forEach(d -> restaurarStock(d.getDisco(), cantidadDetalle(d)));
         } else if (venta.getDisco() != null) {
-            restaurarStock(venta.getDisco());
+            restaurarStock(venta.getDisco(), 1);
         }
     }
 
-    private void restaurarStock(Disco disco) {
+    private void restaurarStock(Disco disco, int cantidad) {
         int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 0;
-        disco.setCantidadCopias(copias + 1);
+        disco.setCantidadCopias(copias + Math.max(1, cantidad));
         if (disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
             disco.setEstado(EstadoDisco.DISPONIBLE);
         }
@@ -538,7 +669,9 @@ public class VentaService {
     private BigDecimal calcularMontoPagado(VentaRequestDTO dto, BigDecimal totalProductos) {
         BigDecimal total = totalProductos != null ? totalProductos : BigDecimal.ZERO;
         BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : total;
-        if (montoPagado.compareTo(total) > 0) return total;
+        if (montoPagado.compareTo(total) > 0) {
+            throw new NegocioException("El monto pagado no puede superar el total de la venta");
+        }
         return montoPagado;
     }
 
@@ -612,6 +745,61 @@ public class VentaService {
         }
         return sb.isEmpty() ? null : sb.toString();
     }
+
+    private LocalDateTime parseDesde(String desde) {
+        return desde != null && !desde.isBlank()
+                ? LocalDateTime.parse(desde + "T00:00:00") : null;
+    }
+
+    private LocalDateTime parseHasta(String hasta) {
+        return hasta != null && !hasta.isBlank()
+                ? LocalDateTime.parse(hasta + "T23:59:59") : null;
+    }
+
+    private int cantidadDetalle(DetalleVenta detalle) {
+        return detalle.getCantidad() != null && detalle.getCantidad() > 0 ? detalle.getCantidad() : 1;
+    }
+
+    private String descripcionDetalle(DetalleVentaDTO dto, Disco disco) {
+        return firstNonBlank(dto.getDescripcion(), disco.getArtista() + " - " + disco.getAlbum());
+    }
+
+    private String descripcionManual(DetalleVentaDTO dto) {
+        return java.util.stream.Stream.of(dto.getArtista(), dto.getAlbum(), dto.getCodigo())
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.joining(" - "));
+    }
+
+    private String textoNulo(String value) {
+        return value != null && !value.isBlank() ? value.trim() : null;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private boolean contiene(String value, String query) {
+        return value != null && value.toLowerCase().contains(query);
+    }
+
+    private record PreparedDetalle(
+            Disco disco,
+            BigDecimal precioUnitario,
+            int cantidad,
+            boolean manualItem,
+            String artistaSnap,
+            String albumSnap,
+            String descripcionSnap,
+            String codigoSnap,
+            BigDecimal costoTotal
+    ) {}
 
     private CanalVenta parseCanal(String canalVenta) {
         try {

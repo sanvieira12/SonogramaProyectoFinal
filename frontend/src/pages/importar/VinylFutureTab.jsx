@@ -315,9 +315,10 @@ function PdfExport() {
     setErrorMsg('')
     try {
       const importId = job?.importId || job?.summary?.importId
-      const result = importId
-        ? await api.importar.vinylfutureZip(importId)
-        : await api.importar.vinylfutureCsv(archivo)
+      if (!importId) {
+        throw new Error('No hay un identificador válido de importación para descargar el ZIP. Volvé a procesar el PDF.')
+      }
+      const result = await api.importar.vinylfutureZip(importId)
       const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
       downloadBlob(result.blob, result.filename || `vinylfuture-export-${ts}.zip`, result.contentDisposition)
     } catch (err) {

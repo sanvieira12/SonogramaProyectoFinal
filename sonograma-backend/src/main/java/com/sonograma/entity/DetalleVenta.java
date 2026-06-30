@@ -25,11 +25,15 @@ public class DetalleVenta {
     private Venta venta;
 
     @ManyToOne
-    @JoinColumn(name = "id_disco", nullable = false)
+    @JoinColumn(name = "id_disco")
     private Disco disco;
 
     @Column(name = "precio_unitario", precision = 10, scale = 2, nullable = false)
     private BigDecimal precioUnitario;
+
+    @Column(name = "cantidad", nullable = false)
+    @Builder.Default
+    private Integer cantidad = 1;
 
     @Column(name = "artista_snap")
     private String artistaSnap;
@@ -37,6 +41,13 @@ public class DetalleVenta {
     @Column(name = "album_snap")
     private String albumSnap;
 
+    @Column(name = "descripcion_snap")
+    private String descripcionSnap;
+
     @Column(name = "codigo_snap")
     private String codigoSnap;
+
+    @Column(name = "manual_item", nullable = false)
+    @Builder.Default
+    private Boolean manualItem = false;
 }

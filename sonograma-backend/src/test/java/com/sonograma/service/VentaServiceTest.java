@@ -8,14 +8,17 @@ import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Envio;
+import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.repository.DetalleVentaRepository;
 import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.DireccionClienteRepository;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.EnvioRepository;
+import com.sonograma.repository.PagoDeudaRepository;
 import com.sonograma.repository.VentaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,9 +28,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,6 +49,7 @@ class VentaServiceTest {
     @Mock private DireccionClienteRepository direccionClienteRepository;
     @Mock private DeudaRepository deudaRepository;
     @Mock private DetalleVentaRepository detalleVentaRepository;
+    @Mock private PagoDeudaRepository pagoDeudaRepository;
     @Mock private ClienteService clienteService;
 
     private VentaService ventaService;
@@ -57,6 +64,7 @@ class VentaServiceTest {
                 direccionClienteRepository,
                 deudaRepository,
                 detalleVentaRepository,
+                pagoDeudaRepository,
                 clienteService,
                 new CostosVentaService()
         );
@@ -144,13 +152,11 @@ class VentaServiceTest {
     }
 
     @Test
-    void registrarVentaNoGuardaPagoMayorAlTotalDeProductosAunquePayloadIncluyaEnvio() {
+    void registrarVentaRechazaPagoMayorAlTotalDeProductosAunquePayloadIncluyaEnvio() {
         Cliente cliente = cliente(1L);
         Disco disco = disco(10L, "A", "Uno", "500", "3000", 1);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
-        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(envioRepository.save(any(Envio.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         VentaRequestDTO request = VentaRequestDTO.builder()
                 .idCliente(1L)
@@ -164,12 +170,130 @@ class VentaServiceTest {
                 .montoPagado(new BigDecimal("3250"))
                 .build();
 
+        assertThatThrownBy(() -> ventaService.registrarVenta(request))
+                .isInstanceOf(NegocioException.class)
+                .hasMessageContaining("monto pagado no puede superar");
+        verify(deudaRepository, never()).save(any(Deuda.class));
+    }
+
+    @Test
+    void registrarVentaManualNoTocaStockYCreaDeudaSiPagoParcial() {
+        Cliente cliente = cliente(1L);
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(102L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaRequestDTO request = VentaRequestDTO.builder()
+                .idCliente(1L)
+                .detalles(java.util.List.of(
+                        DetalleVentaDTO.builder()
+                                .descripcion("Lote usado fuera de catálogo")
+                                .cantidad(2)
+                                .precioUnitario(new BigDecimal("750"))
+                                .manualItem(true)
+                                .build()
+                ))
+                .canalVenta("LOCAL")
+                .tipoEntrega("RETIRO")
+                .total(new BigDecimal("1500"))
+                .montoPagado(new BigDecimal("500"))
+                .build();
+
         VentaResponseDTO response = ventaService.registrarVenta(request);
 
-        assertThat(response.getTotalFinal()).isEqualByComparingTo("3000.00");
-        assertThat(response.getMontoPagado()).isEqualByComparingTo("3000.00");
-        assertThat(response.getMontoDeuda()).isEqualByComparingTo("0.00");
+        assertThat(response.getTotalFinal()).isEqualByComparingTo("1500.00");
+        assertThat(response.getMontoPagado()).isEqualByComparingTo("500.00");
+        assertThat(response.getMontoDeuda()).isEqualByComparingTo("1000.00");
+        assertThat(response.getDetalles()).singleElement().satisfies(detalle -> {
+            assertThat(detalle.getIdDisco()).isNull();
+            assertThat(detalle.getManualItem()).isTrue();
+            assertThat(detalle.getCantidad()).isEqualTo(2);
+        });
+        verify(discoRepository, never()).save(any(Disco.class));
+        verify(deudaRepository).save(any(Deuda.class));
+    }
+
+    @Test
+    void registrarVentaMixtaDescuentaSoloCatalogoSegunCantidad() {
+        Cliente cliente = cliente(1L);
+        Disco disco = disco(10L, "A", "Uno", "500", "1000", 3);
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(103L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaRequestDTO request = VentaRequestDTO.builder()
+                .idCliente(1L)
+                .detalles(java.util.List.of(
+                        DetalleVentaDTO.builder().idDisco(10L).cantidad(2).precioUnitario(new BigDecimal("1000")).build(),
+                        DetalleVentaDTO.builder().descripcion("Disco feria").cantidad(1).precioUnitario(new BigDecimal("400")).manualItem(true).build()
+                ))
+                .canalVenta("LOCAL")
+                .tipoEntrega("RETIRO")
+                .total(new BigDecimal("2400"))
+                .build();
+
+        VentaResponseDTO response = ventaService.registrarVenta(request);
+
+        assertThat(response.getTotalFinal()).isEqualByComparingTo("2400.00");
+        assertThat(disco.getCantidadCopias()).isEqualTo(1);
+        assertThat(disco.getEstado()).isEqualTo(EstadoDisco.DISPONIBLE);
+        verify(discoRepository).save(disco);
         verify(deudaRepository, never()).save(any(Deuda.class));
+    }
+
+    @Test
+    void obtenerLibroIncluyePagosDeDeudaComoIngresoSeparado() {
+        Cliente cliente = cliente(1L);
+        Venta venta = Venta.builder()
+                .idVenta(200L)
+                .cliente(cliente)
+                .fechaVenta(LocalDateTime.of(2026, 6, 1, 10, 0))
+                .numeroFactura("F-2026-001")
+                .clienteNombreSnapshot("Cliente")
+                .totalFinal(new BigDecimal("1000"))
+                .precioVenta(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("400"))
+                .montoDeuda(new BigDecimal("600"))
+                .build();
+        Deuda deuda = Deuda.builder()
+                .idDeuda(300L)
+                .venta(venta)
+                .cliente(cliente)
+                .montoTotal(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("700"))
+                .montoPendiente(new BigDecimal("300"))
+                .activa(true)
+                .build();
+        PagoDeuda pago = PagoDeuda.builder()
+                .idPagoDeuda(400L)
+                .deuda(deuda)
+                .monto(new BigDecimal("300"))
+                .fechaPago(LocalDate.of(2026, 6, 2))
+                .createdAt(LocalDateTime.of(2026, 6, 2, 9, 0))
+                .notas("Transferencia")
+                .build();
+
+        when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of(venta));
+        when(envioRepository.findByVentaIdVenta(200L)).thenReturn(Optional.empty());
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago));
+
+        var libro = ventaService.obtenerLibro(null, null, null, null);
+
+        assertThat(libro).hasSize(2);
+        assertThat(libro.get(0).getTipoMovimiento()).isEqualTo("PAGO_DEUDA");
+        assertThat(libro.get(0).getDescripcionMovimiento()).isEqualTo("Pago de deuda");
+        assertThat(libro.get(0).getMontoMovimiento()).isEqualByComparingTo("300");
+        assertThat(libro.get(1).getTipoMovimiento()).isEqualTo("VENTA");
+        assertThat(libro.get(1).getMontoMovimiento()).isEqualByComparingTo("400");
     }
 
     private static Cliente cliente(Long id) {

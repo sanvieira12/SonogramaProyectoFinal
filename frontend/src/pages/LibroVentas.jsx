@@ -11,6 +11,7 @@ const ESTADO_PAGO_STYLES = {
 
 function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel }) {
   if (!venta) return null
+  const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
   const detalles = venta.detalles?.length ? venta.detalles : [{
     idDisco: venta.idDisco,
     artista: venta.artista,
@@ -32,7 +33,9 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
         {cover && <img src={resolveApiUrl(cover)} alt="" className="w-40 h-40 rounded-xl object-cover bg-slate-100 dark:bg-stone-800 mx-auto" />}
         <div className="grid grid-cols-2 gap-3">
           {[
-            ['Total', fmt(venta.totalFinal)],
+            ['Movimiento', venta.descripcionMovimiento || (esPagoDeuda ? 'Pago de deuda' : 'Venta')],
+            ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
+            ['Total venta', fmt(venta.totalFinal)],
             ['Método de pago', venta.medioPago],
             ['Estado pago', venta.estadoPago],
             ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
@@ -46,21 +49,28 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
           ))}
         </div>
         {venta.observaciones && <p className="text-sm text-slate-500 dark:text-stone-400 whitespace-pre-wrap">{venta.observaciones}</p>}
+        {!esPagoDeuda && (
         <div>
           <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</p>
           <div className="space-y-2">
-            {detalles.map(d => (
-              <button key={d.idDetalle || d.idDisco} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
-                <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.artista} — {d.album}</p>
-                <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · {fmt(d.precioUnitario)}</p>
+            {detalles.map((d, index) => (
+              <button key={d.idDetalle || d.idDisco || index} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
+                <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
+                <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.precioUnitario)}</p>
               </button>
             ))}
           </div>
         </div>
-        <div className="flex gap-2">
+        )}
+        {esPagoDeuda && (
+          <p className="text-sm text-slate-500 dark:text-stone-400">
+            Pago registrado sobre {venta.numeroFactura ? `la factura ${venta.numeroFactura}` : 'una deuda'}.
+          </p>
+        )}
+        {!esPagoDeuda && <div className="flex gap-2">
           <button onClick={onEdit} className="btn-primary flex-1">Editar</button>
           <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">Cancelar venta</button>
-        </div>
+        </div>}
       </div>
     </aside>
   )
@@ -83,10 +93,10 @@ function EditSaleModal({ venta, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  function setDetalle(idDisco, value) {
+  function setDetalle(index, value) {
     setForm(prev => ({
       ...prev,
-      detalles: prev.detalles.map(d => d.idDisco === idDisco ? { ...d, precioUnitario: value } : d),
+      detalles: prev.detalles.map((d, i) => i === index ? { ...d, precioUnitario: value } : d),
     }))
   }
 
@@ -108,12 +118,16 @@ function EditSaleModal({ venta, onClose, onSaved }) {
         medioPago: form.medioPago || null,
         montoPagado: form.montoPagado === '' ? undefined : Number(form.montoPagado),
         observaciones: form.observaciones || null,
-        detalles: form.detalles.length > 1 ? form.detalles.map(d => ({
+        detalles: form.detalles.map(d => ({
           idDisco: d.idDisco,
+          descripcion: d.descripcion || null,
+          artista: d.artista || null,
+          album: d.album || null,
+          codigo: d.codigoInterno || null,
+          cantidad: Number(d.cantidad || 1),
+          manualItem: Boolean(d.manualItem) || !d.idDisco,
           precioUnitario: Number(d.precioUnitario || 0),
-        })) : undefined,
-        idDisco: form.detalles.length === 1 ? form.detalles[0].idDisco : undefined,
-        precioVenta: form.detalles.length === 1 ? Number(form.detalles[0].precioUnitario || 0) : undefined,
+        })),
       }
       onSaved(await api.ventas.actualizar(venta.idVenta, payload))
     } catch (e) {
@@ -132,10 +146,10 @@ function EditSaleModal({ venta, onClose, onSaved }) {
         </div>
         {error && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
         <div className="space-y-2">
-          {form.detalles.map(d => (
-            <div key={d.idDisco} className="grid grid-cols-[1fr_120px] gap-3 items-center">
-              <p className="text-sm text-slate-700 dark:text-stone-300 truncate">{d.artista} — {d.album}</p>
-              <input type="number" min="0" step="0.01" className="input text-right" value={d.precioUnitario} onChange={e => setDetalle(d.idDisco, e.target.value)} />
+          {form.detalles.map((d, index) => (
+            <div key={d.idDetalle || d.idDisco || index} className="grid grid-cols-[1fr_120px] gap-3 items-center">
+              <p className="text-sm text-slate-700 dark:text-stone-300 truncate">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
+              <input type="number" min="0" step="0.01" className="input text-right" value={d.precioUnitario} onChange={e => setDetalle(index, e.target.value)} />
             </div>
           ))}
         </div>
@@ -247,7 +261,7 @@ export default function LibroVentas() {
       .catch(e => setError(e.message))
   }
 
-  const totalFinal = ventas.reduce((s, v) => s + (v.totalFinal || 0), 0)
+  const totalFinal = ventas.reduce((s, v) => s + (v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
   const totalGanancia = ventas.reduce((s, v) => s + (v.gananciaEstimada || 0), 0)
 
   async function cancelarVenta() {
@@ -340,7 +354,7 @@ export default function LibroVentas() {
         <div className="grid grid-cols-3 gap-4">
           {[
             { label: 'Ventas', value: ventas.length },
-            { label: 'Total facturado', value: fmt(totalFinal) },
+            { label: 'Ingresos registrados', value: fmt(totalFinal) },
             { label: 'Ganancia estimada', value: fmt(totalGanancia) },
           ].map(({ label, value }) => (
             <div key={label} className="card p-4 text-center">
@@ -357,7 +371,7 @@ export default function LibroVentas() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Total', 'Estado Pago', 'Ganancia'].map(h => (
+                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'Estado Pago', 'Ganancia'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -366,24 +380,35 @@ export default function LibroVentas() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
               ) : ventas.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
               ) : ventas.map(v => (
-                <tr key={v.idVenta} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
+                <tr key={`${v.tipoMovimiento || 'VENTA'}-${v.idPagoDeuda || v.idVenta}`} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
                   <td className="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
                     {fmtDate(v.fechaVenta)}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      v.tipoMovimiento === 'PAGO_DEUDA'
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-300'
+                    }`}>
+                      {v.descripcionMovimiento || 'Venta'}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-stone-300">
                     {v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}
                   </td>
                   <td className="px-4 py-3">
-                    {v.detalles && v.detalles.length > 1 ? (
+                    {v.tipoMovimiento === 'PAGO_DEUDA' ? (
+                      <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">{v.numeroFactura || 'Pago de deuda'}</div>
+                    ) : v.detalles && v.detalles.length > 1 ? (
                       <div>
-                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">Varios ({v.detalles.length} discos)</div>
-                        <div className="text-slate-400 dark:text-stone-500 text-xs truncate max-w-[160px]">{v.detalles.map(d => d.artista).join(', ')}</div>
+                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">Varios ({v.detalles.length} ítems)</div>
+                        <div className="text-slate-400 dark:text-stone-500 text-xs truncate max-w-[160px]">{v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}</div>
                       </div>
                     ) : (
                       <>
@@ -396,7 +421,7 @@ export default function LibroVentas() {
                     {v.medioPago || '—'}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
-                    {fmt(v.totalFinal)}
+                    {fmt(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal)}
                   </td>
                   <td className="px-4 py-3">
                     {v.estadoPago ? (

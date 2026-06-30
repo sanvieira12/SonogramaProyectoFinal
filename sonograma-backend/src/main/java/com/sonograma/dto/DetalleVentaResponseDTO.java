@@ -13,7 +13,10 @@ public class DetalleVentaResponseDTO {
     private Long idDisco;
     private String artista;
     private String album;
+    private String descripcion;
     private String codigoInterno;
     private String imagenUrl;
+    private Integer cantidad;
     private BigDecimal precioUnitario;
+    private Boolean manualItem;
 }

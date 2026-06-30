@@ -243,8 +243,8 @@ public class ClienteService {
                 .dineroTotalGastado(totalGastado)
                 .promedioGastadoPorCompra(promedio)
                 .mayorGastoCompraIndividual(mayorCompra)
-                .generoMasComprado(masFrecuente(ventas, v -> texto(v.getDisco().getGenero(), "Sin género")))
-                .decadaMusicalMasComprada(masFrecuente(ventas, v -> decada(v.getDisco().getAnio())))
+                .generoMasComprado(masFrecuente(ventas, v -> v.getDisco() != null ? texto(v.getDisco().getGenero(), "Sin género") : null))
+                .decadaMusicalMasComprada(masFrecuente(ventas, v -> v.getDisco() != null ? decada(v.getDisco().getAnio()) : null))
                 .mesMasCompras(masFrecuente(ventas, v -> mes(v.getFechaVenta() != null ? v.getFechaVenta().getMonth() : null)))
                 .ultimaCompra(fechaMasReciente(cliente.getUltimaCompra(), ventas.stream()
                         .map(Venta::getFechaVenta)
@@ -346,10 +346,19 @@ public class ClienteService {
         if (coincideDireccion) return true;
 
         return ventaRepository.findByClienteIdClienteOrderByFechaVentaDesc(cliente.getIdCliente()).stream()
-                .anyMatch(v -> contiene(v.getDisco().getAlbum(), query)
-                        || contiene(v.getDisco().getArtista(), query)
-                        || contiene(v.getDisco().getGenero(), query)
-                        || contiene(v.getDisco().getSelloDiscografico(), query));
+                .anyMatch(v -> {
+                    if (v.getDisco() != null) {
+                        return contiene(v.getDisco().getAlbum(), query)
+                                || contiene(v.getDisco().getArtista(), query)
+                                || contiene(v.getDisco().getGenero(), query)
+                                || contiene(v.getDisco().getSelloDiscografico(), query);
+                    }
+                    return v.getDetalles() != null && v.getDetalles().stream()
+                            .anyMatch(d -> contiene(d.getAlbumSnap(), query)
+                                    || contiene(d.getArtistaSnap(), query)
+                                    || contiene(d.getDescripcionSnap(), query)
+                                    || contiene(d.getCodigoSnap(), query));
+                });
     }
 
     private VentaResponseDTO mapearVenta(Venta venta) {
@@ -359,9 +368,9 @@ public class ClienteService {
                 .idCliente(venta.getCliente().getIdCliente())
                 .nombreCliente(venta.getCliente().getNombre())
                 .apellidoCliente(venta.getCliente().getApellido())
-                .idDisco(venta.getDisco().getIdDisco())
-                .artista(venta.getDisco().getArtista())
-                .album(venta.getDisco().getAlbum())
+                .idDisco(venta.getDisco() != null ? venta.getDisco().getIdDisco() : null)
+                .artista(venta.getDisco() != null ? venta.getDisco().getArtista() : primerDetalleArtista(venta))
+                .album(venta.getDisco() != null ? venta.getDisco().getAlbum() : primerDetalleAlbum(venta))
                 .fechaVenta(venta.getFechaVenta())
                 .canalVenta(venta.getCanalVenta() != null ? venta.getCanalVenta().name() : null)
                 .total(VentaTotals.totalProductos(venta))
@@ -408,6 +417,18 @@ public class ClienteService {
 
     private BigDecimal totalVenta(Venta venta) {
         return VentaTotals.totalProductos(venta);
+    }
+
+    private String primerDetalleArtista(Venta venta) {
+        return venta.getDetalles() != null && !venta.getDetalles().isEmpty()
+                ? venta.getDetalles().get(0).getArtistaSnap()
+                : null;
+    }
+
+    private String primerDetalleAlbum(Venta venta) {
+        return venta.getDetalles() != null && !venta.getDetalles().isEmpty()
+                ? venta.getDetalles().get(0).getAlbumSnap()
+                : null;
     }
 
     private String masFrecuente(List<Venta> ventas, Function<Venta, String> extractor) {

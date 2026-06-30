@@ -12,6 +12,8 @@ import java.util.List;
 @Builder
 public class VentaResponseDTO {
     private Long idVenta;
+    private Long idPagoDeuda;
+    private Long idDeuda;
     private Long idCliente;
     private String nombreCliente;
     private String apellidoCliente;
@@ -42,4 +44,7 @@ public class VentaResponseDTO {
     private BigDecimal subtotal;
     private BigDecimal descuentoPorcentaje;
     private List<DetalleVentaResponseDTO> detalles;
+    private String tipoMovimiento;
+    private String descripcionMovimiento;
+    private BigDecimal montoMovimiento;
 }

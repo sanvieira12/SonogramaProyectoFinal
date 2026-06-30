@@ -82,8 +82,8 @@ public class VentaController {
             @RequestParam(required = false) String hasta,
             @RequestParam(required = false) String canal,
             @RequestParam(required = false) String q) {
-        byte[] bytes = excelExportService.exportarLibroVentas(
-                ventaService.obtenerVentasParaExportar(desde, hasta, canal, q));
+        byte[] bytes = excelExportService.exportarLibroMovimientos(
+                ventaService.obtenerLibro(desde, hasta, canal, q));
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"libro-ventas.xlsx\"")
                 .contentType(MediaType.parseMediaType(

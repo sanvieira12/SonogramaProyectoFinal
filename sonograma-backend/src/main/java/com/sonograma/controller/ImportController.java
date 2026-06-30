@@ -171,11 +171,16 @@ public class ImportController {
     @GetMapping("/vinylfuture/{importId}/zip")
     @Transactional(readOnly = true)
     public ResponseEntity<StreamingResponseBody> exportarZipDesdeImport(@PathVariable String importId) {
+        log.info("Solicitud ZIP VinylFuture importId={}", importId);
         VinylFutureImportBatchService.ImportBatch batch = importBatchService.find(importId)
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "No se encontró la importación solicitada. Volvé a procesar el PDF."
             ));
+        log.info("Batch VinylFuture encontrado importId={}, csvBytes={}, products={}",
+            importId,
+            batch.csv() != null ? batch.csv().getBytes(StandardCharsets.UTF_8).length : 0,
+            batch.pageDataMap() != null ? batch.pageDataMap().size() : 0);
         return buildZipResponse(batch.csv(), batch.pageDataMap());
     }
 

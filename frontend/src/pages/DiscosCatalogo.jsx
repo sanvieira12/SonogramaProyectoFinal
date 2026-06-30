@@ -9,6 +9,11 @@ import { stopAllPreviews } from '../components/audioPreviewPlayback'
 import { api, resolveApiUrl } from '../api/sonograma'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
+const FILTROS_CONDICION = [
+  { value: 'TODOS', label: 'Todos' },
+  { value: 'NUEVO', label: 'Nuevos' },
+  { value: 'USADO', label: 'Usados' },
+]
 
 const ESTADO_LABELS = {
   DISPONIBLE: 'Disponible',
@@ -303,7 +308,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
 
         {/* Acciones fijas al fondo */}
         <div className="p-6 pt-0 space-y-2">
-          <button onClick={() => onViewQr(disco)} className="btn-secondary w-full">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary w-full">
             Ver QR ({disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
           </button>
           <button
@@ -425,7 +430,7 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr 
 
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
-          <button onClick={() => onViewQr(disco)} className="btn-secondary">Ver QR</button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary">Ver QR</button>
           <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Dar de baja</button>
         </div>
       </div>
@@ -439,6 +444,7 @@ export default function DiscosCatalogo() {
   const [error, setError] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
+  const [filtroCondicion, setFiltroCondicion] = useState('TODOS')
   const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
@@ -491,6 +497,11 @@ export default function DiscosCatalogo() {
     setPagina(1)
   }
 
+  function cambiarFiltroCondicion(condicion) {
+    setFiltroCondicion(condicion)
+    setPagina(1)
+  }
+
   function cambiarOrden(key) {
     setPagina(1)
     setSortKey(prevKey => {
@@ -540,9 +551,15 @@ export default function DiscosCatalogo() {
     }
   }
 
-  const discosFiltrados = discos.filter(d =>
-    filtroEstado === 'TODOS' || d.estado === filtroEstado
-  )
+  function condicionNormalizada(disco) {
+    return String(disco?.condicion || '').trim().toUpperCase()
+  }
+
+  const discosFiltrados = discos.filter(d => {
+    const coincideEstado = filtroEstado === 'TODOS' || d.estado === filtroEstado
+    const coincideCondicion = filtroCondicion === 'TODOS' || condicionNormalizada(d) === filtroCondicion
+    return coincideEstado && coincideCondicion
+  })
   const discosOrdenados = sortKey
     ? discosFiltrados
         .map((disco, index) => ({ disco, index }))
@@ -558,7 +575,7 @@ export default function DiscosCatalogo() {
         .map(({ disco }) => disco)
     : discosFiltrados
   const discosPagina = discosOrdenados.slice((pagina - 1) * porPagina, pagina * porPagina)
-  const hayFiltro = filtroEstado !== 'TODOS' || busqueda.trim() !== ''
+  const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS' || busqueda.trim() !== ''
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
@@ -601,6 +618,27 @@ export default function DiscosCatalogo() {
               {estado !== 'TODOS' && (
                 <span className="ml-1.5 opacity-70">
                   {discos.filter(d => d.estado === estado).length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {FILTROS_CONDICION.map(condicion => (
+            <button
+              key={condicion.value}
+              type="button"
+              onClick={() => cambiarFiltroCondicion(condicion.value)}
+              className={`text-xs px-3 py-2 rounded-full border font-medium transition-colors ${
+                filtroCondicion === condicion.value
+                  ? 'border-[#7E9FA8] bg-[#7E9FA8] text-white'
+                  : 'border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 text-slate-600 dark:text-stone-400 hover:bg-slate-100 dark:hover:bg-stone-800'
+              }`}
+            >
+              {condicion.label}
+              {condicion.value !== 'TODOS' && (
+                <span className="ml-1.5 opacity-70">
+                  {discos.filter(d => condicionNormalizada(d) === condicion.value).length}
                 </span>
               )}
             </button>

@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.entity.ShippingOrder;
 import com.sonograma.entity.ShippingOrderItem;
 import com.sonograma.entity.Venta;
+import com.sonograma.dto.VentaResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
@@ -100,6 +101,72 @@ public class ExcelExportService {
         }
     }
 
+    public byte[] exportarLibroMovimientos(List<VentaResponseDTO> movimientos) {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("Libro de Ventas");
+            sheet.setDefaultColumnWidth(18);
+
+            CellStyle headerStyle = buildHeaderStyle(wb);
+            CellStyle moneyStyle = buildMoneyStyle(wb);
+
+            String[] headers = {
+                "Movimiento", "N° Factura", "Fecha", "Cliente", "Artista / Descripción", "Álbum",
+                "Canal", "Medio Pago", "Ingreso", "Total Venta", "Monto Deuda",
+                "Estado Pago", "Ganancia", "Observaciones"
+            };
+
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            int rowNum = 1;
+            BigDecimal totalIngresos = BigDecimal.ZERO;
+            BigDecimal totalGanancia = BigDecimal.ZERO;
+
+            for (VentaResponseDTO v : movimientos) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(orEmpty(v.getDescripcionMovimiento()));
+                row.createCell(1).setCellValue(orEmpty(v.getNumeroFactura()));
+                row.createCell(2).setCellValue(v.getFechaVenta() != null ? v.getFechaVenta().format(FMT) : "");
+                row.createCell(3).setCellValue(orEmpty(v.getClienteNombreSnapshot() != null
+                    ? v.getClienteNombreSnapshot()
+                    : (orEmpty(v.getNombreCliente()) + " " + orEmpty(v.getApellidoCliente())).trim()));
+                row.createCell(4).setCellValue(orEmpty(descripcionMovimiento(v)));
+                row.createCell(5).setCellValue(orEmpty(v.getAlbum()));
+                row.createCell(6).setCellValue(orEmpty(v.getCanalVenta()));
+                row.createCell(7).setCellValue(orEmpty(v.getMedioPago()));
+                setMoney(row, 8, ingresoMovimiento(v), moneyStyle);
+                setMoney(row, 9, v.getTotalFinal(), moneyStyle);
+                setMoney(row, 10, v.getMontoDeuda(), moneyStyle);
+                row.createCell(11).setCellValue(orEmpty(v.getEstadoPago()));
+                setMoney(row, 12, v.getGananciaEstimada(), moneyStyle);
+                row.createCell(13).setCellValue(orEmpty(v.getObservaciones()));
+
+                totalIngresos = totalIngresos.add(ingresoMovimiento(v));
+                if (v.getGananciaEstimada() != null) totalGanancia = totalGanancia.add(v.getGananciaEstimada());
+            }
+
+            Row totalesRow = sheet.createRow(rowNum + 1);
+            CellStyle boldStyle = buildBoldStyle(wb);
+            Cell totalLabel = totalesRow.createCell(7);
+            totalLabel.setCellValue("TOTALES");
+            totalLabel.setCellStyle(boldStyle);
+            setMoney(totalesRow, 8, totalIngresos, moneyStyle);
+            setMoney(totalesRow, 12, totalGanancia, moneyStyle);
+
+            sheet.setAutoFilter(new CellRangeAddress(0, 0, 0, headers.length - 1));
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            wb.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Error generando Excel de ventas", e);
+        }
+    }
+
     public byte[] exportarShippingOrder(ShippingOrder order) {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("Orden " + order.getNumero());
@@ -157,6 +224,32 @@ public class ExcelExportService {
             cell.setCellValue(value.doubleValue());
             cell.setCellStyle(style);
         }
+    }
+
+    private BigDecimal ingresoMovimiento(VentaResponseDTO movimiento) {
+        if (movimiento.getMontoMovimiento() != null) return movimiento.getMontoMovimiento();
+        if (movimiento.getMontoPagado() != null) return movimiento.getMontoPagado();
+        return movimiento.getTotalFinal() != null ? movimiento.getTotalFinal() : BigDecimal.ZERO;
+    }
+
+    private String descripcionMovimiento(VentaResponseDTO movimiento) {
+        if ("PAGO_DEUDA".equals(movimiento.getTipoMovimiento())) {
+            return movimiento.getDescripcionMovimiento();
+        }
+        if (movimiento.getDetalles() != null && !movimiento.getDetalles().isEmpty()) {
+            if (movimiento.getDetalles().size() > 1) {
+                return movimiento.getDetalles().stream()
+                        .map(d -> d.getArtista() != null ? d.getArtista() : d.getDescripcion())
+                        .filter(s -> s != null && !s.isBlank())
+                        .reduce((a, b) -> a + ", " + b)
+                        .orElse("Varios ítems");
+            }
+            var detalle = movimiento.getDetalles().get(0);
+            return detalle.getManualItem() != null && detalle.getManualItem()
+                    ? detalle.getDescripcion()
+                    : detalle.getArtista();
+        }
+        return movimiento.getArtista();
     }
 
     private CellStyle buildHeaderStyle(Workbook wb) {

@@ -29,8 +29,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -153,6 +158,47 @@ class ImportControllerTest {
         });
         verify(audioPreviewService).guardarDesdeTracks(10L, storedPage.tracks());
         verify(zipBundleService, never()).buildZip(any(), any());
+        controller.shutdownImportPool();
+    }
+
+    @Test
+    void zipEndpointReturnsStoredBatchAsNonEmptyApplicationZip() throws Exception {
+        Path zip = Files.createTempFile("vinylfuture-test-", ".zip");
+        Files.write(zip, "zip-bytes".getBytes());
+        var batch = new VinylFutureImportBatchService.ImportBatch(
+            "import-123",
+            "codigo,artista\n",
+            new LinkedHashMap<>(),
+            java.time.Instant.now()
+        );
+        when(importBatchService.find("import-123")).thenReturn(Optional.of(batch));
+        when(zipBundleService.buildZip(batch.csv(), batch.pageDataMap())).thenReturn(zip);
+
+        ImportController controller = new ImportController(
+            pdfParser,
+            searchService,
+            scraperService,
+            assetService,
+            csvExportService,
+            zipBundleService,
+            discoRepository,
+            shippingOrderService,
+            audioPreviewService,
+            qrCopyService,
+            pricingService,
+            importBatchService,
+            transactionManager
+        );
+
+        ResponseEntity<StreamingResponseBody> response = controller.exportarZipDesdeImport("import-123");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getContentType().toString()).isEqualTo("application/zip");
+        assertThat(response.getHeaders().getContentDisposition().getFilename()).startsWith("vinylfuture-import-");
+        assertThat(response.getHeaders().getContentLength()).isGreaterThan(0);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        response.getBody().writeTo(out);
+        assertThat(out.toByteArray()).isNotEmpty();
         controller.shutdownImportPool();
     }
 }

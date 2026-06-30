@@ -27,6 +27,11 @@ function toNumber(valor) {
   return Number.isFinite(n) ? n : 0
 }
 
+function cantidadItem(item) {
+  const n = Number(item?.cantidad)
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
 function ResumenLinea({ label, value, strong, muted }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
@@ -97,6 +102,15 @@ export default function NuevaVenta() {
   const [discosDisponibles, setDiscosDisponibles] = useState([])
   const [busquedaDisco, setBusquedaDisco] = useState('')
   const [carrito, setCarrito] = useState([]) // [{disco, precioUnitario}]
+  const [mostrarManual, setMostrarManual] = useState(false)
+  const [manualForm, setManualForm] = useState({
+    descripcion: '',
+    artista: '',
+    album: '',
+    codigo: '',
+    cantidad: '1',
+    precioUnitario: '',
+  })
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
   const [busquedaCliente, setBusquedaCliente] = useState('')
@@ -136,7 +150,13 @@ export default function NuevaVenta() {
     if (idDiscoParam) {
       api.discos.porId(idDiscoParam)
         .then(d => {
-          setCarrito([{ disco: d, precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '' }])
+          setCarrito([{
+            uid: `disco-${d.idDisco}`,
+            disco: d,
+            precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
+            cantidad: '1',
+            manualItem: false,
+          }])
         })
         .catch(() => setErrores({ disco: 'No se pudo cargar el disco del link' }))
     } else {
@@ -157,12 +177,12 @@ export default function NuevaVenta() {
   }, [departamento, tipoEntrega])
 
   const totales = useMemo(() => {
-    const subtotal = carrito.reduce((s, item) => s + toNumber(item.precioUnitario), 0)
+    const subtotal = carrito.reduce((s, item) => s + toNumber(item.precioUnitario) * cantidadItem(item), 0)
     const descuento = subtotal * descuentoPct / 100
     const base = subtotal - descuento
     const envio = tipoEntrega === 'ENVIO' ? toNumber(costoEnvio) : 0
     const totalFinal = base
-    const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo), 0)
+    const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo) * cantidadItem(item), 0)
     const ganancia = totalFinal - costoDisco
     return { subtotal, descuento, base, envio, totalFinal, ganancia }
   }, [carrito, descuentoPct, costoEnvio, tipoEntrega])
@@ -173,17 +193,51 @@ export default function NuevaVenta() {
   }
 
   function agregarAlCarrito(d) {
-    if (carrito.some(item => item.disco.idDisco === d.idDisco)) return
-    setCarrito(prev => [...prev, { disco: d, precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '' }])
+    if (carrito.some(item => item.disco?.idDisco === d.idDisco)) return
+    setCarrito(prev => [...prev, {
+      uid: `disco-${d.idDisco}`,
+      disco: d,
+      precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
+      cantidad: '1',
+      manualItem: false,
+    }])
     setDiscoDetalle(null)
   }
 
-  function quitarDelCarrito(idDisco) {
-    setCarrito(prev => prev.filter(item => item.disco.idDisco !== idDisco))
+  function agregarManual() {
+    const cantidad = Math.max(1, Number(manualForm.cantidad || 1))
+    const precio = toNumber(manualForm.precioUnitario)
+    const descripcion = manualForm.descripcion.trim()
+      || [manualForm.artista, manualForm.album].map(v => v.trim()).filter(Boolean).join(' — ')
+    if (!descripcion || precio <= 0) {
+      setErrores(prev => ({ ...prev, disco: 'Completá descripción y precio del disco fuera de catálogo' }))
+      return
+    }
+    setCarrito(prev => [...prev, {
+      uid: `manual-${Date.now()}-${prev.length}`,
+      manualItem: true,
+      descripcion,
+      artista: manualForm.artista.trim(),
+      album: manualForm.album.trim(),
+      codigo: manualForm.codigo.trim(),
+      cantidad: String(cantidad),
+      precioUnitario: String(precio),
+    }])
+    setManualForm({ descripcion: '', artista: '', album: '', codigo: '', cantidad: '1', precioUnitario: '' })
+    setMostrarManual(false)
+    setErrores(prev => ({ ...prev, disco: undefined }))
   }
 
-  function setPrecioItem(idDisco, valor) {
-    setCarrito(prev => prev.map(item => item.disco.idDisco === idDisco ? { ...item, precioUnitario: valor } : item))
+  function quitarDelCarrito(uid) {
+    setCarrito(prev => prev.filter(item => item.uid !== uid))
+  }
+
+  function setPrecioItem(uid, valor) {
+    setCarrito(prev => prev.map(item => item.uid === uid ? { ...item, precioUnitario: valor } : item))
+  }
+
+  function setCantidadCarrito(uid, valor) {
+    setCarrito(prev => prev.map(item => item.uid === uid ? { ...item, cantidad: valor } : item))
   }
 
   function onBusquedaDiscoChange(e) {
@@ -259,8 +313,10 @@ export default function NuevaVenta() {
     const e = {}
     if (carrito.length === 0) e.disco = 'Agregá al menos un disco'
     carrito.forEach(item => {
-      if (!['DISPONIBLE', 'RESERVADO'].includes(item.disco.estado))
+      if (!item.manualItem && !['DISPONIBLE', 'RESERVADO'].includes(item.disco.estado))
         e.disco = `"${item.disco.artista}" está ${ESTADO_LABELS[item.disco.estado]?.toLowerCase() || item.disco.estado}`
+      if (cantidadItem(item) <= 0) e.disco = 'La cantidad debe ser mayor a cero'
+      if (toNumber(item.precioUnitario) <= 0) e.disco = 'Ingresá un precio válido para cada ítem'
     })
     if (!clienteSeleccionado) e.cliente = 'Seleccioná o registrá un cliente'
     if (totales.base <= 0) e.total = 'Ingresá un precio de venta válido'
@@ -268,6 +324,8 @@ export default function NuevaVenta() {
       if (!departamento) e.departamento = 'Seleccioná el departamento'
       if (sucursalesDac.length > 0 && !sucursalDacCodigo) e.sucursal = 'Seleccioná una sucursal DAC'
     }
+    const montoP = montoPagado !== '' ? Number(montoPagado) : null
+    if (montoP != null && montoP > totales.totalFinal) e.montoPagado = 'El monto pagado no puede superar el total'
     return e
   }
 
@@ -279,52 +337,35 @@ export default function NuevaVenta() {
     setEnviando(true)
     try {
       const montoP = montoPagado !== '' ? Number(montoPagado) : undefined
-      if (carrito.length === 1 && descuentoPct === 0) {
-        await api.ventas.registrar({
-          idCliente: clienteSeleccionado.idCliente,
-          idDisco: carrito[0].disco.idDisco,
-          canalVenta,
-          total: Number(totales.base.toFixed(2)),
-          precioVenta: Number(totales.base.toFixed(2)),
-          costoEnvio: Number(totales.envio.toFixed(2)),
-          tipoEntrega,
-          medioPago: medioPago || null,
-          observaciones: observaciones || null,
-          montoPagado: montoP,
-          ...(tipoEntrega === 'ENVIO' && {
-            idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
-            direccionEnvio: direccionEnvio.trim() || null,
-            departamento,
-            guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
-            sucursalDacCodigo: sucursalDacCodigo || null,
-            sucursalDacNombre: sucursalDacNombre || null,
-          }),
-        })
-      } else {
-        await api.ventas.registrar({
-          idCliente: clienteSeleccionado.idCliente,
-          detalles: carrito.map(item => ({
-            idDisco: item.disco.idDisco,
-            precioUnitario: Number(toNumber(item.precioUnitario).toFixed(2)),
-          })),
-          descuentoPorcentaje: descuentoPct,
-          canalVenta,
-          total: Number(totales.base.toFixed(2)),
-          costoEnvio: Number(totales.envio.toFixed(2)),
-          tipoEntrega,
-          medioPago: medioPago || null,
-          observaciones: observaciones || null,
-          montoPagado: montoP,
-          ...(tipoEntrega === 'ENVIO' && {
-            idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
-            direccionEnvio: direccionEnvio.trim() || null,
-            departamento,
-            guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
-            sucursalDacCodigo: sucursalDacCodigo || null,
-            sucursalDacNombre: sucursalDacNombre || null,
-          }),
-        })
-      }
+      await api.ventas.registrar({
+        idCliente: clienteSeleccionado.idCliente,
+        detalles: carrito.map(item => ({
+          idDisco: item.disco?.idDisco,
+          descripcion: item.manualItem ? item.descripcion : undefined,
+          artista: item.manualItem ? item.artista : undefined,
+          album: item.manualItem ? item.album : undefined,
+          codigo: item.manualItem ? item.codigo : undefined,
+          manualItem: Boolean(item.manualItem),
+          cantidad: cantidadItem(item),
+          precioUnitario: Number(toNumber(item.precioUnitario).toFixed(2)),
+        })),
+        descuentoPorcentaje: descuentoPct,
+        canalVenta,
+        total: Number(totales.base.toFixed(2)),
+        costoEnvio: Number(totales.envio.toFixed(2)),
+        tipoEntrega,
+        medioPago: medioPago || null,
+        observaciones: observaciones || null,
+        montoPagado: montoP,
+        ...(tipoEntrega === 'ENVIO' && {
+          idDireccionCliente: direccionSeleccionadaId ? Number(direccionSeleccionadaId) : null,
+          direccionEnvio: direccionEnvio.trim() || null,
+          departamento,
+          guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
+          sucursalDacCodigo: sucursalDacCodigo || null,
+          sucursalDacNombre: sucursalDacNombre || null,
+        }),
+      })
       navigate('/')
     } catch (err) {
       setErrores({ general: err.message })
@@ -333,7 +374,7 @@ export default function NuevaVenta() {
     }
   }
 
-  const carritoIds = new Set(carrito.map(i => i.disco.idDisco))
+  const carritoIds = new Set(carrito.filter(i => i.disco).map(i => i.disco.idDisco))
   const discosParaMostrar = discosDisponibles.filter(d => !carritoIds.has(d.idDisco))
 
   return (
@@ -352,25 +393,43 @@ export default function NuevaVenta() {
           {carrito.length > 0 && (
             <div className="space-y-2">
               {carrito.map(item => (
-                <div key={item.disco.idDisco} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-stone-700 px-3 py-2.5">
-                  {item.disco.imagenUrl && (
+                <div key={item.uid} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-stone-700 px-3 py-2.5">
+                  {item.disco?.imagenUrl && (
                     <img src={resolveApiUrl(item.disco.imagenUrl)} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
                   )}
+                  {!item.disco?.imagenUrl && item.manualItem && (
+                    <div className="w-9 h-9 rounded bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">Manual</div>
+                  )}
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">{item.disco.artista} — {item.disco.album}</div>
-                    <div className="text-xs text-slate-400 dark:text-stone-500 truncate">{item.disco.codigoInterno || ''}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">
+                      {item.manualItem ? item.descripcion : `${item.disco.artista} — ${item.disco.album}`}
+                    </div>
+                    <div className="text-xs text-slate-400 dark:text-stone-500 truncate">
+                      {item.manualItem
+                        ? [item.codigo && `Código ${item.codigo}`, item.artista, item.album].filter(Boolean).join(' · ')
+                        : item.disco.codigoInterno || ''}
+                    </div>
                   </div>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={item.cantidad}
+                    onChange={e => setCantidadCarrito(item.uid, e.target.value)}
+                    className="input w-20 text-right tabular-nums"
+                    placeholder="Cant."
+                  />
                   <input
                     type="number"
                     min="0"
                     step="1"
                     value={item.precioUnitario}
-                    onChange={e => setPrecioItem(item.disco.idDisco, e.target.value)}
+                    onChange={e => setPrecioItem(item.uid, e.target.value)}
                     className="input w-28 text-right tabular-nums"
                     placeholder="Precio"
                   />
                   {!idDiscoParam && (
-                    <button type="button" onClick={() => quitarDelCarrito(item.disco.idDisco)}
+                    <button type="button" onClick={() => quitarDelCarrito(item.uid)}
                       className="p-1 rounded text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -384,6 +443,67 @@ export default function NuevaVenta() {
 
           {!idDiscoParam && (
             <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setMostrarManual(v => !v)}
+                className="btn-secondary text-sm"
+              >
+                Agregar disco fuera de catálogo
+              </button>
+              {mostrarManual && (
+                <div className="rounded-lg border border-slate-200 dark:border-stone-700 bg-slate-50 dark:bg-stone-950 p-3 space-y-3">
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <input
+                      value={manualForm.descripcion}
+                      onChange={e => setManualForm(f => ({ ...f, descripcion: e.target.value }))}
+                      className="input sm:col-span-2"
+                      placeholder="Descripción"
+                    />
+                    <input
+                      value={manualForm.artista}
+                      onChange={e => setManualForm(f => ({ ...f, artista: e.target.value }))}
+                      className="input"
+                      placeholder="Artista"
+                    />
+                    <input
+                      value={manualForm.album}
+                      onChange={e => setManualForm(f => ({ ...f, album: e.target.value }))}
+                      className="input"
+                      placeholder="Título / álbum"
+                    />
+                    <input
+                      value={manualForm.codigo}
+                      onChange={e => setManualForm(f => ({ ...f, codigo: e.target.value }))}
+                      className="input"
+                      placeholder="Código o notas"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={manualForm.cantidad}
+                        onChange={e => setManualForm(f => ({ ...f, cantidad: e.target.value }))}
+                        className="input"
+                        placeholder="Cantidad"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={manualForm.precioUnitario}
+                        onChange={e => setManualForm(f => ({ ...f, precioUnitario: e.target.value }))}
+                        className="input"
+                        placeholder="Precio unitario"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setMostrarManual(false)} className="btn-secondary text-sm">Cancelar</button>
+                    <button type="button" onClick={agregarManual} className="btn-primary text-sm">Agregar ítem</button>
+                  </div>
+                </div>
+              )}
               <div className="relative">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -563,6 +683,7 @@ export default function NuevaVenta() {
               <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Monto pagado</label>
               <input type="number" step="0.01" min="0" value={montoPagado} onChange={e => setMontoPagado(e.target.value)}
                 placeholder={money(totales.totalFinal)} className="input" />
+              {errores.montoPagado && <p className="text-red-500 text-xs mt-1">{errores.montoPagado}</p>}
             </div>
           </div>
 

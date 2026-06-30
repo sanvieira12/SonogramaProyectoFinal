@@ -143,6 +143,24 @@ public class ZipBundleService {
                 addEntry(zip, root + "/data/import.csv", csvBytes, usedEntryNames);
                 addEntry(zip, root + "/data/catalog.csv", csvBytes, usedEntryNames);
 
+                List<String> missingProducts = pageDataMap.entrySet().stream()
+                    .filter(entry -> entry.getValue().isEmpty())
+                    .map(entry -> "metadata/media: " + itemLabel(entry.getKey()))
+                    .toList();
+                if (!missingProducts.isEmpty() || entries.isEmpty()) {
+                    List<String> lines = new ArrayList<>();
+                    if (entries.isEmpty()) {
+                        lines.add("No se encontraron productos con metadata de Vinyl Future para incluir media.");
+                    }
+                    lines.addAll(missingProducts);
+                    addEntry(
+                        zip,
+                        root + "/missing.txt",
+                        String.join("\n", lines).getBytes(StandardCharsets.UTF_8),
+                        usedEntryNames
+                    );
+                }
+
                 for (int albumIndex = 0; albumIndex < entries.size(); albumIndex++) {
                     InvoiceItem item = entries.get(albumIndex).getKey();
                     VinylPageData page = entries.get(albumIndex).getValue();
@@ -312,6 +330,11 @@ public class ZipBundleService {
         return truncate(sanitizePath(code), 50)
             + " - " + truncate(sanitizePath(artist), 70)
             + " - " + truncate(sanitizePath(album), 90);
+    }
+
+    private String itemLabel(InvoiceItem item) {
+        return firstNonBlank(item.codigoCatalogo(), item.artista(), "sin-codigo")
+            + " - " + firstNonBlank(item.album(), "sin-album");
     }
 
     private String truncate(String value, int maxLength) {

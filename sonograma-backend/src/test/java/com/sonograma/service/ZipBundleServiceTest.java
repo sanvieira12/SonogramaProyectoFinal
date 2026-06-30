@@ -110,4 +110,30 @@ class ZipBundleServiceTest {
             Files.deleteIfExists(zip);
         }
     }
+
+    @Test
+    void zipIncludesMissingFallbackWhenMetadataIsAbsent() throws Exception {
+        VinylFutureAssetService assetService = new VinylFutureAssetService(tempDir.toString());
+        ZipBundleService zipBundleService = new ZipBundleService(assetService);
+        Map<InvoiceItem, Optional<VinylPageData>> pageData = new LinkedHashMap<>();
+        pageData.put(new InvoiceItem(
+            "NF-001", "Artista", "Album sin metadata", "12",
+            new BigDecimal("10.00"), 1, new BigDecimal("10.00")), Optional.empty());
+
+        Path zip = zipBundleService.buildZip("codigo,artista\nNF-001,Artista\n", pageData);
+
+        try (ZipFile zipFile = new ZipFile(zip.toFile())) {
+            List<String> names = zipFile.stream().map(entry -> entry.getName()).toList();
+            String root = names.stream()
+                .filter(name -> name.startsWith("vinylfuture-export-") && name.endsWith("/import.csv"))
+                .findFirst()
+                .orElseThrow()
+                .replace("/import.csv", "");
+            assertThat(names).contains(root + "/import.csv", root + "/missing.txt");
+            String missing = new String(zipFile.getInputStream(zipFile.getEntry(root + "/missing.txt")).readAllBytes());
+            assertThat(missing).contains("metadata/media: NF-001 - Album sin metadata");
+        } finally {
+            Files.deleteIfExists(zip);
+        }
+    }
 }
