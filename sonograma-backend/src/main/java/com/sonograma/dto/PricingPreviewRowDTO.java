@@ -2,6 +2,10 @@ package com.sonograma.dto;
 
 public record PricingPreviewRowDTO(
     Long idDisco,
+    String invoiceNumber,
+    java.time.LocalDate invoiceDate,
+    String supplier,
+    java.math.BigDecimal shipping,
     String code,
     String artist,
     String title,

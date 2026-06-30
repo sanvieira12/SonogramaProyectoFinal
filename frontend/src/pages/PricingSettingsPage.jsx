@@ -56,6 +56,17 @@ function money(value, digits = 0) {
   })
 }
 
+function dateLabel(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleDateString('es-UY', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
 function InputField({ label, value, onChange, step = '0.01', min = '0' }) {
   return (
     <label className="space-y-1.5">
@@ -136,14 +147,14 @@ export default function PricingSettingsPage() {
 
   async function runPreview() {
     setPreviewing(true)
-    setError('')
-    try {
-      const data = await api.pricing.preview(toPayload(form))
-      setPreview(data.rows || [])
-      setMessage('Preview actualizado.')
-    } catch (err) {
-      setError(err.message)
-    } finally {
+      setError('')
+      try {
+        const data = await api.pricing.preview(toPayload(form))
+        setPreview(data.rows || [])
+        setMessage('Vista previa actualizada.')
+      } catch (err) {
+        setError(err.message)
+      } finally {
       setPreviewing(false)
     }
   }
@@ -154,7 +165,7 @@ export default function PricingSettingsPage() {
     setMessage('')
     try {
       const response = await api.pricing.apply(toPayload(form), scope)
-      setMessage(`Pricing aplicado. ${response.updatedCount} registros actualizados.`)
+      setMessage(`Cambios aplicados. ${response.updatedCount} registros actualizados.`)
       const data = await api.pricing.preview(toPayload(form))
       setPreview(data.rows || [])
     } catch (err) {
@@ -174,7 +185,7 @@ export default function PricingSettingsPage() {
       setForm(next)
       const data = await api.pricing.preview(toPayload(next))
       setPreview(data.rows || [])
-      setMessage('Pricing reseteado a valores por defecto.')
+      setMessage('Configuración restablecida a valores por defecto.')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -238,16 +249,16 @@ export default function PricingSettingsPage() {
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-stone-800">
           <div>
-            <h2 className="font-semibold text-slate-900 dark:text-white">Catalog pricing preview</h2>
-            <p className="text-xs text-slate-500 dark:text-stone-500 mt-1">Live recalculation using the current assumptions.</p>
+            <h2 className="font-semibold text-slate-900 dark:text-white">Vista previa de recálculo</h2>
+            <p className="text-xs text-slate-500 dark:text-stone-500 mt-1">Impacto de los costos y precios con la configuración actual.</p>
           </div>
           {loading || previewing ? <span className="text-xs text-slate-400 dark:text-stone-500">Updating…</span> : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1320px]">
+          <table className="w-full text-sm min-w-[1760px]">
             <thead className="bg-slate-50 dark:bg-stone-950">
               <tr className="text-left">
-                {['Code', 'Artist', 'Title', 'Format', 'Type', 'Unit price EUR', 'Qty', 'Unit line total EUR', 'Extra cost EUR', 'Real cost EUR', 'Real cost UYU', 'Markup', 'Final sale price UYU', 'Pricing mode'].map(label => (
+                {['Invoice Number', 'Invoice Date', 'Supplier', 'Shipping', 'Code', 'Artist', 'Title', 'Format', 'Type', 'Unit price EUR', 'Qty', 'Unit line total EUR', 'Extra cost EUR', 'Real cost EUR', 'Real cost UYU', 'Markup', 'Final sale price UYU', 'Mode'].map(label => (
                   <th key={label} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500">{label}</th>
                 ))}
               </tr>
@@ -255,6 +266,10 @@ export default function PricingSettingsPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {preview.map(row => (
                 <tr key={row.idDisco || `${row.code}-${row.title}`}>
+                  <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.invoiceNumber || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{dateLabel(row.invoiceDate)}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.supplier || '—'}</td>
+                  <td className="px-4 py-3 tabular-nums text-slate-600 dark:text-stone-400">{money(row.shipping, 2)}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.code || '—'}</td>
                   <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{row.artist || '—'}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.title || '—'}</td>
@@ -277,7 +292,7 @@ export default function PricingSettingsPage() {
               ))}
               {!loading && preview.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-10 text-center text-slate-500 dark:text-stone-500">No hay discos para recalcular.</td>
+                  <td colSpan={18} className="px-4 py-10 text-center text-slate-500 dark:text-stone-500">No hay discos para recalcular.</td>
                 </tr>
               ) : null}
             </tbody>

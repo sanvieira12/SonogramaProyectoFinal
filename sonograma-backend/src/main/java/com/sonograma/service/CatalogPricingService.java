@@ -2,12 +2,14 @@ package com.sonograma.service;
 
 import com.sonograma.dto.*;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PricingSettings;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.PricingRoundingRule;
 import com.sonograma.enums.RecordType;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.PedidoRepository;
 import com.sonograma.repository.PricingSettingsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -15,8 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +46,7 @@ public class CatalogPricingService {
 
     private final PricingSettingsRepository pricingSettingsRepository;
     private final DiscoRepository discoRepository;
+    private final PedidoRepository pedidoRepository;
 
     @Transactional(readOnly = true)
     public PricingSettings getOrCreateSettings() {
@@ -69,8 +77,10 @@ public class CatalogPricingService {
     public PricingPreviewResponseDTO preview(PricingSettingsUpdateDTO request) {
         validateSettings(request);
         PricingSettings settings = fromRequest(request);
-        List<PricingPreviewRowDTO> rows = discoRepository.findAll().stream()
-            .map(disco -> toPreviewRow(disco, settings))
+        List<Disco> discos = discoRepository.findAll();
+        Map<String, Pedido> pedidosByInvoice = pedidosByInvoiceNumber(discos);
+        List<PricingPreviewRowDTO> rows = discos.stream()
+            .map(disco -> toPreviewRow(disco, settings, pedidosByInvoice))
             .toList();
         return new PricingPreviewResponseDTO(toDto(settings), rows);
     }
@@ -229,10 +239,15 @@ public class CatalogPricingService {
         dto.setPricingMarkup(pricing.markup());
     }
 
-    public PricingPreviewRowDTO toPreviewRow(Disco disco, PricingSettings settings) {
+    public PricingPreviewRowDTO toPreviewRow(Disco disco, PricingSettings settings, Map<String, Pedido> pedidosByInvoice) {
         PricingResult pricing = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings);
+        Pedido pedido = pedidoForDisco(disco, pedidosByInvoice);
         return new PricingPreviewRowDTO(
             disco.getIdDisco(),
+            blankToNull(disco.getNumeroFacturaCompra()),
+            disco.getFechaFacturaCompra(),
+            pedido != null ? blankToNull(pedido.getProveedor()) : null,
+            pedido != null ? firstNonNull(pedido.getFranqueo(), pedido.getTarifas()) : null,
             disco.getCodigoInterno(),
             disco.getArtista(),
             disco.getAlbum(),
@@ -248,6 +263,28 @@ public class CatalogPricingService {
             pricing != null ? pricing.finalPriceUyu() : null,
             (disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO).name()
         );
+    }
+
+    private Map<String, Pedido> pedidosByInvoiceNumber(List<Disco> discos) {
+        Set<String> invoiceNumbers = discos.stream()
+            .map(Disco::getNumeroFacturaCompra)
+            .map(this::blankToNull)
+            .filter(value -> value != null)
+            .collect(Collectors.toSet());
+        if (invoiceNumbers.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return pedidoRepository.findByNumeroFacturaIn(invoiceNumbers).stream()
+            .filter(pedido -> blankToNull(pedido.getNumeroFactura()) != null)
+            .collect(Collectors.toMap(Pedido::getNumeroFactura, Function.identity(), (first, second) -> first));
+    }
+
+    private Pedido pedidoForDisco(Disco disco, Map<String, Pedido> pedidosByInvoice) {
+        String invoiceNumber = blankToNull(disco.getNumeroFacturaCompra());
+        if (invoiceNumber == null) {
+            return null;
+        }
+        return pedidosByInvoice.get(invoiceNumber);
     }
 
     private BigDecimal applyRounding(BigDecimal value, PricingRoundingRule rule) {
@@ -272,6 +309,19 @@ public class CatalogPricingService {
 
     private String normalizeFormat(String format) {
         return format == null ? "" : format.strip().toLowerCase(Locale.ROOT);
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    private BigDecimal firstNonNull(BigDecimal... values) {
+        for (BigDecimal value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private void validateSettings(PricingSettingsUpdateDTO request) {

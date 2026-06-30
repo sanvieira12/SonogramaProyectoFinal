@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import DiscosCatalogo from './pages/DiscosCatalogo'
 import Clientes from './pages/Clientes'
 import NuevaVenta from './pages/NuevaVenta'
 import Importar from './pages/Importar'
@@ -70,9 +69,9 @@ export default function App() {
             <Route path="/ventas/nueva" element={<NuevaVenta />} />
             <Route path="/importar" element={<Importar />} />
             <Route path="/stock" element={<StockLayout />}>
-              <Route index element={<Navigate to="/stock/catalogo" replace />} />
-              <Route path="catalogo" element={<DiscosCatalogo />} />
-              <Route path="pricing" element={<PricingSettingsPage />} />
+              <Route index element={<PricingSettingsPage />} />
+              <Route path="pricing" element={<Navigate to="/stock" replace />} />
+              <Route path="catalogo" element={<Navigate to="/discos" replace />} />
             </Route>
             <Route path="/deudas" element={<Deudas />} />
             <Route path="/libro-ventas" element={<LibroVentas />} />

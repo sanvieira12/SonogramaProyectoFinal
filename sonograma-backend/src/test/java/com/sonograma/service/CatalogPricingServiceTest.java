@@ -10,6 +10,7 @@ import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.PricingRoundingRule;
 import com.sonograma.enums.RecordType;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.PedidoRepository;
 import com.sonograma.repository.PricingSettingsRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,16 +26,19 @@ class CatalogPricingServiceTest {
 
     private PricingSettingsRepository pricingSettingsRepository;
     private DiscoRepository discoRepository;
+    private PedidoRepository pedidoRepository;
     private CatalogPricingService service;
 
     @BeforeEach
     void setUp() {
         pricingSettingsRepository = mock(PricingSettingsRepository.class);
         discoRepository = mock(DiscoRepository.class);
-        service = new CatalogPricingService(pricingSettingsRepository, discoRepository);
+        pedidoRepository = mock(PedidoRepository.class);
+        service = new CatalogPricingService(pricingSettingsRepository, discoRepository, pedidoRepository);
         when(pricingSettingsRepository.findById(PricingSettings.SINGLETON_ID)).thenReturn(Optional.empty());
         when(pricingSettingsRepository.save(any(PricingSettings.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(discoRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(pedidoRepository.findByNumeroFacturaIn(anySet())).thenReturn(List.of());
     }
 
     @Test
