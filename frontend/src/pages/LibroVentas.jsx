@@ -97,7 +97,7 @@ function EditSaleModal({ venta, onClose, onSaved }) {
     try {
       const subtotal = form.detalles.reduce((sum, d) => sum + Number(d.precioUnitario || 0), 0)
       const descuento = subtotal * Number(form.descuentoPorcentaje || 0) / 100
-      const total = subtotal - descuento + Number(venta.costoEnvio || 0)
+      const total = subtotal - descuento
       const payload = {
         idCliente: venta.idCliente,
         canalVenta: venta.canalVenta || 'LOCAL',

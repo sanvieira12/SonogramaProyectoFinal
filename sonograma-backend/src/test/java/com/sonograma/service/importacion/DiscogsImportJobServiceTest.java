@@ -1,6 +1,7 @@
 package com.sonograma.service.importacion;
 
 import com.sonograma.dto.DiscogsImportJobDTO;
+import com.sonograma.dto.TrackInfo;
 import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -14,6 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import java.io.ByteArrayOutputStream;
 import java.time.Duration;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -59,17 +61,48 @@ class DiscogsImportJobServiceTest {
             assertThat(current.getStatus()).isEqualTo("completed_with_errors");
             assertThat(current.getRateLimited()).isEqualTo(1);
             assertThat(current.getRows()).singleElement().satisfies(row -> {
-                assertThat(row.getStatus()).isEqualTo("rate_limited");
+                assertThat(row.getStatus()).isEqualTo("pending_retry");
                 assertThat(row.getRetryCount()).isEqualTo(1);
                 assertThat(row.getDiscogsId()).isEqualTo(999L);
-                assertThat(row.getErrorMessage()).contains("importado parcialmente");
+                assertThat(row.getErrorMessage()).contains("pendiente");
             });
         });
 
         DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
-        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getImported()).isZero();
         assertThat(imported.getRows()).singleElement()
-                .satisfies(row -> assertThat(row.getImportedCatalogProductId()).isNotNull());
+                .satisfies(row -> assertThat(row.getImportedCatalogProductId()).isNull());
+    }
+
+    @Test
+    void retryAllPendingMetadataThenImportsAvailableUsedRecordWithOneQr() throws Exception {
+        when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
+        when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
+                .thenReturn(DiscogsApiClient.FetchResult.failure(true, 1, "HTTP 429"))
+                .thenReturn(successResult());
+
+        DiscogsImportJobDTO created = service.createJob(fixture());
+
+        await().atMost(Duration.ofSeconds(8)).untilAsserted(() ->
+                assertThat(service.getJob(created.getId()).getMetadataPending()).isEqualTo(1));
+
+        service.retryPendingRows(created.getId());
+
+        await().atMost(Duration.ofSeconds(8)).untilAsserted(() -> {
+            DiscogsImportJobDTO current = service.getJob(created.getId());
+            assertThat(current.getStatus()).isEqualTo("completed");
+            assertThat(current.getReadyToImport()).isEqualTo(1);
+            assertThat(current.getMetadataFetched()).isEqualTo(1);
+        });
+
+        DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
+
+        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getQrEntriesCreated()).isEqualTo(1);
+        assertThat(imported.getRows()).singleElement().satisfies(row -> {
+            assertThat(row.getImportedCatalogProductId()).isNotNull();
+            assertThat(row.getStatus()).isEqualTo("imported");
+        });
     }
 
     private MockMultipartFile fixture() throws Exception {
@@ -86,5 +119,30 @@ class DiscogsImportJobServiceTest {
                     output.toByteArray()
             );
         }
+    }
+
+    private DiscogsApiClient.FetchResult successResult() {
+        return new DiscogsApiClient.FetchResult(
+                true,
+                false,
+                false,
+                0,
+                null,
+                null,
+                999L,
+                "Artist",
+                "Album",
+                2001,
+                "Electronic",
+                "Label",
+                "CAT-1",
+                "Uruguay",
+                "Techno",
+                "VINILO",
+                null,
+                null,
+                "A1. Track",
+                List.of(new TrackInfo("A1", "Track", null, "https://youtube.test/track"))
+        );
     }
 }

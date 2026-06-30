@@ -103,7 +103,7 @@ public class VentaService {
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
 
-        BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : costos.getTotalFinal();
+        BigDecimal montoPagado = calcularMontoPagado(dto, costos.getTotalFinal());
         BigDecimal montoDeuda = costos.getTotalFinal().subtract(montoPagado);
         if (montoDeuda.compareTo(BigDecimal.ZERO) < 0) montoDeuda = BigDecimal.ZERO;
         EstadoPago estadoPago = montoDeuda.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PAGADO
@@ -240,7 +240,7 @@ public class VentaService {
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
 
-        BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : costos.getTotalFinal();
+        BigDecimal montoPagado = calcularMontoPagado(dto, costos.getTotalFinal());
         BigDecimal montoDeuda = costos.getTotalFinal().subtract(montoPagado);
         if (montoDeuda.compareTo(BigDecimal.ZERO) < 0) montoDeuda = BigDecimal.ZERO;
         EstadoPago estadoPago = montoDeuda.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PAGADO
@@ -435,14 +435,14 @@ public class VentaService {
                 .album(album)
                 .fechaVenta(venta.getFechaVenta())
                 .canalVenta(venta.getCanalVenta() != null ? venta.getCanalVenta().name() : null)
-                .total(venta.getTotal())
+                .total(VentaTotals.totalProductos(venta))
                 .costoDisco(venta.getCostoDisco())
                 .precioVenta(venta.getPrecioVenta())
                 .costoEnvio(venta.getCostoEnvio())
                 .porcentajeImpuesto(venta.getPorcentajeImpuesto())
                 .montoImpuesto(venta.getMontoImpuesto())
                 .otrosCostos(venta.getOtrosCostos())
-                .totalFinal(venta.getTotalFinal())
+                .totalFinal(VentaTotals.totalProductos(venta))
                 .gananciaEstimada(venta.getGananciaEstimada())
                 .tipoEntrega(venta.getTipoEntrega() != null ? venta.getTipoEntrega().name() : null)
                 .estado(venta.getEstado() != null ? venta.getEstado().name() : null)
@@ -533,6 +533,13 @@ public class VentaService {
         deuda.setEstadoPago(estadoPago);
         deuda.setUpdatedAt(LocalDateTime.now());
         deudaRepository.save(deuda);
+    }
+
+    private BigDecimal calcularMontoPagado(VentaRequestDTO dto, BigDecimal totalProductos) {
+        BigDecimal total = totalProductos != null ? totalProductos : BigDecimal.ZERO;
+        BigDecimal montoPagado = dto.getMontoPagado() != null ? dto.getMontoPagado() : total;
+        if (montoPagado.compareTo(total) > 0) return total;
+        return montoPagado;
     }
 
     private Envio sincronizarEnvio(

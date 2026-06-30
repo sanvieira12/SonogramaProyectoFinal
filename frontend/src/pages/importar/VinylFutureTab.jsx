@@ -239,7 +239,7 @@ function ExcelImport() {
 function PdfExport() {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle')
-  const [resumen, setResumen] = useState(null)
+  const [job, setJob] = useState(null)
   const [exportando, setExportando] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [segundos, setSegundos] = useState(0)
@@ -257,12 +257,6 @@ function PdfExport() {
     return () => window.clearInterval(timer)
   }, [exportando])
 
-  const etapa = segundos < 3
-    ? 'Leyendo factura y precios…'
-    : segundos < 12
-      ? 'Buscando portadas y metadata en paralelo…'
-      : 'Preparando archivos y guardando el pedido…'
-
   const etapaZip = exportSegundos < 4
     ? 'Validando archivos descargados…'
     : exportSegundos < 18
@@ -277,21 +271,51 @@ function PdfExport() {
     setEstado('loading')
     setErrorMsg('')
     try {
-      setResumen(await api.importar.vinylfutureCatalogo(archivo))
-      setEstado('done')
+      const start = await api.importar.vinylfutureCatalogo(archivo)
+      const firstJob = await api.importar.vinylfutureJob(start.jobId)
+      setJob(firstJob)
     } catch (err) {
       setErrorMsg(err.message || 'Error al procesar el PDF')
       setEstado('error')
     }
   }
 
+  useEffect(() => {
+    if (estado !== 'loading' || !job?.jobId) return undefined
+    let cancelled = false
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await api.importar.vinylfutureJob(job.jobId)
+        if (cancelled) return
+        setJob(next)
+        if (['COMPLETED', 'COMPLETED_WITH_ERRORS'].includes(next.status)) {
+          setEstado('done')
+        }
+        if (['FAILED', 'CANCELLED'].includes(next.status)) {
+          setErrorMsg(next.errors?.[0] || 'Error al procesar el PDF')
+          setEstado('error')
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setErrorMsg(err.message || 'No se pudo consultar el estado de la importación')
+          setEstado('error')
+        }
+      }
+    }, 1500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [estado, job?.jobId])
+
   async function exportarZip() {
     setExportSegundos(0)
     setExportando(true)
     setErrorMsg('')
     try {
-      const blob = resumen?.importId
-        ? await api.importar.vinylfutureZip(resumen.importId)
+      const importId = job?.importId || job?.summary?.importId
+      const blob = importId
+        ? await api.importar.vinylfutureZip(importId)
         : await api.importar.vinylfutureCsv(archivo)
       const url = URL.createObjectURL(blob)
       const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)
@@ -308,9 +332,14 @@ function PdfExport() {
   }
 
   function reset() {
-    setArchivo(null); setResumen(null)
+    setArchivo(null); setJob(null)
     setEstado('idle'); setErrorMsg(''); setSegundos(0); setExportSegundos(0)
   }
+
+  const resumen = job?.summary
+  const progress = Math.max(0, Math.min(job?.progressPercent || 0, 100))
+  const activeStep = job?.currentStep || 'Factura recibida'
+  const canDownloadZip = estado === 'done' && Boolean(job?.importId || resumen?.importId)
 
   return (
     <div className="space-y-4">
@@ -325,35 +354,38 @@ function PdfExport() {
           <UploadZone accept="application/pdf" label="Arrastrá el PDF aquí o hacé clic" onFile={setArchivo} />
           <button onClick={procesar} disabled={!archivo}
             className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
-            Procesar PDF
+            Subir factura PDF
           </button>
         </>
       )}
       {estado === 'loading' && (
         <div className="rounded-xl border border-[#7E9FA8]/20 bg-[#7E9FA8]/5 px-4 py-3">
-          <Spinner text={etapa} />
+          <Spinner text={`Procesando factura · ${activeStep}`} />
           <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-stone-800">
-            <div className="h-full w-1/3 animate-pulse rounded-full bg-[#7E9FA8]" />
+            <div className="h-full rounded-full bg-[#7E9FA8] transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <p className="mt-2 text-center text-xs text-slate-400 dark:text-stone-500">
-            {segundos}s · podés dejar esta pantalla abierta mientras termina
+          <p className="mt-2 text-center text-xs text-slate-500 dark:text-stone-400">
+            {segundos}s · {progress}% · productos detectados {job?.totalItems || 0} · unidades totales {job?.totalQuantity || 0}
           </p>
         </div>
       )}
       {estado === 'done' && (
         <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
           <p className="font-medium text-emerald-700 dark:text-emerald-400 text-sm mb-3">
-            Importación completada: {resumen?.recordsImported || 0} discos agregados al catálogo
+            {job?.status === 'COMPLETED_WITH_ERRORS' ? 'Completado con errores' : 'Completado'}: {resumen?.recordsImported || 0} discos agregados al catálogo
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             {[
-              ['Detectados', resumen?.recordsDetected],
-              ['Importados', resumen?.recordsImported],
+              ['Productos detectados', job?.totalItems ?? resumen?.recordsDetected],
+              ['Unidades totales', job?.totalQuantity],
+              ['Importados', job?.successCount ?? resumen?.recordsImported],
+              ['Omitidos', job?.skippedCount],
+              ['Errores', job?.failedCount],
               ['Portadas encontradas', resumen?.coversFound],
               ['Portadas descargadas', resumen?.coversDownloaded],
               ['MP3 encontrados', resumen?.mp3PreviewsFound],
               ['MP3 descargados', resumen?.mp3Downloaded],
-              ['Media fallida', resumen?.failedMediaDownloads],
+              ['Audios/portadas fallidos', resumen?.failedMediaDownloads],
               ['YouTube', resumen?.youtubeLinksFound],
               ['QR creados', resumen?.qrEntriesCreated],
               ['Duplicados', resumen?.skippedDuplicates],
@@ -366,14 +398,30 @@ function PdfExport() {
               </div>
             ))}
           </div>
+          {job?.warnings?.length > 0 && (
+            <details className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+              <summary className="cursor-pointer font-medium">Ver advertencias ({job.warnings.length})</summary>
+              <ul className="mt-2 list-disc pl-5 space-y-1">
+                {job.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+              </ul>
+            </details>
+          )}
+          {job?.errors?.length > 0 && (
+            <details className="mb-3 text-xs text-red-700 dark:text-red-300">
+              <summary className="cursor-pointer font-medium">Ver errores ({job.errors.length})</summary>
+              <ul className="mt-2 list-disc pl-5 space-y-1">
+                {job.errors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
+              </ul>
+            </details>
+          )}
           {resumen?.failedLinkDetails?.length > 0 && (
             <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
               Sin metadata externa: {resumen.failedLinkDetails.join(', ')}
             </p>
           )}
-          <button onClick={exportarZip} disabled={exportando}
+          <button onClick={exportarZip} disabled={exportando || !canDownloadZip}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500 text-emerald-700 dark:text-emerald-300 text-sm font-medium disabled:opacity-50">
-            {exportando ? 'Preparando ZIP…' : 'Exportar CSV, portadas y audio (opcional)'}
+            {exportando ? 'Preparando ZIP…' : 'Descargar ZIP'}
           </button>
           <button onClick={reset} disabled={exportando} className="ml-3 text-xs underline text-emerald-600 dark:text-emerald-400 disabled:opacity-50">Nueva importación</button>
           {exportando && (

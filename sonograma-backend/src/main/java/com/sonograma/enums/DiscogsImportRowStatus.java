@@ -9,5 +9,7 @@ public enum DiscogsImportRowStatus {
     IGNORED,
     RATE_LIMITED,
     PENDING_RETRY,
+    SOLD,
+    RESERVED,
     FAILED
 }

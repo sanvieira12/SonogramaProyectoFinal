@@ -10,12 +10,14 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.*;
+import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
 public class DiscogsExcelParser {
 
     private final DiscogsLinkParser linkParser;
+    private static final Pattern DISCOGS_TEXT_SPLIT = Pattern.compile("\\s+[–—-]\\s+");
 
     public ParsedSheet parse(MultipartFile file) throws IOException {
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
@@ -26,11 +28,22 @@ public class DiscogsExcelParser {
             FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
             HeaderInfo header = detectHeader(sheet, evaluator);
             List<ParsedRow> rows = new ArrayList<>();
+            int ignoredBlankRows = 0;
 
             for (int rowIndex = header.rowIndex() + 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-                rows.add(parseRow(sheet.getRow(rowIndex), rowIndex + 1, header.columns(), evaluator));
+                Row row = sheet.getRow(rowIndex);
+                if (!rowHasMeaningfulData(row, header.columns(), evaluator)) {
+                    ignoredBlankRows++;
+                    continue;
+                }
+                rows.add(parseRow(row, rowIndex + 1, header.columns(), evaluator));
             }
-            return new ParsedSheet(sheet.getSheetName(), markDuplicates(rows));
+            return new ParsedSheet(
+                    sheet.getSheetName(),
+                    sheet.getLastRowNum() + 1,
+                    ignoredBlankRows,
+                    markDuplicates(rows)
+            );
         }
     }
 
@@ -57,6 +70,13 @@ public class DiscogsExcelParser {
                     row.discogsId(),
                     row.artist(),
                     row.title(),
+                    row.rawCondition(),
+                    row.manualCondition(),
+                    row.rawPrice(),
+                    row.manualPriceUyu(),
+                    row.manualGenre(),
+                    row.sourceStatus(),
+                    row.internalCode(),
                     DiscogsImportRowStatus.IGNORED,
                     "Link Discogs duplicado dentro de la importación"
             ));
@@ -72,6 +92,13 @@ public class DiscogsExcelParser {
     ) {
         String artist = value(row, columns.get("artist"), evaluator);
         String title = value(row, columns.get("title"), evaluator);
+        String rawCondition = value(row, columns.get("condition"), evaluator);
+        String manualCondition = blank(rawCondition) ? null : rawCondition.trim();
+        String rawPrice = value(row, columns.get("price"), evaluator);
+        PriceParse price = parsePrice(rawPrice);
+        String manualGenre = value(row, columns.get("genre"), evaluator);
+        String sourceStatus = normalizeStatus(value(row, columns.get("status"), evaluator));
+        String internalCode = value(row, columns.get("code"), evaluator);
         String hyperlinkUrl = null;
         String visibleCellValue = null;
         String urlSource = null;
@@ -103,13 +130,14 @@ public class DiscogsExcelParser {
                 if (parsed.isPresent()) {
                     visibleCellValue = visible;
                     link = parsed.get();
-                    urlSource = "visible";
+                    urlSource = sourceFromVisibleValue(visible);
                     break;
                 }
             }
         }
 
         if (link != null) {
+            ArtistTitle extracted = extractArtistTitleFromDiscogsText(visibleCellValue);
             return new ParsedRow(
                     excelRowNumber,
                     visibleCellValue,
@@ -118,10 +146,17 @@ public class DiscogsExcelParser {
                     urlSource,
                     link.type(),
                     link.id(),
-                    artist,
-                    title,
-                    DiscogsImportRowStatus.PARSED,
-                    null
+                    firstNonBlank(artist, extracted.artist()),
+                    firstNonBlank(title, extracted.title()),
+                    rawCondition,
+                    manualCondition,
+                    rawPrice,
+                    price.value(),
+                    manualGenre,
+                    sourceStatus,
+                    internalCode,
+                    rowStatusForSourceStatus(sourceStatus),
+                    price.warning()
             );
         }
 
@@ -136,12 +171,18 @@ public class DiscogsExcelParser {
                     null,
                     artist,
                     title,
+                    rawCondition,
+                    manualCondition,
+                    rawPrice,
+                    price.value(),
+                    manualGenre,
+                    sourceStatus,
+                    internalCode,
                     DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
-                    "Fila con artista o álbum, pero sin URL de Discogs"
+                    appendWarning("Fila con artista o álbum, pero sin URL de Discogs", price.warning())
             );
         }
 
-        boolean trulyEmpty = row == null || rowIsEmpty(row, evaluator);
         return new ParsedRow(
                 excelRowNumber,
                 null,
@@ -152,10 +193,15 @@ public class DiscogsExcelParser {
                 null,
                 null,
                 null,
+                rawCondition,
+                manualCondition,
+                rawPrice,
+                price.value(),
+                manualGenre,
+                sourceStatus,
+                internalCode,
                 DiscogsImportRowStatus.IGNORED,
-                trulyEmpty
-                        ? "Fila sin artista ni álbum y sin link Discogs"
-                        : "Fila ignorada: no contiene un link Discogs válido"
+                appendWarning("Fila ignorada: no contiene un link Discogs válido", price.warning())
         );
     }
 
@@ -173,6 +219,16 @@ public class DiscogsExcelParser {
                     columns.putIfAbsent("title", cell.getColumnIndex());
                 } else if (containsAny(header, "discogs", "link", "url")) {
                     columns.putIfAbsent("url", cell.getColumnIndex());
+                } else if (containsAny(header, "condicion", "condition")) {
+                    columns.putIfAbsent("condition", cell.getColumnIndex());
+                } else if (containsAny(header, "precio", "price")) {
+                    columns.putIfAbsent("price", cell.getColumnIndex());
+                } else if (containsAny(header, "genero", "genre")) {
+                    columns.putIfAbsent("genre", cell.getColumnIndex());
+                } else if (containsAny(header, "estado", "status")) {
+                    columns.putIfAbsent("status", cell.getColumnIndex());
+                } else if (containsAny(header, "codigo", "code")) {
+                    columns.putIfAbsent("code", cell.getColumnIndex());
                 }
             }
             if (!columns.isEmpty()) {
@@ -182,13 +238,20 @@ public class DiscogsExcelParser {
         throw new IOException("No se pudo detectar la fila de encabezados del Excel");
     }
 
-    private boolean rowIsEmpty(Row row, FormulaEvaluator evaluator) {
-        for (Cell cell : row) {
-            if (cell.getHyperlink() != null || !cellValue(cell, evaluator).isBlank()) {
-                return false;
+    private boolean rowHasMeaningfulData(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator) {
+        if (row == null) return false;
+        for (Integer column : columns.values()) {
+            Cell cell = row.getCell(column);
+            if (cell != null && (cell.getHyperlink() != null || !cellValue(cell, evaluator).isBlank())) {
+                return true;
             }
         }
-        return true;
+        for (Cell cell : row) {
+            if (cell.getHyperlink() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String value(Row row, Integer column, FormulaEvaluator evaluator) {
@@ -224,13 +287,86 @@ public class DiscogsExcelParser {
         return blank(first) ? second : first;
     }
 
+    private String sourceFromVisibleValue(String visible) {
+        if (visible == null) return "visible";
+        String normalized = visible.toLowerCase(Locale.ROOT);
+        if (normalized.matches(".*\\[\\s*r\\d+\\s*].*")) return "visible_r_id";
+        if (normalized.matches(".*\\[\\s*m\\d+\\s*].*")) return "visible_m_id";
+        if (normalized.contains("discogs.com/")) return "visible";
+        if (normalized.contains("discogs")) return "visible_discogs_text";
+        return "visible";
+    }
+
+    private ArtistTitle extractArtistTitleFromDiscogsText(String visible) {
+        if (blank(visible) || !visible.toLowerCase(Locale.ROOT).contains("discogs")) {
+            return new ArtistTitle(null, null);
+        }
+        String cleaned = visible
+                .replaceFirst("(?i)\\s*\\|\\s*discogs\\s*$", "")
+                .replaceAll("(?i)\\[\\s*[rm]\\d+\\s*]", "")
+                .trim();
+        String[] parts = DISCOGS_TEXT_SPLIT.split(cleaned, 3);
+        if (parts.length < 2) {
+            return new ArtistTitle(null, null);
+        }
+        return new ArtistTitle(blankToNull(parts[0]), blankToNull(parts[1]));
+    }
+
+    private PriceParse parsePrice(String rawPrice) {
+        if (blank(rawPrice)) return new PriceParse(null, null);
+        String normalized = rawPrice.trim().toUpperCase(Locale.ROOT);
+        if (normalized.contains("SIN PRECIO") || normalized.equals("S/P")) {
+            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
+        }
+        String numeric = rawPrice.replaceAll("[^0-9,.-]", "").trim();
+        if (numeric.isBlank()) {
+            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
+        }
+        if (numeric.contains(",") && !numeric.contains(".")) {
+            numeric = numeric.replace(",", ".");
+        } else {
+            numeric = numeric.replace(",", "");
+        }
+        try {
+            return new PriceParse(new BigDecimal(numeric), null);
+        } catch (NumberFormatException ex) {
+            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
+        }
+    }
+
+    private String normalizeStatus(String value) {
+        if (blank(value)) return "DISPONIBLE";
+        String normalized = normalize(value);
+        if (normalized.contains("vendido")) return "VENDIDO";
+        if (normalized.contains("reservado")) return "RESERVADO";
+        return value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private DiscogsImportRowStatus rowStatusForSourceStatus(String sourceStatus) {
+        if ("VENDIDO".equals(sourceStatus)) return DiscogsImportRowStatus.SOLD;
+        if ("RESERVADO".equals(sourceStatus)) return DiscogsImportRowStatus.RESERVED;
+        return DiscogsImportRowStatus.PARSED;
+    }
+
+    private String appendWarning(String message, String warning) {
+        return blank(warning) ? message : message + ". " + warning;
+    }
+
+    private String blankToNull(String value) {
+        return blank(value) ? null : value.trim();
+    }
+
     private boolean blank(String value) {
         return value == null || value.isBlank();
     }
 
     private record HeaderInfo(int rowIndex, Map<String, Integer> columns) {}
 
-    public record ParsedSheet(String sheetName, List<ParsedRow> rows) {}
+    private record ArtistTitle(String artist, String title) {}
+
+    private record PriceParse(BigDecimal value, String warning) {}
+
+    public record ParsedSheet(String sheetName, int physicalExcelLastRow, int ignoredBlankRows, List<ParsedRow> rows) {}
 
     public record ParsedRow(
             int sourceExcelRowNumber,
@@ -242,6 +378,13 @@ public class DiscogsExcelParser {
             Long discogsId,
             String artist,
             String title,
+            String rawCondition,
+            String manualCondition,
+            String rawPrice,
+            BigDecimal manualPriceUyu,
+            String manualGenre,
+            String sourceStatus,
+            String internalCode,
             DiscogsImportRowStatus status,
             String errorMessage
     ) {}

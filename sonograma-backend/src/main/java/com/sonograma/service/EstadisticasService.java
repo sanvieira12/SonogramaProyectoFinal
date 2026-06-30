@@ -138,9 +138,7 @@ public class EstadisticasService {
     }
 
     private static BigDecimal totalVenta(Venta venta) {
-        if (venta.getTotalFinal() != null) return venta.getTotalFinal();
-        if (venta.getTotal() != null) return venta.getTotal();
-        return BigDecimal.ZERO;
+        return VentaTotals.totalProductos(venta);
     }
 
     private static BigDecimal gananciaVenta(Venta venta) {

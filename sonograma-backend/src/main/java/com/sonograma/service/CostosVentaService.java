@@ -55,10 +55,10 @@ public class CostosVentaService {
         BigDecimal porcentajeImpuesto = BigDecimal.ZERO;
         BigDecimal otrosCostos = BigDecimal.ZERO;
 
-        BigDecimal subtotal = nvl(precioVenta).add(costoEnvio).add(otrosCostos);
+        BigDecimal subtotal = nvl(precioVenta).add(otrosCostos);
         BigDecimal montoImpuesto = subtotal.multiply(porcentajeImpuesto).divide(CIEN, 4, RoundingMode.HALF_UP);
         BigDecimal totalFinal = subtotal.add(montoImpuesto);
-        BigDecimal ganancia = totalFinal.subtract(costoDisco).subtract(costoEnvio).subtract(montoImpuesto).subtract(otrosCostos);
+        BigDecimal ganancia = totalFinal.subtract(costoDisco).subtract(montoImpuesto).subtract(otrosCostos);
 
         return ResultadoCostoVentaDTO.builder()
                 .costoDisco(moneda(costoDisco))

@@ -364,14 +364,14 @@ public class ClienteService {
                 .album(venta.getDisco().getAlbum())
                 .fechaVenta(venta.getFechaVenta())
                 .canalVenta(venta.getCanalVenta() != null ? venta.getCanalVenta().name() : null)
-                .total(venta.getTotal())
+                .total(VentaTotals.totalProductos(venta))
                 .costoDisco(venta.getCostoDisco())
                 .precioVenta(venta.getPrecioVenta())
                 .costoEnvio(venta.getCostoEnvio())
                 .porcentajeImpuesto(venta.getPorcentajeImpuesto())
                 .montoImpuesto(venta.getMontoImpuesto())
                 .otrosCostos(venta.getOtrosCostos())
-                .totalFinal(venta.getTotalFinal())
+                .totalFinal(VentaTotals.totalProductos(venta))
                 .gananciaEstimada(venta.getGananciaEstimada())
                 .tipoEntrega(venta.getTipoEntrega() != null ? venta.getTipoEntrega().name() : null)
                 .estado(venta.getEstado() != null ? venta.getEstado().name() : null)
@@ -407,8 +407,7 @@ public class ClienteService {
     }
 
     private BigDecimal totalVenta(Venta venta) {
-        if (venta.getTotalFinal() != null) return venta.getTotalFinal();
-        return venta.getTotal() != null ? venta.getTotal() : BigDecimal.ZERO;
+        return VentaTotals.totalProductos(venta);
     }
 
     private String masFrecuente(List<Venta> ventas, Function<Venta, String> extractor) {

@@ -55,8 +55,11 @@ class DiscogsCoverServiceTest {
         assertThat(Files.readAllBytes(cover.localPath())).containsExactly(1, 2, 3, 4);
         try (ZipFile archive = new ZipFile(zip.toFile())) {
             var names = archive.stream().map(entry -> entry.getName()).toList();
-            assertThat(names).containsExactly("Artist _ Name - Title_ One - 123.jpg");
+            assertThat(names).containsExactly("discogs-summary.csv", "123 - Artist _ Name - Title_ One.jpg");
             assertThat(names).noneMatch(name -> name.contains("/audio/") || name.endsWith(".mp3"));
+            String summary = new String(archive.getInputStream(archive.getEntry("discogs-summary.csv")).readAllBytes());
+            assertThat(summary).contains("row_number,discogs_id,artist,title");
+            assertThat(summary).contains("\"123\",\"Artist / Name\",\"Title: One\"");
         } finally {
             Files.deleteIfExists(zip);
         }

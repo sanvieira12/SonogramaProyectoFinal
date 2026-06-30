@@ -68,4 +68,46 @@ class ZipBundleServiceTest {
             Files.deleteIfExists(zip);
         }
     }
+
+    @Test
+    void duplicateMediaEntryNamesAreRenamedInsteadOfFailing() throws Exception {
+        Path folder = tempDir.resolve("GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)");
+        Files.createDirectories(folder);
+        Files.writeString(folder.resolve("cover.jpg"), "cover");
+
+        VinylFutureAssetService assetService = new VinylFutureAssetService(tempDir.toString());
+        ZipBundleService zipBundleService = new ZipBundleService(assetService);
+        VinylPageData page = new VinylPageData(
+            "https://www.vinylfuture.com/gnd054__123",
+            "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "GND054",
+            null, null, null, null, "12", null, null, BigDecimal.ONE,
+            "/api/importar/vinylfuture/media/GND054%20-%20DJ%20Garth%20_%20Eti%20-%20Twenty%20Minutes%20Of%20Disco%20Glory%20(30th%20Anniversary%20reissue)/cover.jpg",
+            null,
+            List.of()
+        );
+        Map<InvoiceItem, Optional<VinylPageData>> pageData = new LinkedHashMap<>();
+        pageData.put(new InvoiceItem(
+            "GND054", "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "12",
+            new BigDecimal("14.99"), 2, new BigDecimal("29.98")), Optional.of(page));
+        pageData.put(new InvoiceItem(
+            "GND054", "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "12",
+            new BigDecimal("14.99"), 1, new BigDecimal("14.99")), Optional.of(page));
+
+        Path zip = zipBundleService.buildZip("codigo,artista\nGND054,DJ Garth\n", pageData);
+
+        try (ZipFile zipFile = new ZipFile(zip.toFile())) {
+            List<String> names = zipFile.stream().map(entry -> entry.getName()).toList();
+            String root = names.stream()
+                .filter(name -> name.startsWith("vinylfuture-export-") && name.endsWith("/import.csv"))
+                .findFirst()
+                .orElseThrow()
+                .replace("/import.csv", "");
+            assertThat(names).contains(
+                root + "/media/GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)/cover.jpg",
+                root + "/media/GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)/cover-2.jpg"
+            );
+        } finally {
+            Files.deleteIfExists(zip);
+        }
+    }
 }

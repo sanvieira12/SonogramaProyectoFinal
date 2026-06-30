@@ -23,7 +23,12 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         "SELECT TO_CHAR(fecha_venta, 'YYYY-MM') AS mes, " +
         "TO_CHAR(fecha_venta, 'Mon YY') AS etiqueta, " +
         "COUNT(*) AS cantidad, " +
-        "COALESCE(SUM(total), 0) AS total_monto " +
+        "COALESCE(SUM(CASE " +
+        "WHEN subtotal IS NOT NULL THEN subtotal * (100 - COALESCE(descuento_porcentaje, 0)) / 100 " +
+        "WHEN precio_venta IS NOT NULL THEN precio_venta " +
+        "WHEN total_final IS NOT NULL THEN GREATEST(total_final - COALESCE(costo_envio, 0), 0) " +
+        "WHEN total IS NOT NULL THEN GREATEST(total - COALESCE(costo_envio, 0), 0) " +
+        "ELSE 0 END), 0) AS total_monto " +
         "FROM venta " +
         "WHERE estado <> 'CANCELADA' " +
         "GROUP BY TO_CHAR(fecha_venta, 'YYYY-MM'), TO_CHAR(fecha_venta, 'Mon YY') " +

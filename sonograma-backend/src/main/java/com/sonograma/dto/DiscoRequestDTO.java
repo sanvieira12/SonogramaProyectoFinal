@@ -13,6 +13,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 @NoArgsConstructor
@@ -51,6 +52,14 @@ public class DiscoRequestDTO {
 
     @DecimalMin(value = "0.0", inclusive = false, message = "El costo debe ser mayor a 0")
     private BigDecimal costo;
+
+    @Size(max = 10)
+    private String costoMoneda;
+
+    @Size(max = 255)
+    private String numeroFacturaCompra;
+
+    private LocalDate fechaFacturaCompra;
 
     @DecimalMin(value = "0.0", inclusive = false, message = "El precio de venta debe ser mayor a 0")
     private BigDecimal precioVenta;

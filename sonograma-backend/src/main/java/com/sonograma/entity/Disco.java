@@ -7,6 +7,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -56,6 +57,15 @@ public class Disco {
 
     @Column(name = "costo", precision = 10, scale = 2)
     private BigDecimal costo;
+
+    @Column(name = "costo_moneda", length = 10)
+    private String costoMoneda;
+
+    @Column(name = "numero_factura_compra")
+    private String numeroFacturaCompra;
+
+    @Column(name = "fecha_factura_compra")
+    private LocalDate fechaFacturaCompra;
 
     @Column(name = "precio_venta", precision = 10, scale = 2)
     private BigDecimal precioVenta;

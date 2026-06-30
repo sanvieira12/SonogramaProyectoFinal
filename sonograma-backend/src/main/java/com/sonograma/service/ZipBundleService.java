@@ -18,10 +18,12 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -135,10 +137,11 @@ public class ZipBundleService {
             log.info("ZIP VinylFuture generation start: root='{}', target='{}'", root, zipPath);
             try (OutputStream fileOut = new BufferedOutputStream(Files.newOutputStream(zipPath));
                  ZipOutputStream zip = new ZipOutputStream(fileOut, StandardCharsets.UTF_8)) {
+                Set<String> usedEntryNames = new HashSet<>();
                 byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-                addEntry(zip, root + "/import.csv", csvBytes);
-                addEntry(zip, root + "/data/import.csv", csvBytes);
-                addEntry(zip, root + "/data/catalog.csv", csvBytes);
+                addEntry(zip, root + "/import.csv", csvBytes, usedEntryNames);
+                addEntry(zip, root + "/data/import.csv", csvBytes, usedEntryNames);
+                addEntry(zip, root + "/data/catalog.csv", csvBytes, usedEntryNames);
 
                 for (int albumIndex = 0; albumIndex < entries.size(); albumIndex++) {
                     InvoiceItem item = entries.get(albumIndex).getKey();
@@ -152,7 +155,7 @@ public class ZipBundleService {
                         String filename = relative != null && relative.contains("/")
                             ? relative.substring(relative.lastIndexOf('/') + 1)
                             : "cover." + guessExtension(page.frontImageUrl(), "jpg");
-                        addFileEntry(zip, folder + "/" + filename, imagePath);
+                        addFileEntry(zip, folder + "/" + filename, imagePath, usedEntryNames);
                     } else if (page.frontImageUrl() != null) {
                         missing.add("front image: " + page.frontImageUrl());
                     } else {
@@ -161,7 +164,7 @@ public class ZipBundleService {
 
                     for (TrackResult track : tracksByAlbum.getOrDefault(albumIndex, List.of())) {
                         if (track.path() != null) {
-                            addFileEntry(zip, folder + "/" + track.filename(), track.path());
+                            addFileEntry(zip, folder + "/" + track.filename(), track.path(), usedEntryNames);
                         } else {
                             missing.add("audio: " + track.filename());
                         }
@@ -171,7 +174,8 @@ public class ZipBundleService {
                         addEntry(
                             zip,
                             folder + "/missing.txt",
-                            String.join("\n", missing).getBytes(StandardCharsets.UTF_8)
+                            String.join("\n", missing).getBytes(StandardCharsets.UTF_8),
+                            usedEntryNames
                         );
                     }
                 }
@@ -222,16 +226,56 @@ public class ZipBundleService {
         }
     }
 
-    private void addFileEntry(ZipOutputStream zip, String name, Path file) throws IOException {
+    private void addFileEntry(ZipOutputStream zip, String desiredName, Path file, Set<String> usedNames) throws IOException {
+        String name = uniqueZipEntryName(desiredName, usedNames);
+        if (!name.equals(desiredName)) {
+            log.warn("ZIP VinylFuture duplicate media path renamed: '{}' -> '{}'", desiredName, name);
+        }
         zip.putNextEntry(new ZipEntry(name));
         Files.copy(file, zip);
         zip.closeEntry();
     }
 
-    private void addEntry(ZipOutputStream zip, String name, byte[] data) throws IOException {
+    private void addEntry(ZipOutputStream zip, String desiredName, byte[] data, Set<String> usedNames) throws IOException {
+        String name = uniqueZipEntryName(desiredName, usedNames);
+        if (!name.equals(desiredName)) {
+            log.warn("ZIP VinylFuture duplicate entry renamed: '{}' -> '{}'", desiredName, name);
+        }
         zip.putNextEntry(new ZipEntry(name));
         zip.write(data);
         zip.closeEntry();
+    }
+
+    String uniqueZipEntryName(String desiredName, Set<String> usedNames) {
+        String normalized = sanitizeZipEntryName(desiredName);
+        if (usedNames.add(normalized)) {
+            return normalized;
+        }
+        int slash = normalized.lastIndexOf('/');
+        String folder = slash >= 0 ? normalized.substring(0, slash + 1) : "";
+        String filename = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        int dot = filename.lastIndexOf('.');
+        String base = dot > 0 ? filename.substring(0, dot) : filename;
+        String extension = dot > 0 ? filename.substring(dot) : "";
+        for (int counter = 2; ; counter++) {
+            String candidate = folder + base + "-" + counter + extension;
+            if (usedNames.add(candidate)) {
+                return candidate;
+            }
+        }
+    }
+
+    private String sanitizeZipEntryName(String desiredName) {
+        String[] parts = desiredName.replace('\\', '/').split("/");
+        List<String> sanitizedParts = new ArrayList<>();
+        for (String part : parts) {
+            if (part == null || part.isBlank() || ".".equals(part) || "..".equals(part)) {
+                sanitizedParts.add("sin-nombre");
+                continue;
+            }
+            sanitizedParts.add(sanitizePath(part));
+        }
+        return String.join("/", sanitizedParts);
     }
 
     private String guessExtension(String url, String fallback) {

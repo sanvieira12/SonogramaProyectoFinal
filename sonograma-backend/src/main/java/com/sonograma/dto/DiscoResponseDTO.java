@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -26,6 +27,9 @@ public class DiscoResponseDTO {
     private String condicion;
     private String tipoDisco;
     private BigDecimal costo;
+    private String costoMoneda;
+    private String numeroFacturaCompra;
+    private LocalDate fechaFacturaCompra;
     private BigDecimal precioVenta;
     private String estado;
     private String pais;

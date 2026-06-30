@@ -22,6 +22,9 @@ public class DiscoMapper {
                 .condicion(disco.getCondicion() != null ? disco.getCondicion().name() : null)
                 .tipoDisco(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null)
                 .costo(disco.getCosto())
+                .costoMoneda(disco.getCostoMoneda())
+                .numeroFacturaCompra(disco.getNumeroFacturaCompra())
+                .fechaFacturaCompra(disco.getFechaFacturaCompra())
                 .precioVenta(disco.getPrecioVenta())
                 .estado(disco.getEstado() != null ? disco.getEstado().name() : null)
                 .pais(disco.getPais())
@@ -50,6 +53,9 @@ public class DiscoMapper {
                 .condicion(request.getCondicion())
                 .tipoDisco(request.getTipoDisco())
                 .costo(request.getCosto())
+                .costoMoneda(request.getCostoMoneda())
+                .numeroFacturaCompra(request.getNumeroFacturaCompra())
+                .fechaFacturaCompra(request.getFechaFacturaCompra())
                 .precioVenta(request.getPrecioVenta())
                 .pais(request.getPais())
                 .estilo(request.getEstilo())
@@ -74,6 +80,9 @@ public class DiscoMapper {
         if (request.getCondicion() != null) disco.setCondicion(request.getCondicion());
         if (request.getTipoDisco() != null) disco.setTipoDisco(request.getTipoDisco());
         if (request.getCosto() != null) disco.setCosto(request.getCosto());
+        if (request.getCostoMoneda() != null) disco.setCostoMoneda(request.getCostoMoneda());
+        if (request.getNumeroFacturaCompra() != null) disco.setNumeroFacturaCompra(request.getNumeroFacturaCompra());
+        if (request.getFechaFacturaCompra() != null) disco.setFechaFacturaCompra(request.getFechaFacturaCompra());
         if (request.getPrecioVenta() != null) disco.setPrecioVenta(request.getPrecioVenta());
         if (request.getPais() != null) disco.setPais(request.getPais());
         if (request.getEstilo() != null) disco.setEstilo(request.getEstilo());

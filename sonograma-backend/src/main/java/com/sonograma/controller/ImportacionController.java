@@ -113,6 +113,11 @@ public class ImportacionController {
         return ResponseEntity.ok(discogsImportJobService.retryRow(jobId, rowId));
     }
 
+    @PostMapping("/discogs/jobs/{jobId}/retry-pending")
+    public ResponseEntity<DiscogsImportJobDTO> discogsRetryPending(@PathVariable Long jobId) {
+        return ResponseEntity.ok(discogsImportJobService.retryPendingRows(jobId));
+    }
+
     @PostMapping("/discogs/jobs/{jobId}/importar")
     public ResponseEntity<DiscogsImportJobDTO> discogsImportar(@PathVariable Long jobId) {
         return ResponseEntity.ok(discogsImportJobService.importParsedRows(jobId));

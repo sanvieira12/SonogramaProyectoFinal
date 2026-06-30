@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Component
 @Slf4j
@@ -29,6 +30,8 @@ public class DiscogsApiClient {
 
     private static final String USER_AGENT =
             "SonogramaApp/1.0 +https://github.com/sanvieira12/SonogramaProyectoFinal";
+    private static final long AUTHENTICATED_MIN_DELAY_MS = 1_100;
+    private static final long UNAUTHENTICATED_MIN_DELAY_MS = 2_600;
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -52,7 +55,7 @@ public class DiscogsApiClient {
 
     @Autowired
     public DiscogsApiClient(ObjectMapper objectMapper) {
-        this(objectMapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(), 2);
+        this(objectMapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(), 1);
     }
 
     DiscogsApiClient(ObjectMapper objectMapper, HttpClient httpClient, int maxConcurrency) {
@@ -243,11 +246,19 @@ public class DiscogsApiClient {
         synchronized (throttleLock) {
             long now = System.currentTimeMillis();
             wait = Math.max(0, nextRequestAt - now);
-            nextRequestAt = Math.max(now, nextRequestAt) + requestDelayMs;
+            nextRequestAt = Math.max(now, nextRequestAt) + effectiveRequestDelayMs();
         }
         if (wait > 0) {
             Thread.sleep(wait);
         }
+    }
+
+    private long effectiveRequestDelayMs() {
+        if (requestDelayMs <= 0) return 0;
+        long minimum = discogsToken == null || discogsToken.isBlank()
+                ? UNAUTHENTICATED_MIN_DELAY_MS
+                : AUTHENTICATED_MIN_DELAY_MS;
+        return Math.max(requestDelayMs, minimum) + ThreadLocalRandom.current().nextLong(0, 201);
     }
 
     private long retryAfterMs(HttpResponse<?> response) {
@@ -268,15 +279,19 @@ public class DiscogsApiClient {
             }
         }
         Optional<String> remaining = response.headers().firstValue("X-Discogs-Ratelimit-Remaining");
-        if (remaining.isPresent() && "0".equals(remaining.get().trim())) {
-            return 5_000;
+        if (remaining.isPresent()) {
+            Optional<Long> remainingValue = parseLong(remaining.get());
+            if (remainingValue.isPresent() && remainingValue.get() <= 1) {
+                return effectiveRequestDelayMs() * 2;
+            }
         }
         return 0;
     }
 
     private void applyRateLimitHeaders(HttpResponse<?> response) {
         Optional<String> remaining = response.headers().firstValue("X-Discogs-Ratelimit-Remaining");
-        if (remaining.isEmpty() || !"0".equals(remaining.get().trim())) {
+        Optional<Long> remainingValue = remaining.flatMap(this::parseLong);
+        if (remainingValue.isEmpty() || remainingValue.get() > 1) {
             return;
         }
         long resetMs = response.headers().firstValue("X-Discogs-Ratelimit-Reset")

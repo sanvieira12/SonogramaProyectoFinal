@@ -213,6 +213,7 @@ export const api = {
       if (!res.ok) throw new Error(data?.message || text || 'Error procesando PDF')
       return data
     },
+    vinylfutureJob: (jobId) => request('GET', `/importar/vinylfuture/jobs/${encodeURIComponent(jobId)}`),
     vinylfutureCsv: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
@@ -368,6 +369,9 @@ export const api = {
 
     discogsRetryRow: (jobId, rowId) =>
       request('POST', `/importaciones/discogs/jobs/${jobId}/rows/${rowId}/retry`),
+
+    discogsRetryPending: (jobId) =>
+      request('POST', `/importaciones/discogs/jobs/${jobId}/retry-pending`),
 
     discogsImportarJob: (jobId) =>
       request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),

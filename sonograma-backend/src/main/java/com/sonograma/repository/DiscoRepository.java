@@ -20,6 +20,8 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
 
     Optional<Disco> findByCodigoInterno(String codigoInterno);
 
+    boolean existsByNumeroFacturaCompra(String numeroFacturaCompra);
+
     Optional<Disco> findByCodigoQr(String codigoQr);
 
     Optional<Disco> findByDiscogsUrl(String discogsUrl);

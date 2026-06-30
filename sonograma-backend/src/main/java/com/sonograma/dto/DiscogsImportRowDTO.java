@@ -2,6 +2,8 @@ package com.sonograma.dto;
 
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -19,6 +21,13 @@ public class DiscogsImportRowDTO {
     private Long resolvedReleaseId;
     private String artist;
     private String title;
+    private String rawCondition;
+    private String manualCondition;
+    private String rawPrice;
+    private BigDecimal manualPriceUyu;
+    private String manualGenre;
+    private String sourceStatus;
+    private String internalCode;
     private Integer year;
     private String genre;
     private String label;

@@ -45,6 +45,8 @@ public class PdfInvoiceParser {
         "^(.{2,40}?)\\s+-\\s+(.+?)-\\s+(.+?)\\s+([\\d.,]+)\\s+(\\d{1,4})\\s+([\\d.,]+).*$"
     );
 
+    private static final BigDecimal LINE_TOTAL_TOLERANCE = new BigDecimal("0.02");
+
     private static final Pattern TOTAL_LINE = Pattern.compile(
         "(?i)^.*?\\b(?:grand\\s+total|invoice\\s+total|total)\\b[^\\d]*([\\d.,]+)\\s*(?:EUR|€)?\\s*$"
     );
@@ -84,6 +86,14 @@ public class PdfInvoiceParser {
         "(?i)currency\\s*:\\s*([A-Z]{3})"
     );
 
+    private static final List<String> IGNORED_PREFIXES = List.of(
+        "invoice no", "date:", "invoice date", "page:", "from", "recipient", "shipping:",
+        "shipping method:", "payment:", "payment method:", "total weight:", "currency:",
+        "terms of sale:", "customs tariff", "eori", "description unit price quantity sum",
+        "note next page", "quantity", "postage:", "fees:", "net:", "vat.", "total:",
+        "shipper's signature", "bank", "iban", "bic", "ust-id", "commercial register"
+    );
+
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
         DateTimeFormatter.ofPattern("dd.MM.yyyy"),
         DateTimeFormatter.ofPattern("dd/MM/yyyy"),
@@ -114,9 +124,15 @@ public class PdfInvoiceParser {
 
             String[] lines = text.split("\\R");
 
+            boolean inSummary = false;
             for (String raw : lines) {
                 String line = raw.strip();
                 if (line.isEmpty()) continue;
+                if (isSummaryHeader(line)) {
+                    inSummary = true;
+                    continue;
+                }
+                if (inSummary || shouldIgnoreLine(line)) continue;
                 InvoiceItem item = tryParse(line);
                 if (item != null) {
                     items.add(item);
@@ -176,14 +192,32 @@ public class PdfInvoiceParser {
     // ── Item parsing ──────────────────────────────────────────────────────────
 
     private InvoiceItem tryParse(String line) {
+        if (shouldIgnoreLine(line)) return null;
         Matcher m = ITEM_LINE.matcher(line);
-        if (m.matches()) return buildItem(m);
+        if (m.matches()) return buildValidatedItem(m, line);
         Matcher ml = ITEM_LINE_LOOSE.matcher(line);
-        if (ml.matches()) return buildItem(ml);
+        if (ml.matches()) return buildValidatedItem(ml, line);
         return null;
     }
 
-    private InvoiceItem buildItem(Matcher matcher) {
+    private InvoiceItem buildValidatedItem(Matcher matcher, String sourceLine) {
+        BigDecimal unitPrice = parseMoney(matcher.group(4));
+        Integer quantity = parseQuantity(matcher.group(5));
+        BigDecimal lineTotal = parseMoney(matcher.group(6));
+        if (unitPrice == null || quantity == null || quantity <= 0 || lineTotal == null) {
+            log.debug("Línea de producto omitida por precio/cantidad inválida: {}", sourceLine);
+            return null;
+        }
+        BigDecimal expected = unitPrice.multiply(BigDecimal.valueOf(quantity));
+        if (expected.subtract(lineTotal).abs().compareTo(LINE_TOTAL_TOLERANCE) > 0) {
+            log.debug("Línea de producto omitida por total inconsistente: line='{}', expected={}, parsed={}",
+                sourceLine, expected, lineTotal);
+            return null;
+        }
+        if (shouldIgnoreLine(matcher.group(1)) || shouldIgnoreLine(matcher.group(2))) {
+            log.debug("Línea de producto omitida por prefijo reservado: {}", sourceLine);
+            return null;
+        }
         String descripcion = clean(matcher.group(3));
         String formato = detectFormato(descripcion);
         String album = removeFormato(descripcion, formato);
@@ -192,10 +226,18 @@ public class PdfInvoiceParser {
             clean(matcher.group(2)),
             album,
             formato,
-            parseMoney(matcher.group(4)),
-            Integer.valueOf(matcher.group(5)),
-            parseMoney(matcher.group(6))
+            unitPrice,
+            quantity,
+            lineTotal
         );
+    }
+
+    private Integer parseQuantity(String raw) {
+        try {
+            return Integer.valueOf(raw);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private String detectFormato(String album) {
@@ -223,9 +265,7 @@ public class PdfInvoiceParser {
     private SummaryData extractSummary(String[] lines) {
         for (int i = 0; i < lines.length - 1; i++) {
             String lower = lines[i].strip().toLowerCase(Locale.ROOT);
-            if (lower.contains("quantity") && lower.contains("postage")
-                    && lower.contains("fees") && lower.contains("net")
-                    && lower.contains("total")) {
+            if (isSummaryHeader(lower)) {
                 for (int j = i + 1; j < lines.length; j++) {
                     String val = lines[j].strip();
                     if (val.isEmpty()) continue;
@@ -254,6 +294,20 @@ public class PdfInvoiceParser {
             }
         }
         return null;
+    }
+
+    private boolean isSummaryHeader(String line) {
+        String lower = line == null ? "" : line.strip().toLowerCase(Locale.ROOT);
+        return lower.contains("quantity") && lower.contains("postage")
+            && lower.contains("fees") && lower.contains("net")
+            && lower.contains("total");
+    }
+
+    private boolean shouldIgnoreLine(String line) {
+        if (line == null || line.isBlank()) return true;
+        String lower = clean(line).toLowerCase(Locale.ROOT);
+        if (lower.matches("^page\\s+\\d+.*")) return true;
+        return IGNORED_PREFIXES.stream().anyMatch(lower::startsWith);
     }
 
     // ── Header extraction (best-effort) ──────────────────────────────────────

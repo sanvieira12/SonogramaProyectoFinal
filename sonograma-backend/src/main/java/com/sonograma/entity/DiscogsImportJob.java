@@ -27,6 +27,13 @@ public class DiscogsImportJob {
     @Column(name = "nombre_hoja", length = 255)
     private String nombreHoja;
 
+    @Column(name = "physical_excel_last_row")
+    private Integer physicalExcelLastRow;
+
+    @Column(name = "ignored_blank_rows", nullable = false)
+    @Builder.Default
+    private Integer ignoredBlankRows = 0;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default

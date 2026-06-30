@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CostosVentaServiceTest {
 
     @Test
-    void calcularIgnoraImpuestosOtrosCostosYCalculaGanancia() {
+    void calcularNoIncluyeEnvioEnTotalFinalYCalculaGananciaSobreProductos() {
         CostosVentaService service = new CostosVentaService();
         ReflectionTestUtils.setField(service, "porcentajeImpuestoDefault", new BigDecimal("10"));
         ReflectionTestUtils.setField(service, "otrosCostosDefault", new BigDecimal("50"));
@@ -31,7 +31,8 @@ class CostosVentaServiceTest {
         ResultadoCostoVentaDTO resultado = service.calcular(disco, request);
 
         assertThat(resultado.getMontoImpuesto()).isEqualByComparingTo("0.00");
-        assertThat(resultado.getTotalFinal()).isEqualByComparingTo("1200.00");
+        assertThat(resultado.getCostoEnvio()).isEqualByComparingTo("200.00");
+        assertThat(resultado.getTotalFinal()).isEqualByComparingTo("1000.00");
         assertThat(resultado.getGananciaEstimada()).isEqualByComparingTo("600.00");
     }
 }

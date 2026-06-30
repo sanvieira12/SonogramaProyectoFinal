@@ -70,7 +70,7 @@ public class ExcelExportService {
                 setMoney(row, 7, v.getPrecioVenta(), moneyStyle);
                 setMoney(row, 8, v.getCostoEnvio(), moneyStyle);
                 setMoney(row, 9, v.getMontoImpuesto(), moneyStyle);
-                setMoney(row, 10, v.getTotalFinal(), moneyStyle);
+                setMoney(row, 10, VentaTotals.totalProductos(v), moneyStyle);
                 setMoney(row, 11, v.getMontoPagado(), moneyStyle);
                 setMoney(row, 12, v.getMontoDeuda(), moneyStyle);
 
@@ -78,7 +78,7 @@ public class ExcelExportService {
                 setMoney(row, 14, v.getGananciaEstimada(), moneyStyle);
                 row.createCell(15).setCellValue(orEmpty(v.getObservaciones()));
 
-                if (v.getTotalFinal() != null) totalVentas = totalVentas.add(v.getTotalFinal());
+                totalVentas = totalVentas.add(VentaTotals.totalProductos(v));
                 if (v.getGananciaEstimada() != null) totalGanancia = totalGanancia.add(v.getGananciaEstimada());
             }
 

@@ -204,4 +204,85 @@ class PdfInvoiceParserTest {
         assertEquals("DE123456", invoice.eoriNo());
         assertTrue(invoice.rawExtractText().contains("Invoice No.: INV-42"));
     }
+
+    @Test
+    void parsesSampleDeejayInvoiceRowsAcrossTwoPagesStrictly() throws Exception {
+        byte[] pdf = buildPdf(
+            "deejay.de GmbH & Co. KG\n" +
+            "Invoice No.: 0031-188471\n" +
+            "Date: 30.06.2026\n" +
+            "Currency: EUR\n" +
+            "Page: 1\n" +
+            "Description Unit Price Quantity Sum\n" +
+            "AOP010 - Krijka- E-Tribes EP     11,39   2   22,78\n" +
+            "COMMUNIQUE011 - Invisible- The Next EP     10,49   1   10,49\n" +
+            "DBH-011 - Basic Bastard- Basic Bastard Vol. 3     10,49   1   10,49\n" +
+            "DE-338 - Hackney Electronica- Synaptic Shadows     12,99   3   38,97\n" +
+            "DHS999 - Dimensional Holofonic Sound aka Dhs- Holofonic Cuts (reissue)     15,29   5   76,45\n" +
+            "ED012 - djfix & Jek- unknown species     13,49   2   26,98\n" +
+            "GND054 - DJ Garth / Eti- Twenty Minutes Of Disco Glory (30th Anniversary reissue)     14,99   2   29,98\n" +
+            "GND054 - DJ Garth / Eti- Twenty Minutes Of Disco Glory (30th Anniversary reissue)     14,99   1   14,99\n" +
+            "HYPER02 - Caim- Dream Ritual EP     10,99   2   21,98\n" +
+            "MELCURE014 - Droxal- Spore Symphony EP     11,49   2   22,98\n" +
+            "MS05 - Chris Carrier- Parallel Effect     22,49   2   44,98\n" +
+            "NTCLASS006 - Orlando Voorn- Tronics     6,99   1   6,99\n" +
+            "PLNK006 - Natural Goofy & TC80- No Plan EP     10,99   1   10,99\n" +
+            "RX15 - BASIC BASTARD- DETROIT EP     11,49   2   22,98\n" +
+            "SMI-021 - SYT- Echo System / School Of Thought     14,49   2   28,98\n" +
+            "note next page",
+            "Page: 2\n" +
+            "Description Unit Price Quantity Sum\n" +
+            "SMI-021 - SYT- Echo System / School Of Thought     14,49   2   28,98\n" +
+            "TM029 - Jane Fitz, David Fogarty- Mysterious Vastness     22,89   1   22,89\n" +
+            "TRANS1006 - Señor Coconut- El Baile Alemán     24,29   2   48,58\n" +
+            "USR038 - Various- Various VII     11,09   2   22,18\n" +
+            "UTS16V - Lee Burton- Sinewaves     13,99   1   13,99\n" +
+            "VISLP001R - Random Factor- Too Fast Into The Future LP 2x12\"     26,79   1   26,79\n" +
+            "WRECKS303 - Various- WRECKS303     11,49   2   22,98\n" +
+            "ZAZù002 - Witness of Venus- Lost & Found LP     11,29   5   56,45\n" +
+            "Quantity  Postage:  Fees:  Net:  VAT. 7%:  VAT. 19%:  Total:\n" +
+            "45  158,15  40,17  832,17  0,00  0,00  832,17\n" +
+            "Shipper's Signature\n" +
+            "EORI-No.: DE123456"
+        );
+
+        ParsedInvoice invoice = parser.parseInvoice(pdf);
+
+        assertEquals(23, invoice.items().size());
+        assertEquals(45, invoice.items().stream().mapToInt(InvoiceItem::cantidad).sum());
+        assertEquals(Integer.valueOf(45), invoice.cantidadTotalPdf());
+        assertEquals("EUR", invoice.moneda());
+        assertEquals("0031-188471", invoice.numeroFactura());
+
+        InvoiceItem first = invoice.items().getFirst();
+        assertEquals("AOP010", first.codigoCatalogo());
+        assertEquals(new BigDecimal("11.39"), first.precioUnitario());
+        assertEquals(new BigDecimal("22.78"), first.subtotal());
+
+        int gndQty = invoice.items().stream()
+            .filter(item -> "GND054".equals(item.codigoCatalogo()))
+            .mapToInt(InvoiceItem::cantidad)
+            .sum();
+        int smiQty = invoice.items().stream()
+            .filter(item -> "SMI-021".equals(item.codigoCatalogo()))
+            .mapToInt(InvoiceItem::cantidad)
+            .sum();
+        assertEquals(3, gndQty);
+        assertEquals(4, smiQty);
+
+        InvoiceItem unicode = invoice.items().stream()
+            .filter(item -> "TRANS1006".equals(item.codigoCatalogo()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals("Señor Coconut", unicode.artista());
+        assertEquals("El Baile Alemán", unicode.album());
+
+        InvoiceItem doubleFormat = invoice.items().stream()
+            .filter(item -> "VISLP001R".equals(item.codigoCatalogo()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals("2x12\"", doubleFormat.formato());
+        assertEquals("Too Fast Into The Future LP", doubleFormat.album());
+        assertTrue(invoice.items().stream().noneMatch(item -> "Postage".equalsIgnoreCase(item.codigoCatalogo())));
+    }
 }

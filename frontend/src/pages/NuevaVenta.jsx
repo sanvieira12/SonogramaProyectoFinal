@@ -161,9 +161,9 @@ export default function NuevaVenta() {
     const descuento = subtotal * descuentoPct / 100
     const base = subtotal - descuento
     const envio = tipoEntrega === 'ENVIO' ? toNumber(costoEnvio) : 0
-    const totalFinal = base + envio
+    const totalFinal = base
     const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo), 0)
-    const ganancia = totalFinal - costoDisco - envio
+    const ganancia = totalFinal - costoDisco
     return { subtotal, descuento, base, envio, totalFinal, ganancia }
   }, [carrito, descuentoPct, costoEnvio, tipoEntrega])
 
@@ -284,7 +284,7 @@ export default function NuevaVenta() {
           idCliente: clienteSeleccionado.idCliente,
           idDisco: carrito[0].disco.idDisco,
           canalVenta,
-          total: Number(totales.totalFinal.toFixed(2)),
+          total: Number(totales.base.toFixed(2)),
           precioVenta: Number(totales.base.toFixed(2)),
           costoEnvio: Number(totales.envio.toFixed(2)),
           tipoEntrega,
@@ -309,7 +309,7 @@ export default function NuevaVenta() {
           })),
           descuentoPorcentaje: descuentoPct,
           canalVenta,
-          total: Number(totales.totalFinal.toFixed(2)),
+          total: Number(totales.base.toFixed(2)),
           costoEnvio: Number(totales.envio.toFixed(2)),
           tipoEntrega,
           medioPago: medioPago || null,
@@ -570,9 +570,9 @@ export default function NuevaVenta() {
             {carrito.length > 1 && <ResumenLinea label="Subtotal discos" value={money(totales.subtotal)} />}
             {descuentoPct > 0 && <ResumenLinea label={`Descuento ${descuentoPct}%`} value={`-${money(totales.descuento)}`} />}
             <ResumenLinea label="Precio neto" value={money(totales.base)} />
-            {tipoEntrega === 'ENVIO' && <ResumenLinea label="Costo de envío" value={money(totales.envio)} />}
+            {tipoEntrega === 'ENVIO' && <ResumenLinea label="Costo de envío: lo paga el cliente al retirar" value={money(totales.envio)} />}
             <div className="border-t border-slate-200 dark:border-stone-800 pt-2">
-              <ResumenLinea label="Total a cobrar" value={money(totales.totalFinal)} strong />
+              <ResumenLinea label="Total venta" value={money(totales.totalFinal)} strong />
             </div>
             {carrito.length > 0 && <ResumenLinea label="Ganancia estimada" value={money(totales.ganancia)} />}
           </div>

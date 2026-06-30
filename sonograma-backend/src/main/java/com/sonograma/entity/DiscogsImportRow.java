@@ -4,6 +4,8 @@ import com.sonograma.enums.DiscogsImportRowStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "discogs_import_row")
 @Data
@@ -53,6 +55,27 @@ public class DiscogsImportRow {
 
     @Column(name = "title", length = 500)
     private String title;
+
+    @Column(name = "raw_condition", length = 255)
+    private String rawCondition;
+
+    @Column(name = "manual_condition", length = 255)
+    private String manualCondition;
+
+    @Column(name = "raw_price", length = 255)
+    private String rawPrice;
+
+    @Column(name = "manual_price_uyu", precision = 10, scale = 2)
+    private BigDecimal manualPriceUyu;
+
+    @Column(name = "manual_genre", length = 255)
+    private String manualGenre;
+
+    @Column(name = "source_status", length = 50)
+    private String sourceStatus;
+
+    @Column(name = "internal_code", length = 255)
+    private String internalCode;
 
     @Column(name = "release_year")
     private Integer year;

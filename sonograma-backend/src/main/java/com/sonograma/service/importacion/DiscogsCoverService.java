@@ -12,6 +12,8 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.file.Files;
@@ -89,8 +91,10 @@ public class DiscogsCoverService {
     public Path buildZip(List<DiscogsImportRow> rows) throws IOException {
         Path zipPath = Files.createTempFile("discogs-covers-", ".zip");
         Set<Long> included = new HashSet<>();
+        Set<String> usedNames = new HashSet<>();
         try (OutputStream output = new BufferedOutputStream(Files.newOutputStream(zipPath));
              ZipOutputStream zip = new ZipOutputStream(output)) {
+            addSummary(zip, rows, usedNames);
             for (DiscogsImportRow row : rows) {
                 Long releaseId = row.getResolvedReleaseId() != null
                         ? row.getResolvedReleaseId()
@@ -106,10 +110,10 @@ public class DiscogsCoverService {
                 if (cover == null || !Files.isRegularFile(cover)) {
                     continue;
                 }
-                String filename = sanitize(row.getArtist()) + " - "
-                        + sanitize(row.getTitle()) + " - " + releaseId
+                String filename = releaseId + " - " + sanitize(row.getArtist())
+                        + " - " + sanitize(row.getTitle())
                         + extensionWithDot(cover);
-                zip.putNextEntry(new ZipEntry(filename));
+                zip.putNextEntry(new ZipEntry(uniqueZipEntryName(filename, usedNames)));
                 Files.copy(cover, zip);
                 zip.closeEntry();
             }
@@ -118,6 +122,65 @@ public class DiscogsCoverService {
             throw ex;
         }
         return zipPath;
+    }
+
+    private void addSummary(ZipOutputStream zip, List<DiscogsImportRow> rows, Set<String> usedNames) throws IOException {
+        StringBuilder csv = new StringBuilder();
+        csv.append("row_number,discogs_id,artist,title,price_uyu,condition_grade,status,metadata_status,cover_status,imported_catalog_id,qr_id\n");
+        for (DiscogsImportRow row : rows) {
+            csv.append(csv(row.getSourceExcelRowNumber())).append(',')
+                    .append(csv(firstNonNull(row.getResolvedReleaseId(), row.getDiscogsId()))).append(',')
+                    .append(csv(row.getArtist())).append(',')
+                    .append(csv(row.getTitle())).append(',')
+                    .append(csv(row.getManualPriceUyu())).append(',')
+                    .append(csv(row.getManualCondition())).append(',')
+                    .append(csv(row.getSourceStatus())).append(',')
+                    .append(csv(row.getStatus())).append(',')
+                    .append(csv(row.getImageUrl() != null && row.getImageUrl().contains("/discogs/covers/")
+                            ? "downloaded"
+                            : "missing")).append(',')
+                    .append(csv(row.getImportedCatalogProduct() == null
+                            ? null
+                            : row.getImportedCatalogProduct().getIdDisco())).append(',')
+                    .append(csv(row.getImportedCatalogProduct() == null
+                            ? null
+                            : row.getImportedCatalogProduct().getCodigoQr()))
+                    .append('\n');
+        }
+        zip.putNextEntry(new ZipEntry(uniqueZipEntryName("discogs-summary.csv", usedNames)));
+        zip.write(csv.toString().getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
+    }
+
+    private Long firstNonNull(Long first, Long second) {
+        return first == null ? second : first;
+    }
+
+    private String csv(Object value) {
+        if (value == null) return "";
+        String text = value instanceof BigDecimal decimal
+                ? decimal.stripTrailingZeros().toPlainString()
+                : String.valueOf(value);
+        return "\"" + text.replace("\"", "\"\"") + "\"";
+    }
+
+    private String uniqueZipEntryName(String desiredName, Set<String> usedNames) {
+        String sanitized = sanitizeZipPath(desiredName);
+        if (usedNames.add(sanitized)) return sanitized;
+        int dot = sanitized.lastIndexOf('.');
+        String base = dot >= 0 ? sanitized.substring(0, dot) : sanitized;
+        String extension = dot >= 0 ? sanitized.substring(dot) : "";
+        int suffix = 2;
+        String candidate;
+        do {
+            candidate = base + "-" + suffix++ + extension;
+        } while (!usedNames.add(candidate));
+        return candidate;
+    }
+
+    private String sanitizeZipPath(String value) {
+        String sanitized = value.replaceAll("[/\\\\:*?\"<>|]", "_").strip();
+        return sanitized.isBlank() ? "archivo" : sanitized;
     }
 
     private void downloadTo(String imageUrl, Path target) throws IOException {

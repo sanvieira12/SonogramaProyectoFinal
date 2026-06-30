@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/sonograma'
 
 function Spinner({ text }) {
@@ -213,17 +213,59 @@ function LinkSingle() {
 
 // ── Sub-section B: Excel with Discogs links ───────────────────────────────────
 
+function stepLabel(job, estado, processing) {
+  if (estado === 'loading') return 'Leyendo Excel'
+  if (estado === 'saving') return 'Importando al catálogo'
+  if (!job) return 'Validando filas'
+  if (processing && job.rateLimited > 0) return 'Esperando límite de Discogs'
+  if (processing && (job.metadataPending || job.pending)) return 'Consultando Discogs'
+  if ((job.coversDownloaded || 0) > 0 && (job.readyToImport || 0) > 0) return 'Listo para importar'
+  if ((job.imported || 0) > 0 && (job.qrEntriesCreated || 0) >= (job.imported || 0)) return 'Completado'
+  if ((job.metadataFetched || 0) > 0) return 'Descargando portadas'
+  return 'Validando filas'
+}
+
+function statusLabel(row) {
+  if (row.status === 'pending_retry') return 'Pendiente de reintento'
+  if (row.status === 'fetching_discogs') return 'Consultando Discogs'
+  if (row.status === 'parsed' && row.resolvedReleaseId) return row.imageUrl ? 'Metadata obtenida' : 'Portada faltante'
+  if (row.status === 'parsed') return 'Metadata pendiente'
+  if (row.status === 'sold') return 'Fila vendida omitida'
+  if (row.status === 'reserved') return 'Fila reservada omitida'
+  if (row.status === 'failed') return 'Fallida'
+  if (row.status === 'ignored') return 'Link inválido'
+  if (row.status === 'needs_manual_match') return 'Match manual'
+  if (row.status === 'imported') return 'Importada'
+  return row.status || '—'
+}
+
 function ExcelLinks() {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle')
   const [job, setJob] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [filter, setFilter] = useState('all')
   const inputRef = useRef(null)
 
   const processing = job && ['pending', 'processing'].includes(job.status)
-  const readyCount = job?.rows?.filter(row =>
-    ['parsed', 'rate_limited'].includes(row.status) && !row.importedCatalogProductId
-  ).length || 0
+  const readyCount = job?.readyToImport || 0
+  const rows = job?.rows || []
+  const filteredRows = useMemo(() => rows.filter(row => {
+    if (filter === 'all') return true
+    if (filter === 'available') return row.sourceStatus === 'DISPONIBLE' && !['sold', 'reserved'].includes(row.status)
+    if (filter === 'sold') return row.status === 'sold'
+    if (filter === 'reserved') return row.status === 'reserved'
+    if (filter === 'invalid') return ['ignored', 'needs_manual_match'].includes(row.status)
+    if (filter === 'pending') return ['pending', 'parsed', 'fetching_discogs', 'pending_retry'].includes(row.status) && !row.resolvedReleaseId
+    if (filter === 'failed') return ['failed', 'pending_retry', 'rate_limited'].includes(row.status)
+    if (filter === 'imported') return row.status === 'imported'
+    return true
+  }), [rows, filter])
+
+  const progressTotal = Math.max(job?.realRowsRead || job?.totalRowsRead || 0, 1)
+  const progressDone = Math.min(progressTotal, (job?.metadataFetched || 0) + (job?.invalidRows || 0) + (job?.soldRows || 0) + (job?.reservedRows || 0))
+  const progressPct = Math.round((progressDone / progressTotal) * 100)
+  const currentStep = stepLabel(job, estado, processing)
 
   useEffect(() => {
     if (!processing) return undefined
@@ -268,6 +310,15 @@ function ExcelLinks() {
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'No se pudo reintentar la fila')
+    }
+  }
+
+  async function retryPending() {
+    try {
+      setJob(await api.importaciones.discogsRetryPending(job.id))
+      setEstado('preview')
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudieron reintentar las filas pendientes')
     }
   }
 
@@ -339,25 +390,40 @@ function ExcelLinks() {
             {processing && <Spinner text="Enriqueciendo…" />}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-stone-400">
+              <span>{currentStep}</span>
+              <span>{progressPct}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 dark:bg-stone-800 overflow-hidden">
+              <div className="h-full bg-[#5C7D87] transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-2">
             {[
-              ['Filas leídas', job.totalRowsRead],
-              ['Release URLs', job.validReleaseUrls],
-              ['Master URLs', job.validMasterUrls],
-              ['Hipervínculos', job.embeddedHyperlinkRows],
-              ['Match manual', job.needsManualMatch],
-              ['Ignoradas', job.ignored],
-              ['Fallidas', job.failed],
+              ['Filas reales', job.realRowsRead ?? job.totalRowsRead],
+              ['Filas vacías ignoradas', job.blankRowsIgnored],
+              ['Release IDs', job.validReleaseUrls],
+              ['Master IDs', job.validMasterUrls],
+              ['Texto Discogs [rID]', job.visibleDiscogsTextRows],
+              ['URLs directas', job.directUrlRows],
+              ['Vendidos', job.soldRows],
+              ['Reservados', job.reservedRows],
+              ['Disponibles', job.availableRows],
+              ['Inválidos', job.invalidRows],
+              ['Metadata obtenida', job.metadataFetched],
+              ['Metadata pendiente', job.metadataPending],
               ['Rate limited', job.rateLimited],
-              ['Importadas', job.imported],
-              ['Portadas', job.coversDownloaded],
-              ['MP3', job.mp3PreviewsFound],
+              ['Portadas descargadas', job.coversDownloaded],
+              ['Portadas faltantes', job.coversMissing],
               ['YouTube', job.youtubeLinksFound],
+              ['Listos para importar', job.readyToImport],
+              ['Importados', job.imported],
               ['QR creados', job.qrEntriesCreated],
-              ['Pendientes', job.pending],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-slate-200 dark:border-stone-800 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                <p className="text-[10px] uppercase text-slate-400 dark:text-stone-500">{label}</p>
                 <p className="text-lg font-bold text-slate-900 dark:text-white">{value || 0}</p>
               </div>
             ))}
@@ -366,22 +432,43 @@ function ExcelLinks() {
           {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
           {job.rateLimited > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-              Discogs limitó temporalmente algunas solicitudes. Esos ítems pueden importarse parcialmente y quedan pendientes de reintentar metadata.
+              Discogs limitó temporalmente algunas solicitudes. Esas filas quedan pendientes y no se importan hasta reintentar metadata.
             </div>
           )}
+
+          <div className="flex flex-wrap gap-2">
+            {[
+              ['all', 'All'],
+              ['available', 'Available'],
+              ['sold', 'Sold'],
+              ['reserved', 'Reserved'],
+              ['invalid', 'Invalid'],
+              ['pending', 'Metadata pending'],
+              ['failed', 'Failed'],
+              ['imported', 'Imported'],
+            ].map(([key, label]) => (
+              <button key={key} onClick={() => setFilter(key)}
+                className={`px-3 py-1.5 rounded-md border text-xs transition-colors
+                  ${filter === key
+                    ? 'border-[#5C7D87] bg-[#5C7D87] text-white'
+                    : 'border-slate-200 dark:border-stone-700 text-slate-600 dark:text-stone-300 hover:bg-slate-50 dark:hover:bg-stone-900'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-stone-800">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950">
-                  {['Fila', 'URL extraída', 'Fuente', 'Tipo / ID', 'Artista / Título', 'Estado', 'Detalle', ''].map(h => (
+                  {['Fila', 'URL extraída', 'Fuente', 'Tipo / ID', 'Artista / Título', 'Excel', 'Estado', 'Detalle', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-                {job.rows?.map(row => (
-                  <tr key={row.id} className={['failed', 'rate_limited'].includes(row.status) ? 'bg-red-50 dark:bg-red-900/10' : ''}>
+                {filteredRows.map(row => (
+                  <tr key={row.id} className={['failed', 'rate_limited', 'pending_retry'].includes(row.status) ? 'bg-red-50 dark:bg-red-900/10' : ''}>
                     <td className="px-3 py-2 font-mono">{row.sourceExcelRowNumber}</td>
                     <td className="px-3 py-2 max-w-[240px]">
                       {row.normalizedDiscogsUrl ? (
@@ -402,10 +489,15 @@ function ExcelLinks() {
                       <div className="font-medium text-slate-800 dark:text-stone-200">{row.artist || '—'}</div>
                       <div className="text-slate-500 dark:text-stone-500">{row.title || '—'}</div>
                     </td>
-                    <td className="px-3 py-2">{row.status}</td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500">
+                      <div>{row.manualCondition || '—'} · {row.manualPriceUyu ? `$${row.manualPriceUyu}` : 'sin precio'}</div>
+                      <div>{row.manualGenre || '—'} · {row.sourceStatus || '—'}</div>
+                      {row.internalCode && <div className="font-mono">{row.internalCode}</div>}
+                    </td>
+                    <td className="px-3 py-2">{statusLabel(row)}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500 max-w-[240px]">{row.errorMessage || '—'}</td>
                     <td className="px-3 py-2">
-                      {['failed', 'rate_limited'].includes(row.status) && (
+                      {['failed', 'rate_limited', 'pending_retry'].includes(row.status) && (
                         <button onClick={() => retryRow(row.id)}
                           className="text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">
                           Reintentar
@@ -417,10 +509,14 @@ function ExcelLinks() {
               </tbody>
             </table>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button onClick={importarDisponibles} disabled={readyCount === 0 || processing || estado === 'saving'}
               className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
               {estado === 'saving' ? 'Importando…' : `Importar al catálogo (${readyCount})`}
+            </button>
+            <button onClick={retryPending} disabled={processing || !(job.metadataPending || job.rateLimited || job.failed)}
+              className="px-5 py-2.5 rounded-lg border border-[#7E9FA8]/50 text-[#5C7D87] dark:text-[#7E9FA8] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              Reintentar metadata pendiente
             </button>
             <button onClick={descargarPortadas} disabled={!job.coversDownloaded}
               className="px-5 py-2.5 rounded-lg border border-[#7E9FA8]/50 text-[#5C7D87] dark:text-[#7E9FA8] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
