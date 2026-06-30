@@ -2,6 +2,7 @@ package com.sonograma.entity;
 
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import jakarta.persistence.*;
 import lombok.*;
@@ -69,6 +70,14 @@ public class Disco {
 
     @Column(name = "precio_venta", precision = 10, scale = 2)
     private BigDecimal precioVenta;
+
+    @Column(name = "formato", length = 120)
+    private String formato;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "pricing_mode", nullable = false, length = 20)
+    @Builder.Default
+    private PricingMode pricingMode = PricingMode.AUTO;
 
     // DISPONIBLE, RESERVADO, VENDIDO, SIN_STOCK
     @Enumerated(EnumType.STRING)

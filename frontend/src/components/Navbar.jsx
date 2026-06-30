@@ -76,6 +76,7 @@ export default function Navbar({ usuario }) {
               </span>
             </NavLink>
             <NavLink to="/discos" className={navLinkClass}>Catálogo</NavLink>
+            <NavLink to="/stock" className={navLinkClass}>Stock</NavLink>
             <NavLink to="/clientes" className={navLinkClass}>Clientes</NavLink>
             <NavLink to="/ventas/nueva" className={navLinkClass}>Nueva venta</NavLink>
             <NavLink to="/importar" className={navLinkClass}>Importar</NavLink>

@@ -21,11 +21,13 @@ public class DiscoMapper {
                 .anio(disco.getAnio())
                 .condicion(disco.getCondicion() != null ? disco.getCondicion().name() : null)
                 .tipoDisco(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null)
+                .formato(disco.getFormato())
                 .costo(disco.getCosto())
                 .costoMoneda(disco.getCostoMoneda())
                 .numeroFacturaCompra(disco.getNumeroFacturaCompra())
                 .fechaFacturaCompra(disco.getFechaFacturaCompra())
                 .precioVenta(disco.getPrecioVenta())
+                .pricingMode(disco.getPricingMode() != null ? disco.getPricingMode().name() : null)
                 .estado(disco.getEstado() != null ? disco.getEstado().name() : null)
                 .pais(disco.getPais())
                 .estilo(disco.getEstilo())
@@ -52,11 +54,13 @@ public class DiscoMapper {
                 .anio(request.getAnio())
                 .condicion(request.getCondicion())
                 .tipoDisco(request.getTipoDisco())
+                .formato(request.getFormato())
                 .costo(request.getCosto())
                 .costoMoneda(request.getCostoMoneda())
                 .numeroFacturaCompra(request.getNumeroFacturaCompra())
                 .fechaFacturaCompra(request.getFechaFacturaCompra())
                 .precioVenta(request.getPrecioVenta())
+                .pricingMode(request.getPricingMode())
                 .pais(request.getPais())
                 .estilo(request.getEstilo())
                 .tracklist(request.getTracklist())
@@ -79,11 +83,13 @@ public class DiscoMapper {
         if (request.getAnio() != null) disco.setAnio(request.getAnio());
         if (request.getCondicion() != null) disco.setCondicion(request.getCondicion());
         if (request.getTipoDisco() != null) disco.setTipoDisco(request.getTipoDisco());
+        if (request.getFormato() != null) disco.setFormato(request.getFormato());
         if (request.getCosto() != null) disco.setCosto(request.getCosto());
         if (request.getCostoMoneda() != null) disco.setCostoMoneda(request.getCostoMoneda());
         if (request.getNumeroFacturaCompra() != null) disco.setNumeroFacturaCompra(request.getNumeroFacturaCompra());
         if (request.getFechaFacturaCompra() != null) disco.setFechaFacturaCompra(request.getFechaFacturaCompra());
         if (request.getPrecioVenta() != null) disco.setPrecioVenta(request.getPrecioVenta());
+        if (request.getPricingMode() != null) disco.setPricingMode(request.getPricingMode());
         if (request.getPais() != null) disco.setPais(request.getPais());
         if (request.getEstilo() != null) disco.setEstilo(request.getEstilo());
         if (request.getTracklist() != null) disco.setTracklist(request.getTracklist());

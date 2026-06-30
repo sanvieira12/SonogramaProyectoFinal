@@ -376,9 +376,11 @@ public class DiscogsImportJobService {
                 .anio(row.getYear())
                 .condicion(CondicionDisco.USADO)
                 .tipoDisco(parseFormat(row.getFormat()))
+                .formato(row.getFormat())
                 .estado(EstadoDisco.DISPONIBLE)
                 .cantidadCopias(1)
                 .precioVenta(row.getManualPriceUyu())
+                .pricingMode(row.getManualPriceUyu() != null ? PricingMode.MANUAL : PricingMode.AUTO)
                 .pais(row.getCountry())
                 .estilo(row.getStyle())
                 .tracklist(row.getTracklist())
@@ -419,8 +421,12 @@ public class DiscogsImportJobService {
         disco.setProcedencia("DISCOGS");
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCantidadCopias(1);
+        disco.setFormato(row.getFormat());
         if (!blank(row.getInternalCode())) disco.setCodigoInterno(row.getInternalCode());
-        if (row.getManualPriceUyu() != null) disco.setPrecioVenta(row.getManualPriceUyu());
+        if (row.getManualPriceUyu() != null) {
+            disco.setPrecioVenta(row.getManualPriceUyu());
+            disco.setPricingMode(PricingMode.MANUAL);
+        }
         if (row.getResolvedReleaseId() != null) {
             disco.setTipoDisco(parseFormat(row.getFormat()));
             disco.setNotas(catalogNotes(row));

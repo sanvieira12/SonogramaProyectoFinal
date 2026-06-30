@@ -26,11 +26,16 @@ public class DiscoService {
     private final DiscoRepository discoRepository;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
+    private final CatalogPricingService catalogPricingService;
 
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
+        if (disco.getPricingMode() == null) {
+            disco.setPricingMode(com.sonograma.enums.PricingMode.AUTO);
+        }
+        catalogPricingService.applyPricingToDisco(disco, request);
         return saveWithQr(disco);
     }
 
@@ -85,6 +90,7 @@ public class DiscoService {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         DiscoMapper.updateFromRequest(disco, request);
+        catalogPricingService.applyPricingToDisco(disco, request);
         return saveWithQr(disco);
     }
 
@@ -147,6 +153,7 @@ public class DiscoService {
             qrCopyService.synchronize(disco);
         }
         DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
+        catalogPricingService.enrichDiscoResponse(disco, dto);
         dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
         dto.setQrCopies(qrCopyService.listDtos(disco));
         return dto;

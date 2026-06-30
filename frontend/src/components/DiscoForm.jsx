@@ -9,7 +9,7 @@ const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTIN
 
 const VACIO = {
   codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
-  condicion: 'NUEVO', tipoDisco: 'VINILO', costo: '', precioVenta: '', estado: 'DISPONIBLE', imagenUrl: '',
+  condicion: 'NUEVO', tipoDisco: 'VINILO', formato: '', costo: '', precioVenta: '', pricingMode: 'AUTO', estado: 'DISPONIBLE', imagenUrl: '',
 }
 
 function resizarBase64(file, maxPx = 400) {
@@ -214,8 +214,10 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           anio: disco.anio || '',
           condicion: disco.condicion || 'NUEVO',
           tipoDisco: disco.tipoDisco || 'VINILO',
+          formato: disco.formato || '',
           costo: disco.costo || '',
           precioVenta: disco.precioVenta || '',
+          pricingMode: disco.pricingMode || 'AUTO',
           estado: disco.estado || 'DISPONIBLE',
           imagenUrl: disco.imagenUrl || '',
         }
@@ -241,6 +243,12 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
         anio: form.anio ? parseInt(form.anio) : null,
         costo: form.costo ? parseFloat(form.costo) : null,
         precioVenta: form.precioVenta ? parseFloat(form.precioVenta) : null,
+      }
+      const initialPrice = disco?.precioVenta != null ? Number(disco.precioVenta) : null
+      const nextPrice = form.precioVenta !== '' ? Number(form.precioVenta) : null
+      payload.pricingMode = form.pricingMode || 'AUTO'
+      if ((nextPrice != null && initialPrice == null) || (nextPrice != null && initialPrice != null && nextPrice !== initialPrice)) {
+        payload.pricingMode = 'MANUAL'
       }
       await onGuardar(payload)
     } catch (err) {
@@ -295,7 +303,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Código</label>
               <input value={form.codigoInterno} onChange={e => set('codigoInterno', e.target.value)} className="input" placeholder="ABC001" />
@@ -333,6 +341,10 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
               <select value={form.tipoDisco} onChange={e => set('tipoDisco', e.target.value)} className="input">
                 {TIPOS.map(t => <option key={t}>{t}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Formato</label>
+              <input value={form.formato} onChange={e => set('formato', e.target.value)} className="input" placeholder='LP, 2x12", 3LP, Box Set' />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Estado</label>

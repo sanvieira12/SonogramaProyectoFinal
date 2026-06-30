@@ -1,6 +1,7 @@
 package com.sonograma.dto;
 
 import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -50,6 +51,9 @@ public class DiscoRequestDTO {
     @NotNull(message = "El tipo de disco es obligatorio")
     private TipoDisco tipoDisco;
 
+    @Size(max = 120)
+    private String formato;
+
     @DecimalMin(value = "0.0", inclusive = false, message = "El costo debe ser mayor a 0")
     private BigDecimal costo;
 
@@ -63,6 +67,8 @@ public class DiscoRequestDTO {
 
     @DecimalMin(value = "0.0", inclusive = false, message = "El precio de venta debe ser mayor a 0")
     private BigDecimal precioVenta;
+
+    private PricingMode pricingMode;
 
     @Size(max = 100)
     private String pais;

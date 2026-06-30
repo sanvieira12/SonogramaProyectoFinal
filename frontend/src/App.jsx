@@ -12,6 +12,8 @@ import Pedidos from './pages/Pedidos'
 import PedidoDetalle from './pages/PedidoDetalle'
 import Notas from './pages/Notas'
 import Navbar from './components/Navbar'
+import StockLayout from './components/StockLayout'
+import PricingSettingsPage from './pages/PricingSettingsPage'
 import { api } from './api/sonograma'
 
 function PrivateRoute() {
@@ -67,6 +69,11 @@ export default function App() {
             <Route path="/clientes" element={<Clientes />} />
             <Route path="/ventas/nueva" element={<NuevaVenta />} />
             <Route path="/importar" element={<Importar />} />
+            <Route path="/stock" element={<StockLayout />}>
+              <Route index element={<Navigate to="/stock/catalogo" replace />} />
+              <Route path="catalogo" element={<DiscosCatalogo />} />
+              <Route path="pricing" element={<PricingSettingsPage />} />
+            </Route>
             <Route path="/deudas" element={<Deudas />} />
             <Route path="/libro-ventas" element={<LibroVentas />} />
             <Route path="/pedidos" element={<Pedidos />} />

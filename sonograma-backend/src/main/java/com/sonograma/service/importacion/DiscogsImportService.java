@@ -6,6 +6,7 @@ import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
@@ -109,6 +110,7 @@ public class DiscogsImportService {
                 .estado(EstadoDisco.DISPONIBLE.name())
                 .condicion(CondicionDisco.USADO.name())
                 .cantidadCopias(1)
+                .procedencia("DISCOGS")
                 .notas(cover.warning() == null ? null : "Portada: " + cover.warning())
                 .errores(new ArrayList<>())
                 .build();
@@ -132,6 +134,7 @@ public class DiscogsImportService {
         request.setAnio(preview.getAnio());
         request.setPrecioVenta(preview.getPrecioVenta());
         request.setCosto(preview.getCosto());
+        request.setFormato(preview.getFormato());
         request.setCantidadCopias(preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1);
         request.setTracklist(preview.getTracklist());
         request.setImagenUrl(preview.getImagenUrl());
@@ -140,6 +143,7 @@ public class DiscogsImportService {
         request.setCodigoInterno(preview.getCodigoInterno());
         request.setNotas(preview.getNotas());
         request.setProcedencia(preview.getProcedencia());
+        request.setPricingMode(preview.getPrecioVenta() != null ? PricingMode.MANUAL : PricingMode.AUTO);
         request.setCondicion(parseCondition(preview.getCondicion()));
         request.setTipoDisco(parseFormat(preview.getFormato()));
         return request;

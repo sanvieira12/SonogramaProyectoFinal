@@ -4,6 +4,7 @@ import com.sonograma.dto.DiscoImportPreviewDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
@@ -121,8 +122,11 @@ public class VinylFutureImportService {
                 DiscoRequestDTO req = mapearARequest(preview);
                 if (req.getPrecioVenta() == null && req.getCosto() != null) {
                     CatalogPricingService.PricingResult pricing =
-                        catalogPricingService.calcular(req.getCosto(), preview.getFormato());
-                    if (pricing != null) req.setPrecioVenta(pricing.salePriceUyu());
+                        catalogPricingService.calculate(req.getCosto(), preview.getFormato());
+                    if (pricing != null) req.setPrecioVenta(pricing.finalPriceUyu());
+                    req.setPricingMode(PricingMode.AUTO);
+                } else if (req.getPrecioVenta() != null) {
+                    req.setPricingMode(PricingMode.MANUAL);
                 }
                 com.sonograma.entity.Disco disco = DiscoMapper.toEntity(req);
                 disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
@@ -246,6 +250,7 @@ public class VinylFutureImportService {
         req.setAnio(preview.getAnio());
         req.setPrecioVenta(preview.getPrecioVenta());
         req.setCosto(preview.getCosto());
+        req.setFormato(preview.getFormato());
         req.setCantidadCopias(preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1);
         req.setTracklist(preview.getTracklist());
         req.setImagenUrl(preview.getImagenUrl());

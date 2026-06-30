@@ -12,6 +12,7 @@ import com.sonograma.dto.VinylFutureImportSummaryDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.enums.VinylFutureImportJobStatus;
 import com.sonograma.repository.DiscoRepository;
@@ -404,7 +405,7 @@ public class ImportController {
         java.math.BigDecimal cost = item.precioUnitario() != null
             ? item.precioUnitario()
             : (page != null ? page.purchasePrice() : null);
-        CatalogPricingService.PricingResult pricing = catalogPricingService.calcular(cost, format);
+        CatalogPricingService.PricingResult pricing = catalogPricingService.calculate(cost, format);
 
         Disco disco = new Disco();
         disco.setArtista(page != null ? firstNonBlank(page.artist(), item.artista()) : item.artista());
@@ -418,9 +419,11 @@ public class ImportController {
         disco.setCantidadCopias(item.cantidad() != null ? item.cantidad() : 1);
         disco.setCosto(cost);
         disco.setCostoMoneda("EUR");
+        disco.setFormato(format);
         disco.setNumeroFacturaCompra(invoice.numeroFactura());
         disco.setFechaFacturaCompra(invoice.fechaFactura());
-        disco.setPrecioVenta(pricing != null ? pricing.salePriceUyu() : null);
+        disco.setPrecioVenta(pricing != null ? pricing.finalPriceUyu() : null);
+        disco.setPricingMode(PricingMode.AUTO);
         if (page != null) {
             disco.setSelloDiscografico(page.label());
             disco.setGenero(page.genre());

@@ -142,6 +142,14 @@ export const api = {
     },
   },
 
+  pricing: {
+    settings: () => request('GET', '/pricing/settings'),
+    updateSettings: (settings) => request('PUT', '/pricing/settings', settings),
+    preview: (settings) => request('POST', '/pricing/preview', { settings }),
+    apply: (settings, scope) => request('POST', '/pricing/apply', { settings, scope }),
+    reset: () => request('POST', '/pricing/reset'),
+  },
+
   clientes: {
     todos: () => request('GET', '/clientes'),
     porId: (id) => request('GET', `/clientes/${id}`),

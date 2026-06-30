@@ -179,12 +179,13 @@ public class PedidoService {
     public PedidoResponseDTO actualizarConfiguracion(Long id, PedidoConfiguracionDTO cfg) {
         Pedido pedido = pedidoRepository.findById(id)
             .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+        PricingSettingsDTO settings = catalogPricingService.getSettingsDto();
 
-        pedido.setTipoCambio(CatalogPricingService.TIPO_CAMBIO);
-        pedido.setExtraCostoSimple(CatalogPricingService.EXTRA_SIMPLE);
-        pedido.setExtraCostoDoble(CatalogPricingService.EXTRA_DOBLE);
-        pedido.setMarkupSimple(CatalogPricingService.MARKUP_SIMPLE);
-        pedido.setMarkupDoble(CatalogPricingService.MARKUP_DOBLE);
+        pedido.setTipoCambio(settings.eurUyuRate());
+        pedido.setExtraCostoSimple(settings.extraCostSingleEur());
+        pedido.setExtraCostoDoble(settings.extraCostDoubleEur());
+        pedido.setMarkupSimple(settings.markupSingle());
+        pedido.setMarkupDoble(settings.markupDouble());
 
         pedidoRepository.save(pedido);
         recalcularItems(pedido);
@@ -200,13 +201,13 @@ public class PedidoService {
 
     private void calcularItem(PedidoItem item) {
         CatalogPricingService.PricingResult result =
-            catalogPricingService.calcular(item.getPrecioUnitarioEur(), item.getFormato());
+            catalogPricingService.calculate(item.getPrecioUnitarioEur(), item.getFormato());
         if (result == null) return;
         item.setExtraCostoEur(result.extraCostEur());
-        item.setCostoRealEur(result.realCostEur());
-        item.setCostoRealUyu(result.realCostUyu());
+        item.setCostoRealEur(result.realUnitCostEur());
+        item.setCostoRealUyu(result.realUnitCostUyu());
         item.setMarkup(result.markup());
-        item.setPrecioFinalUyu(result.salePriceUyu());
+        item.setPrecioFinalUyu(result.finalPriceUyu());
     }
 
     private boolean esDoble(String formato) {
@@ -329,11 +330,12 @@ public class PedidoService {
             disco.getTipoDisco()));
         disco.setCondicion(mapCondicion(scraped != null ? scraped.condition() : null, disco.getCondicion()));
         disco.setCantidadCopias(item.getCantidad() != null ? item.getCantidad() : 1);
-        BigDecimal purchasePrice = item.getCostoRealEur() != null
-            ? item.getCostoRealEur()
-            : firstNonNull(item.getPrecioUnitarioEur(), scraped != null ? scraped.purchasePrice() : null);
+        BigDecimal purchasePrice = firstNonNull(item.getPrecioUnitarioEur(), scraped != null ? scraped.purchasePrice() : null);
         if (purchasePrice != null) disco.setCosto(purchasePrice);
+        disco.setCostoMoneda("EUR");
+        disco.setFormato(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null));
         if (item.getPrecioFinalUyu() != null) disco.setPrecioVenta(item.getPrecioFinalUyu());
+        disco.setPricingMode(PricingMode.AUTO);
         setIfPresent(disco::setImagenUrl, firstNonBlank(item.getPortadaUrl(),
             scraped != null ? scraped.frontImageUrl() : null));
 
@@ -423,6 +425,7 @@ public class PedidoService {
         int sumCantidad = items.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
         boolean advertencia = p.getCantidadTotalPdf() != null && p.getCantidadTotalPdf() != sumCantidad;
 
+        PricingSettingsDTO settings = catalogPricingService.getSettingsDto();
         return new PedidoResponseDTO(
             p.getIdPedido(),
             p.getNumeroFactura(),
@@ -449,11 +452,11 @@ public class PedidoService {
             p.getTotal(),
             p.getCantidadTotalPdf(),
             p.getImportStatus().name(),
-            CatalogPricingService.TIPO_CAMBIO,
-            CatalogPricingService.EXTRA_SIMPLE,
-            CatalogPricingService.EXTRA_DOBLE,
-            CatalogPricingService.MARKUP_SIMPLE,
-            CatalogPricingService.MARKUP_DOBLE,
+            settings.eurUyuRate(),
+            settings.extraCostSingleEur(),
+            settings.extraCostDoubleEur(),
+            settings.markupSingle(),
+            settings.markupDouble(),
             p.getCreatedAt(),
             itemDTOs,
             merchandiseTotal,
@@ -473,7 +476,7 @@ public class PedidoService {
             i.getPrecioUnitarioEur(),
             i.getCantidad(),
             i.getTotalLineaEur(),
-            esDoble(i.getFormato()) ? "Double" : "Single",
+            catalogPricingService.detectRecordType(i.getFormato()).name(),
             i.getExtraCostoEur(),
             i.getCostoRealEur(),
             i.getCostoRealUyu(),
