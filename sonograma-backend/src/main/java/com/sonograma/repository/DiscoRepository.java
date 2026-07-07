@@ -26,6 +26,9 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
 
     Optional<Disco> findByDiscogsUrl(String discogsUrl);
 
+    @Query("SELECT d FROM Disco d WHERE LOWER(d.artista) = LOWER(:artista) AND LOWER(d.album) = LOWER(:album)")
+    List<Disco> findByArtistaAndAlbumIgnoreCase(@Param("artista") String artista, @Param("album") String album);
+
     @Query("SELECT d FROM Disco d WHERE " +
            "LOWER(d.artista) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(d.album) LIKE LOWER(CONCAT('%', :q, '%')) " +

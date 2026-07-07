@@ -123,6 +123,12 @@
             <version>1.17.2</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.sejda.imageio</groupId>
+            <artifactId>webp-imageio</artifactId>
+            <version>0.1.6</version>
+        </dependency>
+
         <!-- Apache POI — Excel parsing (xlsx/xls) -->
         <dependency>
             <groupId>org.apache.poi</groupId>

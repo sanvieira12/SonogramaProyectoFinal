@@ -23,13 +23,15 @@ public class VinylFutureImportBatchService {
 
     public String store(
             String csv,
-            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) {
+            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
+            String zipRootName) {
         cleanup();
         String importId = UUID.randomUUID().toString();
         batches.put(importId, new ImportBatch(
             importId,
             csv,
             new LinkedHashMap<>(pageDataMap),
+            zipRootName,
             Instant.now()
         ));
         cleanupOverflow();
@@ -60,6 +62,7 @@ public class VinylFutureImportBatchService {
         String importId,
         String csv,
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
+        String zipRootName,
         Instant createdAt
     ) {}
 }

@@ -71,6 +71,7 @@ public class VinylFutureScraperService {
     VinylPageData extractPageData(Document doc, String productUrl) {
         Map<String, String> jsonLd = extractJsonLd(doc);
         Map<String, String> labelled = extractLabelledValues(doc);
+        labelled.putAll(extractInfoBlockValues(doc));
         String productId = extractProductId(productUrl).orElse(null);
 
         List<TrackInfo> tracks = extractTracks(doc, productUrl, productId);
@@ -91,6 +92,7 @@ public class VinylFutureScraperService {
             text(doc, "article.single_product .artist h1"),
             text(doc, "article.product h2.artist"), text(doc, ".artikel h2.artist"),
             labelled.get("artist"), labelled.get("artista"),
+            jsonLd.get("artist"), jsonLd.get("byartist"),
             meta(doc, "meta[name=music:musician]", "content"),
             text(doc, "[itemprop=byArtist]"), text(doc, ".artist")
         );
@@ -107,15 +109,18 @@ public class VinylFutureScraperService {
             clean(title),
             clean(firstNonBlank(labelled.get("catalog"), labelled.get("catalogue"), labelled.get("codigo"),
                 labelled.get("cat no"), labelled.get("cat. no"), labelled.get("barcode"),
+                labelled.get("catalog no"), labelled.get("release no"),
                 text(doc, "article.single_product .labelContainer [itemprop=alternateName]"),
                 text(doc, "article.product .musiclabel strong"), text(doc, ".musiclabel strong"), jsonLd.get("sku"))),
             clean(firstNonBlank(labelled.get("label"), labelled.get("sello"),
+                labelled.get("brand"), labelled.get("provider"),
                 text(doc, "article.single_product .labelContainer [itemprop=provider]"),
                 text(doc, "article.product .musiclabel a"), text(doc, ".musiclabel a"), text(doc, ".label"))),
-            clean(firstNonBlank(labelled.get("genre"), labelled.get("genero"), text(doc, ".genre"))),
+            clean(firstNonBlank(labelled.get("genre"), labelled.get("genero"), labelled.get("style"),
+                jsonLd.get("genre"), text(doc, ".genre"), text(doc, ".style"))),
             parseYear(firstNonBlank(labelled.get("year"), labelled.get("anio"), labelled.get("released"),
                 jsonLd.get("datePublished"))),
-            clean(firstNonBlank(labelled.get("country"), labelled.get("pais"))),
+            clean(firstNonBlank(labelled.get("country"), labelled.get("pais"), jsonLd.get("country"))),
             clean(firstNonBlank(labelled.get("format"), labelled.get("formato"),
                 text(doc, "article.single_product .product_infos .infos .medium"),
                 text(doc, "article.product .infos .medium"), text(doc, ".infos .medium"))),
@@ -211,6 +216,25 @@ public class VinylFutureScraperService {
         return values;
     }
 
+    private Map<String, String> extractInfoBlockValues(Document doc) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (Element element : doc.select(
+            "article.single_product .product_infos .infos span, " +
+                "article.single_product .product_infos .infos div, " +
+                "article.product .infos span, article.product .infos div, .infos span, .infos div"
+        )) {
+            String text = element.text();
+            if (text == null || !text.contains(":")) {
+                continue;
+            }
+            String[] parts = text.split(":", 2);
+            if (parts.length == 2) {
+                putLabel(values, parts[0], parts[1]);
+            }
+        }
+        return values;
+    }
+
     private void putLabel(Map<String, String> values, String label, String value) {
         if (label == null || value == null || value.isBlank()) return;
         values.putIfAbsent(normalizeLabel(label), value.strip());
@@ -239,7 +263,15 @@ public class VinylFutureScraperService {
             return;
         }
         if (!node.isObject()) return;
-        copyText(node, values, "name", "description", "sku", "datePublished", "price");
+        copyText(node, values, "name", "description", "sku", "datePublished", "price", "genre", "country", "brand");
+        JsonNode artist = node.get("byArtist");
+        if (artist != null) {
+            if (artist.isTextual()) {
+                values.putIfAbsent("byartist", artist.asText());
+            } else if (artist.has("name")) {
+                values.putIfAbsent("byartist", artist.get("name").asText());
+            }
+        }
         JsonNode image = node.get("image");
         if (image != null) {
             if (image.isTextual()) values.putIfAbsent("image", image.asText());

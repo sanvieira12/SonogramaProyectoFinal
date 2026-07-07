@@ -46,6 +46,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -141,7 +142,8 @@ public class ImportController {
             job.updateStep("Preparando ZIP", 92);
             String importId = importBatchService.store(
                 csvExport.buildCsv(result.searchResults()),
-                result.pageDataMap()
+                result.pageDataMap(),
+                buildZipRootName(result.invoice())
             );
             VinylFutureImportSummaryDTO summary = result.summary().withImportId(importId);
             job.complete(summary);
@@ -166,7 +168,11 @@ public class ImportController {
             return errorResponse(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + e.getMessage());
         }
 
-        return buildZipResponse(csvExport.buildCsv(result.searchResults()), result.pageDataMap());
+        return buildZipResponse(
+            csvExport.buildCsv(result.searchResults()),
+            result.pageDataMap(),
+            buildZipRootName(result.invoice())
+        );
     }
 
     @GetMapping("/vinylfuture/{importId}/zip")
@@ -182,15 +188,16 @@ public class ImportController {
             importId,
             batch.csv() != null ? batch.csv().getBytes(StandardCharsets.UTF_8).length : 0,
             batch.pageDataMap() != null ? batch.pageDataMap().size() : 0);
-        return buildZipResponse(batch.csv(), batch.pageDataMap());
+        return buildZipResponse(batch.csv(), batch.pageDataMap(), batch.zipRootName());
     }
 
     private ResponseEntity<StreamingResponseBody> buildZipResponse(
             String csv,
-            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap) {
+            Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
+            String zipRootName) {
         Path zipPath;
         try {
-            zipPath = zipBundle.buildZip(csv, pageDataMap);
+            zipPath = zipBundle.buildZip(csv, pageDataMap, zipRootName);
         } catch (Exception e) {
             log.error("Error al construir el ZIP: {}", e.getMessage(), e);
             return errorResponse(
@@ -199,7 +206,7 @@ public class ImportController {
             );
         }
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        String filename = "vinylfuture-import-" + timestamp + ".zip";
+        String filename = sanitizeFilename(firstNonBlank(zipRootName, "VinylFuture_Invoice_" + timestamp)) + ".zip";
 
         long zipSize;
         try {
@@ -315,22 +322,30 @@ public class ImportController {
             String catalogCode = pageData.map(VinylPageData::code)
                 .filter(value -> !value.isBlank())
                 .orElse(item.codigoCatalogo());
-            if (catalogCode != null && !catalogCode.isBlank()
-                    && discoRepository.findByCodigoInterno(catalogCode).isPresent()) {
-                skippedDuplicates++;
-                if (job != null) job.skipItem(item, "Código ya existente en catálogo: " + catalogCode);
-                log.info("Disco ya importado, se omite: {} / {}", catalogCode, item.album());
-                continue;
-            }
-
             try {
-                Disco disco = buildDisco(item, pageData.orElse(null), catalogCode, invoice);
+                Optional<Disco> existing = findExistingDisco(item, pageData.orElse(null), catalogCode);
+                int availableBefore = existing.map(disco -> (int) qrCopyService.countAvailableCopies(disco.getIdDisco()))
+                    .orElse(0);
+                Disco disco = existing
+                    .map(existingDisco -> mergeDisco(existingDisco, item, pageData.orElse(null), catalogCode, invoice))
+                    .orElseGet(() -> buildDisco(item, pageData.orElse(null), catalogCode, invoice));
                 disco = discoRepository.save(disco);
-                qrEntriesCreated += qrCopyService.synchronize(disco).size();
+                int purchasedQuantity = item.cantidad() != null ? item.cantidad() : 1;
+                List<com.sonograma.entity.DiscoQrCopy> copies = existing.isPresent()
+                    ? qrCopyService.synchronizeAvailableCopies(disco, availableBefore + purchasedQuantity)
+                    : qrCopyService.synchronize(disco);
+                qrEntriesCreated += existing.isPresent()
+                    ? purchasedQuantity
+                    : copies.size();
                 Disco savedDisco = disco;
                 pageData.ifPresent(page ->
                     audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
                 imported.add(discoRepository.save(disco));
+                if (existing.isPresent() && job != null) {
+                    skippedDuplicates++;
+                    job.addWarning("Stock actualizado sobre disco existente: " + itemReference(item)
+                        + " +" + purchasedQuantity + " copia(s)");
+                }
                 if (job != null) job.successItem(item);
                 int mp3Count = pageData.map(page -> (int) safeTracks(page).stream()
                     .filter(track -> !blank(track.mp3Url()))
@@ -397,7 +412,7 @@ public class ImportController {
             summary.failedMediaDownloads(), summary.youtubeLinksFound(), summary.qrEntriesCreated(),
             summary.failedLinks(), summary.skippedDuplicates(), summary.rateLimitFailures()
         );
-        return new ImportProcessingResult(summary, searchResults, pageDataMap);
+        return new ImportProcessingResult(invoice, summary, searchResults, pageDataMap);
     }
 
     private Disco buildDisco(InvoiceItem item, VinylPageData page, String catalogCode, ParsedInvoice invoice) {
@@ -433,6 +448,91 @@ public class ImportController {
             disco.setImagenUrl(page.frontImageUrl());
             disco.setDiscogsUrl(page.sourceUrl());
             if (!safeTracks(page).isEmpty()) {
+                disco.setTracklist(safeTracks(page).stream()
+                    .map(track -> firstNonBlank(track.label(), "") + " "
+                        + firstNonBlank(track.name(), "Track"))
+                    .map(String::strip)
+                    .collect(Collectors.joining("\n")));
+            }
+        }
+        return disco;
+    }
+
+    private Optional<Disco> findExistingDisco(InvoiceItem item, VinylPageData page, String catalogCode) {
+        if (!blank(catalogCode)) {
+            Optional<Disco> byCode = discoRepository.findByCodigoInterno(catalogCode);
+            if (byCode.isPresent()) {
+                return byCode;
+            }
+        }
+        String artist = firstNonBlank(page != null ? page.artist() : null, item.artista());
+        String album = firstNonBlank(page != null ? page.title() : null, item.album());
+        if (blank(artist) || blank(album)) {
+            return Optional.empty();
+        }
+        String normalizedFormat = normalize(firstNonBlank(page != null ? page.format() : null, item.formato()));
+        String normalizedLabel = normalize(page != null ? page.label() : null);
+        return discoRepository.findByArtistaAndAlbumIgnoreCase(artist, album).stream()
+            .filter(candidate -> matchesByFallback(candidate, normalizedFormat, normalizedLabel))
+            .findFirst();
+    }
+
+    private boolean matchesByFallback(Disco candidate, String normalizedFormat, String normalizedLabel) {
+        String candidateFormat = normalize(candidate.getFormato());
+        String candidateLabel = normalize(candidate.getSelloDiscografico());
+        boolean formatMatches = normalizedFormat.isBlank()
+            || candidateFormat.isBlank()
+            || candidateFormat.equals(normalizedFormat);
+        boolean labelMatches = normalizedLabel.isBlank()
+            || candidateLabel.isBlank()
+            || candidateLabel.equals(normalizedLabel);
+        return formatMatches && labelMatches;
+    }
+
+    private Disco mergeDisco(Disco disco, InvoiceItem item, VinylPageData page, String catalogCode, ParsedInvoice invoice) {
+        String format = firstNonBlank(page != null ? page.format() : null, item.formato(), disco.getFormato());
+        java.math.BigDecimal cost = item.precioUnitario() != null
+            ? item.precioUnitario()
+            : (page != null ? page.purchasePrice() : null);
+        disco.setCodigoInterno(firstNonBlank(disco.getCodigoInterno(), catalogCode));
+        disco.setArtista(firstNonBlank(disco.getArtista(), page != null ? page.artist() : null, item.artista()));
+        disco.setAlbum(firstNonBlank(disco.getAlbum(), page != null ? page.title() : null, item.album()));
+        disco.setEstado(EstadoDisco.DISPONIBLE);
+        disco.setProcedencia(firstNonBlank(disco.getProcedencia(), "VINYL_FUTURE"));
+        if (blank(disco.getCodigoQr())) {
+            disco.setCodigoQr(UUID.randomUUID().toString());
+        }
+        if (disco.getTipoDisco() == null) {
+            disco.setTipoDisco(parseFormat(format));
+        }
+        if (disco.getCondicion() == null) {
+            disco.setCondicion(parseCondition(page != null ? page.condition() : null));
+        }
+        disco.setCantidadCopias(Math.max(0, (disco.getCantidadCopias() == null ? 0 : disco.getCantidadCopias())
+            + (item.cantidad() == null ? 1 : item.cantidad())));
+        if (disco.getCosto() == null) {
+            disco.setCosto(cost);
+        }
+        disco.setCostoMoneda(firstNonBlank(disco.getCostoMoneda(), "EUR"));
+        disco.setFormato(firstNonBlank(disco.getFormato(), format));
+        disco.setNumeroFacturaCompra(invoice.numeroFactura());
+        disco.setFechaFacturaCompra(invoice.fechaFactura());
+        if (disco.getPrecioVenta() == null && cost != null) {
+            CatalogPricingService.PricingResult pricing = catalogPricingService.calculate(cost, format);
+            disco.setPrecioVenta(pricing != null ? pricing.finalPriceUyu() : null);
+            disco.setPricingMode(PricingMode.AUTO);
+        }
+        if (page != null) {
+            disco.setSelloDiscografico(firstNonBlank(disco.getSelloDiscografico(), page.label()));
+            disco.setGenero(firstNonBlank(disco.getGenero(), page.genre()));
+            if (disco.getAnio() == null) {
+                disco.setAnio(page.year());
+            }
+            disco.setPais(firstNonBlank(disco.getPais(), page.country()));
+            disco.setDescripcion(firstNonBlank(disco.getDescripcion(), page.description()));
+            disco.setImagenUrl(firstNonBlank(disco.getImagenUrl(), page.frontImageUrl()));
+            disco.setDiscogsUrl(firstNonBlank(disco.getDiscogsUrl(), page.sourceUrl()));
+            if (blank(disco.getTracklist()) && !safeTracks(page).isEmpty()) {
                 disco.setTracklist(safeTracks(page).stream()
                     .map(track -> firstNonBlank(track.label(), "") + " "
                         + firstNonBlank(track.name(), "Track"))
@@ -511,11 +611,30 @@ public class ImportController {
 
     private String normalize(String value) {
         if (value == null) return "";
-        return java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
             .replaceAll("\\p{M}", "")
             .replaceAll("[^\\p{L}\\p{N}]+", " ")
             .trim()
             .toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String buildZipRootName(ParsedInvoice invoice) {
+        String suffix = firstNonBlank(
+            sanitizeFilename(invoice.numeroFactura()),
+            invoice.fechaFactura() != null ? invoice.fechaFactura().format(DateTimeFormatter.ISO_DATE) : null,
+            LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        );
+        return "VinylFuture_Invoice_" + suffix;
+    }
+
+    private String sanitizeFilename(String value) {
+        if (value == null || value.isBlank()) {
+            return "sin-datos";
+        }
+        String sanitized = value.replaceAll("[/\\\\:*?\"<>|]", "_")
+            .replaceAll("\\s+", "_")
+            .strip();
+        return sanitized.isBlank() ? "sin-datos" : sanitized;
     }
 
     private TipoDisco parseFormat(String value) {
@@ -544,6 +663,7 @@ public class ImportController {
     }
 
     private record ImportProcessingResult(
+        ParsedInvoice invoice,
         VinylFutureImportSummaryDTO summary,
         Map<InvoiceItem, Optional<String>> searchResults,
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap

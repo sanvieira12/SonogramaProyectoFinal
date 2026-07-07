@@ -7,6 +7,10 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
@@ -23,19 +27,19 @@ class VinylFutureAssetServiceTest {
 
     @Test
     void storesCoverAndMp3AndReturnsLocalUrls() throws Exception {
+        byte[] jpeg = jpegBytes();
+        byte[] mp3 = new byte[] {'I', 'D', '3', 4, 0, 0};
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/cover.jpg", exchange -> {
-            byte[] body = "fake-jpeg".getBytes();
             exchange.getResponseHeaders().add("Content-Type", "image/jpeg");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
+            exchange.sendResponseHeaders(200, jpeg.length);
+            exchange.getResponseBody().write(jpeg);
             exchange.close();
         });
         server.createContext("/a1.mp3", exchange -> {
-            byte[] body = "fake-mp3".getBytes();
             exchange.getResponseHeaders().add("Content-Type", "audio/mpeg");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
+            exchange.sendResponseHeaders(200, mp3.length);
+            exchange.getResponseBody().write(mp3);
             exchange.close();
         });
         server.start();
@@ -71,6 +75,8 @@ class VinylFutureAssetServiceTest {
 
     @Test
     void retriesTransientFailuresAndReportsDownloadCounters() throws Exception {
+        byte[] jpeg = jpegBytes();
+        byte[] mp3 = new byte[] {'I', 'D', '3', 4, 0, 0};
         AtomicInteger coverAttempts = new AtomicInteger();
         AtomicInteger audioAttempts = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
@@ -81,10 +87,9 @@ class VinylFutureAssetServiceTest {
                 exchange.close();
                 return;
             }
-            byte[] body = "cover-ok".getBytes();
             exchange.getResponseHeaders().add("Content-Type", "image/jpeg");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
+            exchange.sendResponseHeaders(200, jpeg.length);
+            exchange.getResponseBody().write(jpeg);
             exchange.close();
         });
         server.createContext("/retry-a1.mp3", exchange -> {
@@ -94,10 +99,9 @@ class VinylFutureAssetServiceTest {
                 exchange.close();
                 return;
             }
-            byte[] body = "mp3-ok".getBytes();
             exchange.getResponseHeaders().add("Content-Type", "audio/mpeg");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
+            exchange.sendResponseHeaders(200, mp3.length);
+            exchange.getResponseBody().write(mp3);
             exchange.close();
         });
         server.start();
@@ -134,8 +138,11 @@ class VinylFutureAssetServiceTest {
             exchange.sendResponseHeaders(404, -1);
             exchange.close();
         });
-        server.createContext("/missing-a1.mp3", exchange -> {
-            exchange.sendResponseHeaders(503, -1);
+        server.createContext("/html-as-audio", exchange -> {
+            byte[] body = "<html>bad</html>".getBytes();
+            exchange.getResponseHeaders().add("Content-Type", "text/html");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.start();
@@ -149,7 +156,7 @@ class VinylFutureAssetServiceTest {
                 "Fail Artist", "Fail Album", "CAT-3", "Label", "Genre", 2026,
                 "Germany", "12", "New", "Desc", BigDecimal.ONE,
                 baseUrl + "/missing-cover.jpg", null,
-                List.of(new TrackInfo("A1", "Missing Track", baseUrl + "/missing-a1.mp3", null))
+                List.of(new TrackInfo("A1", "Missing Track", baseUrl + "/html-as-audio", null))
             );
 
             VinylFutureAssetService.AssetStoreResult result = service.storeAssetsWithResult(item, page);
@@ -162,5 +169,16 @@ class VinylFutureAssetServiceTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    private byte[] jpegBytes() throws Exception {
+        BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setColor(Color.ORANGE);
+        graphics.fillRect(0, 0, 4, 4);
+        graphics.dispose();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "jpg", out);
+        return out.toByteArray();
     }
 }

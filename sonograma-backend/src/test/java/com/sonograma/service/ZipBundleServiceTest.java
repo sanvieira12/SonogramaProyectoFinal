@@ -6,6 +6,9 @@ import com.sonograma.dto.VinylPageData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,11 +26,11 @@ class ZipBundleServiceTest {
     Path tempDir;
 
     @Test
-    void zipIncludesPersistedMediaFolderWithCoverAndMp3() throws Exception {
+    void zipIncludesAlbumFoldersWithImagenesAndAudios() throws Exception {
         Path folder = tempDir.resolve("ALT025 - Betonkust - Tropicana Tracks Two");
         Files.createDirectories(folder);
-        Files.writeString(folder.resolve("cover.jpg"), "cover");
-        Files.writeString(folder.resolve("A1 - Dont Think Ill Be Here Too Long.mp3"), "mp3");
+        writePng(folder.resolve("cover.png"));
+        Files.write(folder.resolve("A1 - Dont Think Ill Be Here Too Long.mp3"), new byte[] {'I', 'D', '3', 4, 0, 0});
 
         VinylFutureAssetService assetService = new VinylFutureAssetService(tempDir.toString());
         ZipBundleService zipBundleService = new ZipBundleService(assetService);
@@ -38,7 +41,7 @@ class ZipBundleServiceTest {
             "https://www.vinylfuture.com/Betonkust_Tropicana_Tracks_Two_ALT025_Vinyl__1225612",
             "Betonkust", "Tropicana Tracks Two", "ALT025", null, null, null,
             null, "12", null, null, BigDecimal.ONE,
-            "/api/importar/vinylfuture/media/ALT025%20-%20Betonkust%20-%20Tropicana%20Tracks%20Two/cover.jpg",
+            "/api/importar/vinylfuture/media/ALT025%20-%20Betonkust%20-%20Tropicana%20Tracks%20Two/cover.png",
             null,
             List.of(new TrackInfo(
                 "A1",
@@ -49,20 +52,14 @@ class ZipBundleServiceTest {
         Map<InvoiceItem, Optional<VinylPageData>> pageData = new LinkedHashMap<>();
         pageData.put(item, Optional.of(page));
 
-        Path zip = zipBundleService.buildZip("codigo,artista\nALT025,Betonkust\n", pageData);
+        Path zip = zipBundleService.buildZip("codigo,artista\nALT025,Betonkust\n", pageData, "VinylFuture_Invoice_INV-42");
 
         try (ZipFile zipFile = new ZipFile(zip.toFile())) {
             List<String> names = zipFile.stream().map(entry -> entry.getName()).toList();
-            String root = names.stream()
-                .filter(name -> name.startsWith("vinylfuture-export-") && name.endsWith("/import.csv"))
-                .findFirst()
-                .orElseThrow()
-                .replace("/import.csv", "");
             assertThat(names).contains(
-                root + "/import.csv",
-                root + "/data/import.csv",
-                root + "/media/ALT025 - Betonkust - Tropicana Tracks Two/cover.jpg",
-                root + "/media/ALT025 - Betonkust - Tropicana Tracks Two/A1 - Dont Think Ill Be Here Too Long.mp3"
+                "VinylFuture_Invoice_INV-42/import.csv",
+                "VinylFuture_Invoice_INV-42/ALT025 - Tropicana Tracks Two/Imagenes/ALT025 - Tropicana Tracks Two - Cover.jpg",
+                "VinylFuture_Invoice_INV-42/ALT025 - Tropicana Tracks Two/Audios/ALT025 - A1 - Dont Think Ill Be Here Too Long.mp3"
             );
         } finally {
             Files.deleteIfExists(zip);
@@ -70,49 +67,38 @@ class ZipBundleServiceTest {
     }
 
     @Test
-    void duplicateMediaEntryNamesAreRenamedInsteadOfFailing() throws Exception {
-        Path folder = tempDir.resolve("GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)");
+    void zipAddsMissingMediaReportWithoutFailingWholeBundle() throws Exception {
+        Path folder = tempDir.resolve("CAT-9 - Artist - Album");
         Files.createDirectories(folder);
-        Files.writeString(folder.resolve("cover.jpg"), "cover");
+        writePng(folder.resolve("cover.png"));
 
         VinylFutureAssetService assetService = new VinylFutureAssetService(tempDir.toString());
         ZipBundleService zipBundleService = new ZipBundleService(assetService);
+        InvoiceItem item = new InvoiceItem("CAT-9", "Artist", "Album", "12", BigDecimal.ONE, 1, BigDecimal.ONE);
         VinylPageData page = new VinylPageData(
-            "https://www.vinylfuture.com/gnd054__123",
-            "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "GND054",
-            null, null, null, null, "12", null, null, BigDecimal.ONE,
-            "/api/importar/vinylfuture/media/GND054%20-%20DJ%20Garth%20_%20Eti%20-%20Twenty%20Minutes%20Of%20Disco%20Glory%20(30th%20Anniversary%20reissue)/cover.jpg",
+            "https://supplier.example/release",
+            "Artist", "Album", "CAT-9", null, null, null, null, "12", null, null, BigDecimal.ONE,
+            "/api/importar/vinylfuture/media/CAT-9%20-%20Artist%20-%20Album/cover.png",
             null,
-            List.of()
+            List.of(new TrackInfo("A1", "Track Missing", null, null))
         );
         Map<InvoiceItem, Optional<VinylPageData>> pageData = new LinkedHashMap<>();
-        pageData.put(new InvoiceItem(
-            "GND054", "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "12",
-            new BigDecimal("14.99"), 2, new BigDecimal("29.98")), Optional.of(page));
-        pageData.put(new InvoiceItem(
-            "GND054", "DJ Garth / Eti", "Twenty Minutes Of Disco Glory (30th Anniversary reissue)", "12",
-            new BigDecimal("14.99"), 1, new BigDecimal("14.99")), Optional.of(page));
+        pageData.put(item, Optional.of(page));
 
-        Path zip = zipBundleService.buildZip("codigo,artista\nGND054,DJ Garth\n", pageData);
+        Path zip = zipBundleService.buildZip("codigo\nCAT-9\n", pageData, "VinylFuture_Invoice_2026-07-07");
 
         try (ZipFile zipFile = new ZipFile(zip.toFile())) {
-            List<String> names = zipFile.stream().map(entry -> entry.getName()).toList();
-            String root = names.stream()
-                .filter(name -> name.startsWith("vinylfuture-export-") && name.endsWith("/import.csv"))
-                .findFirst()
-                .orElseThrow()
-                .replace("/import.csv", "");
-            assertThat(names).contains(
-                root + "/media/GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)/cover.jpg",
-                root + "/media/GND054 - DJ Garth _ Eti - Twenty Minutes Of Disco Glory (30th Anniversary reissue)/cover-2.jpg"
-            );
+            String missingPath = "VinylFuture_Invoice_2026-07-07/CAT-9 - Album/missing_media.txt";
+            assertThat(zipFile.getEntry(missingPath)).isNotNull();
+            String missing = new String(zipFile.getInputStream(zipFile.getEntry(missingPath)).readAllBytes());
+            assertThat(missing).contains("Audio: falta preview");
         } finally {
             Files.deleteIfExists(zip);
         }
     }
 
     @Test
-    void zipIncludesMissingFallbackWhenMetadataIsAbsent() throws Exception {
+    void zipCreatesAlbumFolderEvenWhenMetadataIsMissing() throws Exception {
         VinylFutureAssetService assetService = new VinylFutureAssetService(tempDir.toString());
         ZipBundleService zipBundleService = new ZipBundleService(assetService);
         Map<InvoiceItem, Optional<VinylPageData>> pageData = new LinkedHashMap<>();
@@ -120,20 +106,25 @@ class ZipBundleServiceTest {
             "NF-001", "Artista", "Album sin metadata", "12",
             new BigDecimal("10.00"), 1, new BigDecimal("10.00")), Optional.empty());
 
-        Path zip = zipBundleService.buildZip("codigo,artista\nNF-001,Artista\n", pageData);
+        Path zip = zipBundleService.buildZip("codigo,artista\nNF-001,Artista\n", pageData, "VinylFuture_Invoice_2026-07-07");
 
         try (ZipFile zipFile = new ZipFile(zip.toFile())) {
             List<String> names = zipFile.stream().map(entry -> entry.getName()).toList();
-            String root = names.stream()
-                .filter(name -> name.startsWith("vinylfuture-export-") && name.endsWith("/import.csv"))
-                .findFirst()
-                .orElseThrow()
-                .replace("/import.csv", "");
-            assertThat(names).contains(root + "/import.csv", root + "/missing.txt");
-            String missing = new String(zipFile.getInputStream(zipFile.getEntry(root + "/missing.txt")).readAllBytes());
-            assertThat(missing).contains("metadata/media: NF-001 - Album sin metadata");
+            assertThat(names).contains(
+                "VinylFuture_Invoice_2026-07-07/import.csv",
+                "VinylFuture_Invoice_2026-07-07/NF-001 - Album sin metadata/missing_media.txt"
+            );
         } finally {
             Files.deleteIfExists(zip);
         }
+    }
+
+    private void writePng(Path target) throws Exception {
+        BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setColor(Color.BLUE);
+        graphics.fillRect(0, 0, 4, 4);
+        graphics.dispose();
+        ImageIO.write(image, "png", target.toFile());
     }
 }

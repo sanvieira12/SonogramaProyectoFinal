@@ -9,6 +9,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -219,6 +221,8 @@ public class VinylFutureAssetService {
             if (status < 200 || status >= 300) {
                 throw new AssetDownloadException("HTTP " + status, status);
             }
+            String contentType = connection.getContentType();
+            validateContentType(contentType, accept);
             long contentLength = connection.getContentLengthLong();
             if (contentLength > maxSize) {
                 throw new IOException("asset supera el límite de " + maxSize + " bytes");
@@ -237,9 +241,57 @@ public class VinylFutureAssetService {
                     output.write(buffer, 0, read);
                 }
             }
+            validateDownloadedAsset(target, accept);
         } finally {
             connection.disconnect();
         }
+    }
+
+    private void validateContentType(String contentType, String accept) throws IOException {
+        String normalized = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        if (accept.startsWith("image/")) {
+            if (!normalized.startsWith("image/")) {
+                throw new IOException("content-type de imagen inválido: " + contentType);
+            }
+            return;
+        }
+        if (!normalized.startsWith("audio/mpeg") && !normalized.startsWith("audio/mp3") && !normalized.startsWith("audio/")) {
+            throw new IOException("content-type de audio inválido: " + contentType);
+        }
+    }
+
+    private void validateDownloadedAsset(Path target, String accept) throws IOException {
+        if (accept.startsWith("image/")) {
+            try (InputStream input = new BufferedInputStream(Files.newInputStream(target))) {
+                BufferedImage image = ImageIO.read(input);
+                if (image == null) {
+                    throw new IOException("imagen inválida o no soportada");
+                }
+            }
+            return;
+        }
+        if (!isLikelyMp3(target)) {
+            throw new IOException("audio descargado no es MP3 compatible");
+        }
+    }
+
+    private boolean isLikelyMp3(Path file) throws IOException {
+        if (!Files.isRegularFile(file) || Files.size(file) < 3) {
+            return false;
+        }
+        byte[] header = new byte[10];
+        try (InputStream input = new BufferedInputStream(Files.newInputStream(file))) {
+            int read = input.read(header);
+            if (read < 3) {
+                return false;
+            }
+        }
+        if (header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
+            return true;
+        }
+        int first = header[0] & 0xFF;
+        int second = header[1] & 0xFF;
+        return first == 0xFF && (second & 0xE0) == 0xE0;
     }
 
     private Path safeFile(String filename) throws IOException {
