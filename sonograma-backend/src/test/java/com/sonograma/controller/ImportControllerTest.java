@@ -43,7 +43,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -236,8 +235,7 @@ class ImportControllerTest {
             .thenReturn(new VinylFutureAssetService.AssetStoreResult(page, 0, 0, 0));
         when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.of(existing));
         when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(qrCopyService.countAvailableCopies(10L)).thenReturn(1L);
-        when(qrCopyService.synchronizeAvailableCopies(any(Disco.class), anyInt()))
+        when(qrCopyService.synchronize(any(Disco.class)))
             .thenReturn(List.of(
                 DiscoQrCopy.builder().idDisco(10L).copyNumber(1).codigoQr("qr-existing").build(),
                 DiscoQrCopy.builder().idDisco(10L).copyNumber(2).codigoQr("qr-2").build(),
@@ -276,7 +274,7 @@ class ImportControllerTest {
             );
         });
         assertThat(existing.getCantidadCopias()).isEqualTo(3);
-        verify(qrCopyService).synchronizeAvailableCopies(existing, 3);
+        verify(qrCopyService).synchronize(existing);
         controller.shutdownImportPool();
     }
 }

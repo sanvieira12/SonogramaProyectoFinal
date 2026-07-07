@@ -324,16 +324,12 @@ public class ImportController {
                 .orElse(item.codigoCatalogo());
             try {
                 Optional<Disco> existing = findExistingDisco(item, pageData.orElse(null), catalogCode);
-                int availableBefore = existing.map(disco -> (int) qrCopyService.countAvailableCopies(disco.getIdDisco()))
-                    .orElse(0);
                 Disco disco = existing
                     .map(existingDisco -> mergeDisco(existingDisco, item, pageData.orElse(null), catalogCode, invoice))
                     .orElseGet(() -> buildDisco(item, pageData.orElse(null), catalogCode, invoice));
                 disco = discoRepository.save(disco);
                 int purchasedQuantity = item.cantidad() != null ? item.cantidad() : 1;
-                List<com.sonograma.entity.DiscoQrCopy> copies = existing.isPresent()
-                    ? qrCopyService.synchronizeAvailableCopies(disco, availableBefore + purchasedQuantity)
-                    : qrCopyService.synchronize(disco);
+                List<com.sonograma.entity.DiscoQrCopy> copies = qrCopyService.synchronize(disco);
                 qrEntriesCreated += existing.isPresent()
                     ? purchasedQuantity
                     : copies.size();
