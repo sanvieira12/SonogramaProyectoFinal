@@ -4,6 +4,9 @@ import com.sonograma.dto.InvoiceItem;
 import com.sonograma.dto.VinylPageData;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
@@ -24,7 +27,8 @@ public class VinylFutureImportBatchService {
     public String store(
             String csv,
             Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
-            String zipRootName) {
+            String zipRootName,
+            Path zipPath) {
         cleanup();
         String importId = UUID.randomUUID().toString();
         batches.put(importId, new ImportBatch(
@@ -32,6 +36,7 @@ public class VinylFutureImportBatchService {
             csv,
             new LinkedHashMap<>(pageDataMap),
             zipRootName,
+            zipPath,
             Instant.now()
         ));
         cleanupOverflow();
@@ -45,7 +50,13 @@ public class VinylFutureImportBatchService {
 
     private void cleanup() {
         Instant cutoff = Instant.now().minus(TTL);
-        batches.entrySet().removeIf(entry -> entry.getValue().createdAt().isBefore(cutoff));
+        batches.entrySet().removeIf(entry -> {
+            boolean expired = entry.getValue().createdAt().isBefore(cutoff);
+            if (expired) {
+                deleteZipIfExists(entry.getValue().zipPath());
+            }
+            return expired;
+        });
     }
 
     private void cleanupOverflow() {
@@ -54,7 +65,20 @@ public class VinylFutureImportBatchService {
             .sorted((first, second) -> first.createdAt().compareTo(second.createdAt()))
             .iterator();
         while (batches.size() > MAX_BATCHES && oldest.hasNext()) {
-            batches.remove(oldest.next().importId());
+            ImportBatch batch = oldest.next();
+            batches.remove(batch.importId());
+            deleteZipIfExists(batch.zipPath());
+        }
+    }
+
+    private void deleteZipIfExists(Path zipPath) {
+        if (zipPath == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(zipPath);
+        } catch (IOException ignored) {
+            // Best effort cleanup for temporary export files.
         }
     }
 
@@ -63,6 +87,7 @@ public class VinylFutureImportBatchService {
         String csv,
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
         String zipRootName,
+        Path zipPath,
         Instant createdAt
     ) {}
 }

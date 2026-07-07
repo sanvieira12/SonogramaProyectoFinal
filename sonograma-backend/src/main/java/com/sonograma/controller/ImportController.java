@@ -140,10 +140,15 @@ public class ImportController {
                 throw new IllegalStateException("No se pudo completar la importación");
             }
             job.updateStep("Preparando ZIP", 92);
+            String csv = csvExport.buildCsv(result.searchResults());
+            String zipRootName = buildZipRootName(result.invoice());
+            Path zipPath = zipBundle.buildZip(csv, result.pageDataMap(), zipRootName);
+            job.updateStep("ZIP listo para descargar", 98);
             String importId = importBatchService.store(
-                csvExport.buildCsv(result.searchResults()),
+                csv,
                 result.pageDataMap(),
-                buildZipRootName(result.invoice())
+                zipRootName,
+                zipPath
             );
             VinylFutureImportSummaryDTO summary = result.summary().withImportId(importId);
             job.complete(summary);
@@ -188,6 +193,9 @@ public class ImportController {
             importId,
             batch.csv() != null ? batch.csv().getBytes(StandardCharsets.UTF_8).length : 0,
             batch.pageDataMap() != null ? batch.pageDataMap().size() : 0);
+        if (batch.zipPath() != null && Files.isRegularFile(batch.zipPath())) {
+            return streamZipResponse(batch.zipPath(), batch.zipRootName(), false);
+        }
         return buildZipResponse(batch.csv(), batch.pageDataMap(), batch.zipRootName());
     }
 
@@ -205,6 +213,13 @@ public class ImportController {
                 "Error al generar el archivo: " + e.getMessage()
             );
         }
+        return streamZipResponse(zipPath, zipRootName, true);
+    }
+
+    private ResponseEntity<StreamingResponseBody> streamZipResponse(
+            Path zipPath,
+            String zipRootName,
+            boolean deleteAfterDownload) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         String filename = sanitizeFilename(firstNonBlank(zipRootName, "VinylFuture_Invoice_" + timestamp)) + ".zip";
 
@@ -228,7 +243,9 @@ public class ImportController {
             try {
                 Files.copy(zipPath, outputStream);
             } finally {
-                Files.deleteIfExists(zipPath);
+                if (deleteAfterDownload) {
+                    Files.deleteIfExists(zipPath);
+                }
             }
         };
 

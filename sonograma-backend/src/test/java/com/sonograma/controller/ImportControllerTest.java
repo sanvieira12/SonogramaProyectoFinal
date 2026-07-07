@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -107,7 +108,10 @@ class ImportControllerTest {
             DiscoQrCopy.builder().idDisco(10L).copyNumber(2).codigoQr("qr-2").build()
         ));
         when(csvExportService.buildCsv(any())).thenReturn("csv");
-        when(importBatchService.store(any(), any(), anyString())).thenReturn("import-123");
+        Path prebuiltZip = Files.createTempFile("vinylfuture-ready-", ".zip");
+        Files.write(prebuiltZip, "ready".getBytes());
+        when(zipBundleService.buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_0031-188471"))).thenReturn(prebuiltZip);
+        when(importBatchService.store(any(), any(), anyString(), eq(prebuiltZip))).thenReturn("import-123");
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         ImportController controller = new ImportController(
@@ -154,7 +158,7 @@ class ImportControllerTest {
             assertThat(job.totalQuantity()).isEqualTo(2);
         });
         verify(audioPreviewService).guardarDesdeTracks(10L, storedPage.tracks());
-        verify(zipBundleService, never()).buildZip(any(), any(), anyString());
+        verify(zipBundleService).buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_0031-188471"));
         controller.shutdownImportPool();
     }
 
@@ -167,10 +171,10 @@ class ImportControllerTest {
             "codigo,artista\n",
             new LinkedHashMap<>(),
             "VinylFuture_Invoice_INV-42",
+            zip,
             java.time.Instant.now()
         );
         when(importBatchService.find("import-123")).thenReturn(Optional.of(batch));
-        when(zipBundleService.buildZip(batch.csv(), batch.pageDataMap(), batch.zipRootName())).thenReturn(zip);
 
         ImportController controller = new ImportController(
             pdfParser,
@@ -197,6 +201,7 @@ class ImportControllerTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         response.getBody().writeTo(out);
         assertThat(out.toByteArray()).isNotEmpty();
+        verify(zipBundleService, never()).buildZip(any(), any(), anyString());
         controller.shutdownImportPool();
     }
 
@@ -242,7 +247,10 @@ class ImportControllerTest {
                 DiscoQrCopy.builder().idDisco(10L).copyNumber(3).codigoQr("qr-3").build()
             ));
         when(csvExportService.buildCsv(any())).thenReturn("csv");
-        when(importBatchService.store(any(), any(), anyString())).thenReturn("import-merge");
+        Path prebuiltZip = Files.createTempFile("vinylfuture-merge-", ".zip");
+        Files.write(prebuiltZip, "ready".getBytes());
+        when(zipBundleService.buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_INV-77"))).thenReturn(prebuiltZip);
+        when(importBatchService.store(any(), any(), anyString(), eq(prebuiltZip))).thenReturn("import-merge");
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         ImportController controller = new ImportController(
