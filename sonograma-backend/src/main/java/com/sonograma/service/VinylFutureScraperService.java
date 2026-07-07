@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 public class VinylFutureScraperService {
 
     private static final String DEEJAY_BASE = "https://www.deejay.de";
+    private static final String PLAYLIST_ENDPOINT = "/ajaxHelper/fp.php";
     private static final String USER_AGENT =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -38,6 +39,7 @@ public class VinylFutureScraperService {
         "(?i)(https?:)?(?:\\\\?/\\\\?/|/)?[^\\s\"'<>\\\\]+\\.mp3(?:\\?[^\\s\"'<>\\\\]*)?"
     );
     private static final Pattern TRACK_POSITION = Pattern.compile("(?i)\\b([A-H]\\d{1,2})\\b");
+    private static final Pattern TRACK_LEADING_POSITION = Pattern.compile("(?i)^\\s*([A-H]\\d{1,2}|\\d{1,2})\\s*(?:\\||:|-)?\\s*(.*)$");
     private static final Pattern YEAR = Pattern.compile("\\b(19\\d{2}|20\\d{2})\\b");
     private static final Pattern PRICE = Pattern.compile("([0-9]+(?:[.,][0-9]{1,2})?)");
 
@@ -117,9 +119,9 @@ public class VinylFutureScraperService {
                 text(doc, "article.single_product .labelContainer [itemprop=provider]"),
                 text(doc, "article.product .musiclabel a"), text(doc, ".musiclabel a"), text(doc, ".label"))),
             clean(firstNonBlank(labelled.get("genre"), labelled.get("genero"), labelled.get("style"),
-                jsonLd.get("genre"), text(doc, ".genre"), text(doc, ".style"))),
+                jsonLd.get("genre"), text(doc, "[itemprop=genre]"), text(doc, ".genre"), text(doc, ".style"))),
             parseYear(firstNonBlank(labelled.get("year"), labelled.get("anio"), labelled.get("released"),
-                jsonLd.get("datePublished"))),
+                labelled.get("release"), jsonLd.get("datePublished"))),
             clean(firstNonBlank(labelled.get("country"), labelled.get("pais"), jsonLd.get("country"))),
             clean(firstNonBlank(labelled.get("format"), labelled.get("formato"),
                 text(doc, "article.single_product .product_infos .infos .medium"),
@@ -138,6 +140,14 @@ public class VinylFutureScraperService {
     private List<TrackInfo> extractTracks(Document doc, String productUrl, String productId) {
         Map<String, TrackInfo> tracks = new LinkedHashMap<>();
 
+        if (productId != null) {
+            for (TrackInfo track : fetchPlaylistTracks(productUrl, productId)) {
+                if (track.mp3Url() != null && !track.mp3Url().isBlank()) {
+                    tracks.merge(track.mp3Url(), track, this::preferDetailedTrack);
+                }
+            }
+        }
+
         for (Element element : doc.select(
             "audio[src], source[src], a[href], [data-src], [data-audio], [data-mp3], [data-preview], [data-url]"
         )) {
@@ -152,7 +162,7 @@ public class VinylFutureScraperService {
             addTrack(tracks, productUrl, raw, null, null);
         }
 
-        if (productId != null) {
+        if (productId != null && tracks.isEmpty()) {
             String prefix = "playTrack_" + productId + "_";
             String streamBase = streamBase(productId);
             for (Element anchor : doc.select("a[id^=" + prefix + "]")) {
@@ -162,6 +172,55 @@ public class VinylFutureScraperService {
         }
 
         return new ArrayList<>(tracks.values());
+    }
+
+    private List<TrackInfo> fetchPlaylistTracks(String productUrl, String productId) {
+        String playlist = fetchPlaylistData(productUrl, productId);
+        if (playlist == null || playlist.isBlank()) {
+            return List.of();
+        }
+        String[] parts = playlist.split("~");
+        if (parts.length < 8) {
+            return List.of();
+        }
+        List<TrackInfo> tracks = new ArrayList<>();
+        String streamBase = streamBase(productId);
+        for (int index = 7; index < parts.length; index++) {
+            String entry = parts[index];
+            int firstSlash = entry.indexOf('\\');
+            int secondSlash = firstSlash < 0 ? -1 : entry.indexOf('\\', firstSlash + 1);
+            if (firstSlash <= 0 || secondSlash <= firstSlash + 1) {
+                continue;
+            }
+            String suffix = entry.substring(0, firstSlash).strip();
+            String display = clean(entry.substring(secondSlash + 1));
+            String position = null;
+            String name = display;
+            if (display != null) {
+                Matcher matcher = TRACK_LEADING_POSITION.matcher(display);
+                if (matcher.matches()) {
+                    position = clean(matcher.group(1));
+                    name = clean(matcher.group(2));
+                }
+            }
+            tracks.add(new TrackInfo(position, name, streamBase + suffix + ".mp3"));
+        }
+        return tracks;
+    }
+
+    String fetchPlaylistData(String productUrl, String productId) {
+        try {
+            return Jsoup.connect(resolveUrl(productUrl, PLAYLIST_ENDPOINT) + "?t=" + productId + "&s=a")
+                .userAgent(USER_AGENT)
+                .timeout(timeoutMs)
+                .ignoreContentType(true)
+                .referrer(productUrl)
+                .execute()
+                .body();
+        } catch (Exception ex) {
+            log.debug("Playlist AJAX no disponible para '{}': {}", productUrl, ex.getMessage());
+            return null;
+        }
     }
 
     private void addTrack(Map<String, TrackInfo> tracks, String pageUrl, String rawUrl,

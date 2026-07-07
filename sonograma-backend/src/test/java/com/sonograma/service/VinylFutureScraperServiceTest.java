@@ -14,6 +14,15 @@ class VinylFutureScraperServiceTest {
 
     private final VinylFutureScraperService service = new VinylFutureScraperService(new ObjectMapper());
 
+    private VinylFutureScraperService localOnlyService() {
+        return new VinylFutureScraperService(new ObjectMapper()) {
+            @Override
+            String fetchPlaylistData(String productUrl, String productId) {
+                return null;
+            }
+        };
+    }
+
     @Test
     void extractsMetadataAndRelativeAudioFromSupplierHtml() {
         String html = """
@@ -59,12 +68,13 @@ class VinylFutureScraperServiceTest {
 
     @Test
     void buildsLegacyDeejayPreviewWhenVinylFutureUsesPlayTrackIds() {
+        VinylFutureScraperService localOnlyService = localOnlyService();
         String html = """
             <a id="playTrack_106278_a"><b>A1</b><span class="trackname">Legacy Track</span></a>
             """;
         Document doc = Jsoup.parse(html, "https://www.vinylfuture.com/release_Vinyl__106278");
 
-        VinylPageData result = service.extractPageData(
+        VinylPageData result = localOnlyService.extractPageData(
             doc, "https://www.vinylfuture.com/release_Vinyl__106278");
 
         assertEquals(1, result.tracks().size());
@@ -75,14 +85,71 @@ class VinylFutureScraperServiceTest {
     }
 
     @Test
+    void extractsYearFromReleaseInfoBlock() {
+        VinylFutureScraperService localOnlyService = localOnlyService();
+        String html = """
+            <article class="single_product">
+              <div class="artist"><h1>O.H.M</h1></div>
+              <div class="title"><h1>Entropy EP</h1></div>
+              <div class="product_infos">
+                <div class="infos">
+                  <span class="format"><b>Format:</b> <span class="medium disc1">12inch Vinyl</span></span>
+                  <span class="date"><b>Release:</b> 02.12.2025</span>
+                </div>
+              </div>
+            </article>
+            """;
+        Document doc = Jsoup.parse(html, "https://www.vinylfuture.com/OHM_Entropy_EP_WV9005_Vinyl__1194016");
+
+        VinylPageData result = localOnlyService.extractPageData(
+            doc, "https://www.vinylfuture.com/OHM_Entropy_EP_WV9005_Vinyl__1194016");
+
+        assertEquals(2025, result.year());
+    }
+
+    @Test
+    void prefersPlaylistAjaxTrackMetadataWhenAvailable() {
+        VinylFutureScraperService ajaxAwareService = new VinylFutureScraperService(new ObjectMapper()) {
+            @Override
+            String fetchPlaylistData(String productUrl, String productId) {
+                return "1887582026~1006977~13+YEAR+CICADA~HA+HA+GRAVITY+LP~TP27~a~n"
+                    + "~a\\\\0\\\\1 GTA~b\\\\0\\\\2 BUILDING~i\\\\0\\\\9 DCT";
+            }
+        };
+        String html = """
+            <div class="tracks">
+              <ul class="playtrack">
+                <li><a class="track noMod" id="playTrack_1006977_a" title="Play" href="#"><b>1</b><span class="trackname">GTA</span></a></li>
+                <li><a class="track noMod" id="playTrack_1006977_b" title="Play" href="#"><b>2</b><span class="trackname">BUILDING</span></a></li>
+                <li><a class="track noMod" id="playTrack_1006977_i" title="Play" href="#"><b>9</b><span class="trackname">DCT</span></a></li>
+              </ul>
+            </div>
+            """;
+        Document doc = Jsoup.parse(html,
+            "https://www.vinylfuture.com/13_YEAR_CICADA_HA_HA_GRAVITY_LP_TP27_Vinyl__1006977");
+
+        VinylPageData result = ajaxAwareService.extractPageData(
+            doc, "https://www.vinylfuture.com/13_YEAR_CICADA_HA_HA_GRAVITY_LP_TP27_Vinyl__1006977");
+
+        assertEquals(3, result.tracks().size());
+        assertEquals("1", result.tracks().get(0).label());
+        assertEquals("GTA", result.tracks().get(0).name());
+        assertEquals("https://www.deejay.de/streamit/7/7/1006977a.mp3", result.tracks().get(0).mp3Url());
+        assertEquals("9", result.tracks().get(2).label());
+        assertEquals("DCT", result.tracks().get(2).name());
+        assertEquals("https://www.deejay.de/streamit/7/7/1006977i.mp3", result.tracks().get(2).mp3Url());
+    }
+
+    @Test
     void ignoresBlankAudioElementsWithoutTrackPosition() {
+        VinylFutureScraperService localOnlyService = localOnlyService();
         String html = """
             <audio src=""></audio>
             <a href="/preview.mp3"></a>
             """;
         Document doc = Jsoup.parse(html, "https://www.vinylfuture.com/release_Vinyl__106278");
 
-        VinylPageData result = service.extractPageData(
+        VinylPageData result = localOnlyService.extractPageData(
             doc, "https://www.vinylfuture.com/release_Vinyl__106278");
 
         assertEquals(1, result.tracks().size());
