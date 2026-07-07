@@ -131,6 +131,8 @@ export const api = {
     actualizar: (id, disco) => request('PUT', `/discos/${id}`, disco),
     cambiarEstado: (id, estado) =>
       request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
+    cambiarEstadoCopia: (idDisco, idCopia, estado) =>
+      request('PATCH', `/discos/${idDisco}/copias/${idCopia}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
     buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
     previews: {
@@ -245,6 +247,19 @@ export const api = {
       const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
       return `${BASE}/ventas/libro/exportar${q ? `?${q}` : ''}`
     },
+  },
+
+  preVentas: {
+    listar: () => request('GET', '/pre-ventas'),
+    crear: (payload) => request('POST', '/pre-ventas', payload),
+  },
+
+  gastosTienda: {
+    listar: () => request('GET', '/gastos-tienda'),
+    resumen: () => request('GET', '/gastos-tienda/resumen'),
+    crear: (payload) => request('POST', '/gastos-tienda', payload),
+    actualizar: (id, payload) => request('PUT', `/gastos-tienda/${id}`, payload),
+    eliminar: (id) => request('DELETE', `/gastos-tienda/${id}`),
   },
 
   shippingOrders: {

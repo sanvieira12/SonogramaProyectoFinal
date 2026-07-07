@@ -144,6 +144,7 @@ public class CatalogPricingService {
         }
 
         RecordType recordType = detectRecordType(format);
+        int normalizedQuantity = normalizeQuantity(quantity);
         BigDecimal extra = switch (recordType) {
             case DOUBLE -> settings.getExtraCostDoubleEur();
             case MULTI -> settings.getExtraCostMultiEur();
@@ -155,26 +156,27 @@ public class CatalogPricingService {
             case SINGLE -> settings.getMarkupSingle();
         };
 
-        BigDecimal lineTotal = unitPriceEur.multiply(BigDecimal.valueOf(normalizeQuantity(quantity))).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal realUnitCostEur = unitPriceEur.add(extra).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal realUnitCostUyu = realUnitCostEur.multiply(settings.getEurUyuRate()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal finalPriceUyu = applyRounding(realUnitCostUyu.multiply(markup), settings.getRoundingRule());
+        BigDecimal lineTotal = unitPriceEur.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal extraLineCostEur = extra.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal finalPriceUyu = applyRounding(unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup), DEFAULT_ROUNDING_RULE);
 
-        return new PricingResult(recordType, lineTotal, extra, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
+        return new PricingResult(recordType, lineTotal, extraLineCostEur, realLineCostEur, realLineCostUyu, markup, finalPriceUyu);
     }
 
     public RecordType detectRecordType(String format) {
         String normalized = normalizeFormat(format);
+        String compact = normalized.replace(" ", "").replace("'", "").replace("\"", "");
         if (normalized.isBlank()) {
             return RecordType.SINGLE;
         }
-        if (normalized.contains("boxset") || normalized.contains("box set") || normalized.contains("box")
-            || normalized.contains("multi") || normalized.startsWith("3x") || normalized.startsWith("4x")
-            || normalized.contains("3lp") || normalized.contains("4lp")) {
+        if (compact.contains("boxset") || normalized.contains("box set") || compact.startsWith("3x")
+            || compact.startsWith("4x") || compact.startsWith("5x") || compact.contains("3lp")
+            || compact.contains("4lp") || compact.contains("5lp") || compact.contains("multi")) {
             return RecordType.MULTI;
         }
-        if (normalized.startsWith("2x") || normalized.contains("2lp") || normalized.contains("2xlp")
-            || normalized.contains("double")) {
+        if (isDoubleAlbum(normalized, compact)) {
             return RecordType.DOUBLE;
         }
         return RecordType.SINGLE;
@@ -311,6 +313,14 @@ public class CatalogPricingService {
         return format == null ? "" : format.strip().toLowerCase(Locale.ROOT);
     }
 
+    private boolean isDoubleAlbum(String normalized, String compact) {
+        return compact.startsWith("2x")
+            || compact.contains("2lp")
+            || compact.contains("2xlp")
+            || compact.contains("2x12")
+            || compact.contains("double");
+    }
+
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.strip();
     }
@@ -368,7 +378,7 @@ public class CatalogPricingService {
         settings.setMarkupSingle(request.markupSingle());
         settings.setMarkupDouble(request.markupDouble());
         settings.setMarkupMulti(request.markupMulti());
-        settings.setRoundingRule(request.roundingRule());
+        settings.setRoundingRule(DEFAULT_ROUNDING_RULE);
     }
 
     private PricingSettingsDTO toDto(PricingSettings settings) {

@@ -262,8 +262,6 @@ export default function LibroVentas() {
   }
 
   const totalFinal = ventas.reduce((s, v) => s + (v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
-  const totalGanancia = ventas.reduce((s, v) => s + (v.gananciaEstimada || 0), 0)
-
   async function cancelarVenta() {
     if (!ventaCancelar) return
     setCancelando(true)
@@ -351,11 +349,10 @@ export default function LibroVentas() {
 
       {/* Totales */}
       {ventas.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           {[
             { label: 'Ventas', value: ventas.length },
             { label: 'Ingresos registrados', value: fmt(totalFinal) },
-            { label: 'Ganancia estimada', value: fmt(totalGanancia) },
           ].map(({ label, value }) => (
             <div key={label} className="card p-4 text-center">
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
@@ -371,7 +368,7 @@ export default function LibroVentas() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'Estado Pago', 'Ganancia'].map(h => (
+                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'Estado Pago'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -380,11 +377,11 @@ export default function LibroVentas() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
               ) : ventas.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
               ) : ventas.map(v => (
                 <tr key={`${v.tipoMovimiento || 'VENTA'}-${v.idPagoDeuda || v.idVenta}`} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
                   <td className="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
@@ -429,9 +426,6 @@ export default function LibroVentas() {
                         {v.estadoPago}
                       </span>
                     ) : '—'}
-                  </td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                    {fmt(v.gananciaEstimada)}
                   </td>
                 </tr>
               ))}

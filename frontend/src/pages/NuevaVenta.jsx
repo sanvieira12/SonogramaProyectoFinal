@@ -97,6 +97,7 @@ export default function NuevaVenta() {
   const debounceRef = useRef(null)
 
   const idDiscoParam = searchParams.get('idDisco')
+  const qrParam = searchParams.get('qr')
 
   const [departamentos, setDepartamentos] = useState(DEPARTAMENTOS_FALLBACK)
   const [discosDisponibles, setDiscosDisponibles] = useState([])
@@ -155,16 +156,17 @@ export default function NuevaVenta() {
             disco: d,
             precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
             cantidad: '1',
+            codigoQr: qrParam && d.qrCopies?.some(copy => copy.codigoQr === qrParam) ? qrParam : null,
             manualItem: false,
           }])
         })
         .catch(() => setErrores({ disco: 'No se pudo cargar el disco del link' }))
     } else {
-      api.discos.todos()
-        .then(ds => setDiscosDisponibles(ds.filter(d => d.estado === 'DISPONIBLE' || d.estado === 'RESERVADO')))
+      api.discos.disponibles()
+        .then(ds => setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0)))
         .catch(() => setDiscosDisponibles([]))
     }
-  }, [idDiscoParam])
+  }, [idDiscoParam, qrParam])
 
   useEffect(() => {
     if (tipoEntrega !== 'ENVIO' || !departamento) return
@@ -182,14 +184,12 @@ export default function NuevaVenta() {
     const base = subtotal - descuento
     const envio = tipoEntrega === 'ENVIO' ? toNumber(costoEnvio) : 0
     const totalFinal = base
-    const costoDisco = carrito.reduce((s, item) => s + toNumber(item.disco?.costo) * cantidadItem(item), 0)
-    const ganancia = totalFinal - costoDisco
-    return { subtotal, descuento, base, envio, totalFinal, ganancia }
+    return { subtotal, descuento, base, envio, totalFinal }
   }, [carrito, descuentoPct, costoEnvio, tipoEntrega])
 
   async function cargarDiscosVendibles() {
-    const ds = await api.discos.todos()
-    setDiscosDisponibles(ds.filter(d => d.estado === 'DISPONIBLE' || d.estado === 'RESERVADO'))
+    const ds = await api.discos.disponibles()
+    setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0))
   }
 
   function agregarAlCarrito(d) {
@@ -199,6 +199,7 @@ export default function NuevaVenta() {
       disco: d,
       precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
       cantidad: '1',
+      codigoQr: null,
       manualItem: false,
     }])
     setDiscoDetalle(null)
@@ -245,7 +246,7 @@ export default function NuevaVenta() {
     setBusquedaDisco(q)
     if (!q.trim()) { cargarDiscosVendibles(); return }
     api.discos.buscar(q).then(ds =>
-      setDiscosDisponibles(ds.filter(d => d.estado === 'DISPONIBLE' || d.estado === 'RESERVADO'))
+      setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0))
     )
   }
 
@@ -345,6 +346,7 @@ export default function NuevaVenta() {
           artista: item.manualItem ? item.artista : undefined,
           album: item.manualItem ? item.album : undefined,
           codigo: item.manualItem ? item.codigo : undefined,
+          codigoQr: item.codigoQr || undefined,
           manualItem: Boolean(item.manualItem),
           cantidad: cantidadItem(item),
           precioUnitario: Number(toNumber(item.precioUnitario).toFixed(2)),
@@ -695,7 +697,6 @@ export default function NuevaVenta() {
             <div className="border-t border-slate-200 dark:border-stone-800 pt-2">
               <ResumenLinea label="Total venta" value={money(totales.totalFinal)} strong />
             </div>
-            {carrito.length > 0 && <ResumenLinea label="Ganancia estimada" value={money(totales.ganancia)} />}
           </div>
           {errores.total && <p className="text-red-500 text-xs">{errores.total}</p>}
 

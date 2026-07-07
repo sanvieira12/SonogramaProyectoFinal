@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [ventasPorMes, setVentasPorMes] = useState([])
   const [estadisticas, setEstadisticas] = useState(null)
+  const [gastosMesActual, setGastosMesActual] = useState(0)
   const [graficaSeleccionada, setGraficaSeleccionada] = useState('inventarioPorEstado')
   const [ultimasVentas, setUltimasVentas] = useState([])
   const [paginaVentas, setPaginaVentas] = useState(1)
@@ -80,6 +81,9 @@ export default function Dashboard() {
     api.libro.listar({})
       .then(data => setUltimasVentas(Array.isArray(data) ? data : []))
       .catch(() => setUltimasVentas([]))
+    api.gastosTienda.resumen()
+      .then(data => setGastosMesActual(Number(data?.totalMesActual || 0)))
+      .catch(() => setGastosMesActual(0))
   }, [])
 
   const stats = {
@@ -110,9 +114,6 @@ export default function Dashboard() {
   })()
   const ventaSemana = estadisticas?.ventasPorSemana?.find(v => v.clave === semanaActual)
   const ventaTotalSemana = Number(ventaSemana?.totalMonto || 0)
-  const ingresosTotales = (estadisticas?.ventasPorMes || [])
-    .reduce((sum, item) => sum + Number(item.totalMonto || 0), 0)
-
   const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
   const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
     etiqueta: item.etiqueta,
@@ -177,9 +178,9 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Ingresos totales"
-          value={fmtMonto(ingresosTotales)}
-          sublabel="Pesos uruguayos"
+          label="Gastos de tienda del mes"
+          value={fmtMonto(gastosMesActual)}
+          sublabel="Egresos registrados"
           color="bg-slate-100 dark:bg-stone-900"
           icon={
             <svg className="w-5 h-5 text-[#6B7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -50,4 +50,7 @@ public class DetalleVenta {
     @Column(name = "manual_item", nullable = false)
     @Builder.Default
     private Boolean manualItem = false;
+
+    @Column(name = "copy_ids_snapshot", columnDefinition = "TEXT")
+    private String copyIdsSnapshot;
 }

@@ -1,5 +1,6 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.EstadoCopiaDisco;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -31,6 +32,11 @@ public class DiscoQrCopy {
 
     @Column(name = "codigo_qr", nullable = false, unique = true)
     private String codigoQr;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "estado", nullable = false, length = 20)
+    @Builder.Default
+    private EstadoCopiaDisco estado = EstadoCopiaDisco.DISPONIBLE;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default

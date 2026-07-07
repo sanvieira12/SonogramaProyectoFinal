@@ -1,13 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/sonograma'
 
-const ROUNDING_OPTIONS = [
-  { value: 'NONE', label: 'No rounding' },
-  { value: 'NEAREST_10', label: 'Round to nearest 10 UYU' },
-  { value: 'NEAREST_50', label: 'Round to nearest 50 UYU' },
-  { value: 'NEAREST_100', label: 'Round to nearest 100 UYU' },
-]
-
 const EMPTY = {
   eurUyuRate: '49.5',
   extraCostSingleEur: '5',
@@ -16,7 +9,6 @@ const EMPTY = {
   markupSingle: '1.7',
   markupDouble: '1.5',
   markupMulti: '1.4',
-  roundingRule: 'NEAREST_10',
 }
 
 function toForm(settings) {
@@ -29,7 +21,6 @@ function toForm(settings) {
     markupSingle: String(settings.markupSingle ?? ''),
     markupDouble: String(settings.markupDouble ?? ''),
     markupMulti: String(settings.markupMulti ?? ''),
-    roundingRule: settings.roundingRule || 'NEAREST_10',
   }
 }
 
@@ -42,7 +33,6 @@ function toPayload(form) {
     markupSingle: Number(form.markupSingle),
     markupDouble: Number(form.markupDouble),
     markupMulti: Number(form.markupMulti),
-    roundingRule: form.roundingRule,
   }
 }
 
@@ -204,12 +194,6 @@ export default function PricingSettingsPage() {
           <InputField label="Markup single" value={form.markupSingle} onChange={e => setField('markupSingle', e.target.value)} step="0.0001" min="0.0001" />
           <InputField label="Markup double" value={form.markupDouble} onChange={e => setField('markupDouble', e.target.value)} step="0.0001" min="0.0001" />
           <InputField label="Markup multi" value={form.markupMulti} onChange={e => setField('markupMulti', e.target.value)} step="0.0001" min="0.0001" />
-          <label className="space-y-1.5">
-            <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Final price rounding rule</span>
-            <select className="input" value={form.roundingRule} onChange={e => setField('roundingRule', e.target.value)}>
-              {ROUNDING_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
         </div>
 
         <div className="flex flex-wrap gap-3">
@@ -275,13 +259,13 @@ export default function PricingSettingsPage() {
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.title || '—'}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.format || '—'}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.type}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.unitPriceEur, 2)}</td>
-                  <td className="px-4 py-3 tabular-nums">{row.quantity ?? '—'}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.unitLineTotalEur, 2)}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.extraCostEur, 2)}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.realCostEur, 2)}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.realCostUyu, 2)}</td>
-                  <td className="px-4 py-3 tabular-nums">{money(row.markup, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.unitPriceEur, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{row.quantity ?? '—'}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.unitLineTotalEur, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.extraCostEur, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.realCostEur, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.realCostUyu, 2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-white">{money(row.markup, 2)}</td>
                   <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white tabular-nums">{money(row.finalSalePriceUyu, 0)}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${row.pricingMode === 'MANUAL' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`}>

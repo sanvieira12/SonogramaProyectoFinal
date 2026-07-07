@@ -8,9 +8,11 @@ import NuevaVenta from './pages/NuevaVenta'
 import Importar from './pages/Importar'
 import Deudas from './pages/Deudas'
 import LibroVentas from './pages/LibroVentas'
+import PreVentas from './pages/PreVentas'
 import Pedidos from './pages/Pedidos'
 import PedidoDetalle from './pages/PedidoDetalle'
 import Notas from './pages/Notas'
+import GastosTienda from './pages/GastosTienda'
 import Navbar from './components/Navbar'
 import StockLayout from './components/StockLayout'
 import PricingSettingsPage from './pages/PricingSettingsPage'
@@ -68,6 +70,7 @@ export default function App() {
             <Route path="/discos" element={<DiscosCatalogo />} />
             <Route path="/clientes" element={<Clientes />} />
             <Route path="/ventas/nueva" element={<NuevaVenta />} />
+            <Route path="/pre-ventas" element={<PreVentas />} />
             <Route path="/importar" element={<Importar />} />
             <Route path="/stock" element={<StockLayout />}>
               <Route index element={<PricingSettingsPage />} />
@@ -79,6 +82,7 @@ export default function App() {
             <Route path="/pedidos" element={<Pedidos />} />
             <Route path="/pedidos/:id" element={<PedidoDetalle />} />
             <Route path="/notas" element={<Notas />} />
+            <Route path="/gastos-tienda" element={<GastosTienda />} />
             <Route path="/shipping-orders" element={<Navigate to="/pedidos" replace />} />
             <Route path="/deudores" element={<Navigate to="/deudas" replace />} />
           </Route>

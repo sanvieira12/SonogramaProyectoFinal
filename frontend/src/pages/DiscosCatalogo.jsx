@@ -164,11 +164,12 @@ function qrCopiesForDisco(disco) {
     id: `legacy-${disco.idDisco}`,
     copyNumber: 1,
     codigoQr: disco.codigoQr,
+    estado: 'DISPONIBLE',
     content: buildSaleUrl(disco, disco.codigoQr),
   }]
 }
 
-function QrModal({ disco, onClose }) {
+function QrModal({ disco, onClose, onUpdated }) {
   if (!disco) return null
   const copies = qrCopiesForDisco(disco)
   const sourceLabel = disco.procedencia === 'DISCOGS'
@@ -202,6 +203,7 @@ function QrModal({ disco, onClose }) {
                     ['Disco', disco.album],
                     ['Código catálogo', disco.codigoInterno],
                     ['Identificador copia', copy.copyNumber ? `Copia ${copy.copyNumber}` : null],
+                    ['Estado', copy.estado || '—'],
                     ['Código QR', copy.codigoQr],
                     ['URL venta', saleUrl],
                   ].map(([label, value]) => (
@@ -211,6 +213,19 @@ function QrModal({ disco, onClose }) {
                     </div>
                   ))}
                 </div>
+                {copy.id && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const nuevoEstado = copy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
+                      const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, copy.id, nuevoEstado)
+                      onUpdated(actualizado)
+                    }}
+                    className="btn-secondary w-full mt-4"
+                  >
+                    {copy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
+                  </button>
+                )}
               </article>
             )
           })}
@@ -309,7 +324,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
         {/* Acciones fijas al fondo */}
         <div className="p-6 pt-0 space-y-2">
           <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary w-full">
-            Ver QR ({disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
+            Ver QR ({disco.totalCopias ?? disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
           </button>
           <button
             onClick={() => { onEditar(disco); onCerrar() }}
@@ -836,7 +851,15 @@ export default function DiscosCatalogo() {
         onViewQr={d => { abrirQr(d); setSlideOverDisco(null) }}
       />
 
-      <QrModal disco={qrDisco} onClose={() => setQrDisco(null)} />
+      <QrModal
+        disco={qrDisco}
+        onClose={() => setQrDisco(null)}
+        onUpdated={(actualizado) => {
+          setDiscos(prev => prev.map(item => item.idDisco === actualizado.idDisco ? actualizado : item))
+          setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
+          setQrDisco(actualizado)
+        }}
+      />
 
       {/* Formulario de edición / creación */}
       {discoForm !== null && (

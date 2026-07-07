@@ -13,6 +13,7 @@ import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.DireccionCliente;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.Envio;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
@@ -61,6 +62,7 @@ public class VentaService {
     private final PagoDeudaRepository pagoDeudaRepository;
     private final ClienteService clienteService;
     private final CostosVentaService costosVentaService;
+    private final DiscoQrCopyService discoQrCopyService;
 
     private static final BigDecimal CIEN = new BigDecimal("100");
 
@@ -104,6 +106,7 @@ public class VentaService {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
             discoLegacy = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
+            discoQrCopyService.synchronize(discoLegacy);
             validarStockDisponible(discoLegacy);
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
@@ -145,12 +148,12 @@ public class VentaService {
 
         if (tieneDetalles) {
             for (PreparedDetalle preparado : detallesPreparados) {
-                DetalleVenta detalle = detalleDesdePreparado(venta, preparado);
+                String copyIdsSnapshot = reservarStock(preparado);
+                DetalleVenta detalle = detalleDesdePreparado(venta, preparado, copyIdsSnapshot);
                 venta.getDetalles().add(detalleVentaRepository.save(detalle));
-                descontarStock(preparado.disco(), preparado.cantidad());
             }
         } else {
-            descontarStock(discoLegacy, 1);
+            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
         }
 
         if (montoDeuda.compareTo(BigDecimal.ZERO) > 0) {
@@ -232,6 +235,7 @@ public class VentaService {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
             discoLegacy = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
+            discoQrCopyService.synchronize(discoLegacy);
             validarStockDisponible(discoLegacy);
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
@@ -269,12 +273,12 @@ public class VentaService {
 
         if (tieneDetalles) {
             for (PreparedDetalle preparado : detallesPreparados) {
-                DetalleVenta detalle = detalleDesdePreparado(venta, preparado);
+                String copyIdsSnapshot = reservarStock(preparado);
+                DetalleVenta detalle = detalleDesdePreparado(venta, preparado, copyIdsSnapshot);
                 venta.getDetalles().add(detalleVentaRepository.save(detalle));
-                descontarStock(preparado.disco(), preparado.cantidad());
             }
         } else {
-            descontarStock(discoLegacy, 1);
+            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
         }
 
         sincronizarDeuda(venta, cliente, costos.getTotalFinal(), montoPagado, montoDeuda, estadoPago, fechaVenta);
@@ -545,6 +549,7 @@ public class VentaService {
         if (dto.getIdDisco() != null) {
             Disco disco = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
+            discoQrCopyService.synchronize(disco);
             validarStockDisponible(disco, cantidad);
             return new PreparedDetalle(
                     disco,
@@ -556,7 +561,9 @@ public class VentaService {
                     descripcionDetalle(dto, disco),
                     disco.getCodigoInterno(),
                     (disco.getCosto() != null ? disco.getCosto() : BigDecimal.ZERO)
-                            .multiply(BigDecimal.valueOf(cantidad))
+                            .multiply(BigDecimal.valueOf(cantidad)),
+                    dto.getCopyId(),
+                    dto.getCodigoQr()
             );
         }
 
@@ -573,11 +580,13 @@ public class VentaService {
                 textoNulo(dto.getAlbum()),
                 descripcion,
                 textoNulo(dto.getCodigo()),
-                BigDecimal.ZERO
+                BigDecimal.ZERO,
+                null,
+                null
         );
     }
 
-    private DetalleVenta detalleDesdePreparado(Venta venta, PreparedDetalle preparado) {
+    private DetalleVenta detalleDesdePreparado(Venta venta, PreparedDetalle preparado, String copyIdsSnapshot) {
         return DetalleVenta.builder()
                 .venta(venta)
                 .disco(preparado.disco())
@@ -588,6 +597,7 @@ public class VentaService {
                 .albumSnap(preparado.albumSnap())
                 .descripcionSnap(preparado.descripcionSnap())
                 .codigoSnap(preparado.codigoSnap())
+                .copyIdsSnapshot(copyIdsSnapshot)
                 .build();
     }
 
@@ -596,28 +606,32 @@ public class VentaService {
     }
 
     private void validarStockDisponible(Disco disco, int cantidad) {
-        int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
-        if (copias < cantidad || disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
+        int copias = (int) discoQrCopyService.countAvailableCopies(disco.getIdDisco());
+        if (copias < cantidad || disco.getEstado() == EstadoDisco.SIN_STOCK) {
             throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' está sin stock");
         }
     }
 
-    private void descontarStock(Disco disco, int cantidad) {
-        if (disco == null) return;
-        int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 1;
-        int restantes = Math.max(0, copias - Math.max(1, cantidad));
-        disco.setCantidadCopias(restantes);
-        if (restantes == 0) {
-            disco.setEstado(EstadoDisco.VENDIDO);
-        }
-        discoRepository.save(disco);
+    private String reservarStock(PreparedDetalle preparado) {
+        if (preparado.disco() == null) return null;
+        List<DiscoQrCopy> reserved = discoQrCopyService.reserveCopies(
+                preparado.disco(),
+                Math.max(1, preparado.cantidad()),
+                preparado.copyId(),
+                preparado.codigoQr()
+        );
+        long restantes = discoQrCopyService.countAvailableCopies(preparado.disco().getIdDisco());
+        preparado.disco().setCantidadCopias((int) restantes);
+        preparado.disco().setEstado(restantes > 0 ? EstadoDisco.DISPONIBLE : EstadoDisco.SIN_STOCK);
+        discoRepository.save(preparado.disco());
+        return reserved.stream().map(copy -> String.valueOf(copy.getId())).collect(Collectors.joining(","));
     }
 
     private void restaurarStockVenta(Venta venta) {
         if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
             venta.getDetalles().stream()
                     .filter(d -> d.getDisco() != null)
-                    .forEach(d -> restaurarStock(d.getDisco(), cantidadDetalle(d)));
+                    .forEach(this::restaurarStock);
         } else if (venta.getDisco() != null) {
             restaurarStock(venta.getDisco(), 1);
         }
@@ -626,10 +640,21 @@ public class VentaService {
     private void restaurarStock(Disco disco, int cantidad) {
         int copias = disco.getCantidadCopias() != null ? disco.getCantidadCopias() : 0;
         disco.setCantidadCopias(copias + Math.max(1, cantidad));
-        if (disco.getEstado() == EstadoDisco.VENDIDO || disco.getEstado() == EstadoDisco.SIN_STOCK) {
-            disco.setEstado(EstadoDisco.DISPONIBLE);
-        }
+        disco.setEstado(EstadoDisco.DISPONIBLE);
         discoRepository.save(disco);
+    }
+
+    private void restaurarStock(DetalleVenta detalle) {
+        if (detalle.getDisco() == null) return;
+        if (detalle.getCopyIdsSnapshot() == null || detalle.getCopyIdsSnapshot().isBlank()) {
+            restaurarStock(detalle.getDisco(), cantidadDetalle(detalle));
+            return;
+        }
+        discoQrCopyService.restoreCopies(detalle.getCopyIdsSnapshot());
+        long disponibles = discoQrCopyService.countAvailableCopies(detalle.getDisco().getIdDisco());
+        detalle.getDisco().setCantidadCopias((int) disponibles);
+        detalle.getDisco().setEstado(disponibles > 0 ? EstadoDisco.DISPONIBLE : EstadoDisco.SIN_STOCK);
+        discoRepository.save(detalle.getDisco());
     }
 
     private void sincronizarDeuda(
@@ -798,7 +823,9 @@ public class VentaService {
             String albumSnap,
             String descripcionSnap,
             String codigoSnap,
-            BigDecimal costoTotal
+            BigDecimal costoTotal,
+            Long copyId,
+            String codigoQr
     ) {}
 
     private CanalVenta parseCanal(String canalVenta) {

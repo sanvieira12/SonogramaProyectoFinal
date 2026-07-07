@@ -7,6 +7,7 @@ import com.sonograma.entity.Cliente;
 import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.Envio;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
@@ -51,6 +52,7 @@ class VentaServiceTest {
     @Mock private DetalleVentaRepository detalleVentaRepository;
     @Mock private PagoDeudaRepository pagoDeudaRepository;
     @Mock private ClienteService clienteService;
+    @Mock private DiscoQrCopyService discoQrCopyService;
 
     private VentaService ventaService;
 
@@ -66,7 +68,8 @@ class VentaServiceTest {
                 detalleVentaRepository,
                 pagoDeudaRepository,
                 clienteService,
-                new CostosVentaService()
+                new CostosVentaService(),
+                discoQrCopyService
         );
     }
 
@@ -76,6 +79,9 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "3000", 1);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
+        when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
             Venta venta = invocation.getArgument(0);
             venta.setIdVenta(100L);
@@ -103,7 +109,7 @@ class VentaServiceTest {
         assertThat(response.getMontoDeuda()).isEqualByComparingTo("1000.00");
         assertThat(response.getEstadoPago()).isEqualTo("PARCIAL");
         assertThat(disco.getCantidadCopias()).isZero();
-        assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
+        assertThat(disco.getEstado()).isEqualTo(EstadoDisco.SIN_STOCK);
 
         ArgumentCaptor<Deuda> deudaCaptor = ArgumentCaptor.forClass(Deuda.class);
         verify(deudaRepository).save(deudaCaptor.capture());
@@ -121,6 +127,12 @@ class VentaServiceTest {
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(discoA));
         when(discoRepository.findById(11L)).thenReturn(Optional.of(discoB));
+        when(discoQrCopyService.synchronize(discoA)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(discoQrCopyService.synchronize(discoB)).thenReturn(java.util.List.of(copy(11L, 2L, 1), copy(11L, 3L, 2)));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
+        when(discoQrCopyService.countAvailableCopies(11L)).thenReturn(2L, 1L);
+        when(discoQrCopyService.reserveCopies(discoA, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(discoQrCopyService.reserveCopies(discoB, 1, null, null)).thenReturn(java.util.List.of(copy(11L, 2L, 1)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
             Venta venta = invocation.getArgument(0);
             venta.setIdVenta(101L);
@@ -157,6 +169,8 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "3000", 1);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L);
 
         VentaRequestDTO request = VentaRequestDTO.builder()
                 .idCliente(1L)
@@ -223,6 +237,9 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "1000", 3);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1), copy(10L, 2L, 2), copy(10L, 3L, 3)));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(3L, 1L);
+        when(discoQrCopyService.reserveCopies(disco, 2, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1), copy(10L, 2L, 2)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
             Venta venta = invocation.getArgument(0);
             venta.setIdVenta(103L);
@@ -313,6 +330,15 @@ class VentaServiceTest {
                 .precioVenta(new BigDecimal(precio))
                 .cantidadCopias(copias)
                 .estado(EstadoDisco.DISPONIBLE)
+                .build();
+    }
+
+    private static DiscoQrCopy copy(Long discoId, Long id, int number) {
+        return DiscoQrCopy.builder()
+                .id(id)
+                .idDisco(discoId)
+                .copyNumber(number)
+                .codigoQr("qr-" + id)
                 .build();
     }
 }

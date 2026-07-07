@@ -112,7 +112,7 @@ public class ExcelExportService {
             String[] headers = {
                 "Movimiento", "N° Factura", "Fecha", "Cliente", "Artista / Descripción", "Álbum",
                 "Canal", "Medio Pago", "Ingreso", "Total Venta", "Monto Deuda",
-                "Estado Pago", "Ganancia", "Observaciones"
+                "Estado Pago", "Observaciones"
             };
 
             Row headerRow = sheet.createRow(0);
@@ -124,7 +124,6 @@ public class ExcelExportService {
 
             int rowNum = 1;
             BigDecimal totalIngresos = BigDecimal.ZERO;
-            BigDecimal totalGanancia = BigDecimal.ZERO;
 
             for (VentaResponseDTO v : movimientos) {
                 Row row = sheet.createRow(rowNum++);
@@ -142,11 +141,9 @@ public class ExcelExportService {
                 setMoney(row, 9, v.getTotalFinal(), moneyStyle);
                 setMoney(row, 10, v.getMontoDeuda(), moneyStyle);
                 row.createCell(11).setCellValue(orEmpty(v.getEstadoPago()));
-                setMoney(row, 12, v.getGananciaEstimada(), moneyStyle);
-                row.createCell(13).setCellValue(orEmpty(v.getObservaciones()));
+                row.createCell(12).setCellValue(orEmpty(v.getObservaciones()));
 
                 totalIngresos = totalIngresos.add(ingresoMovimiento(v));
-                if (v.getGananciaEstimada() != null) totalGanancia = totalGanancia.add(v.getGananciaEstimada());
             }
 
             Row totalesRow = sheet.createRow(rowNum + 1);
@@ -155,7 +152,6 @@ public class ExcelExportService {
             totalLabel.setCellValue("TOTALES");
             totalLabel.setCellStyle(boldStyle);
             setMoney(totalesRow, 8, totalIngresos, moneyStyle);
-            setMoney(totalesRow, 12, totalGanancia, moneyStyle);
 
             sheet.setAutoFilter(new CellRangeAddress(0, 0, 0, headers.length - 1));
 

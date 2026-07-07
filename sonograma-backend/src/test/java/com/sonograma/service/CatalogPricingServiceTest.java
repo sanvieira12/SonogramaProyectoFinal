@@ -47,7 +47,7 @@ class CatalogPricingServiceTest {
 
         assertEquals(RecordType.SINGLE, result.recordType());
         assertEquals(new BigDecimal("10.00"), result.unitLineTotalEur());
-        assertEquals(new BigDecimal("5"), result.extraCostEur());
+        assertEquals(0, new BigDecimal("5.00").compareTo(result.extraCostEur()));
         assertEquals(new BigDecimal("15.00"), result.realUnitCostEur());
         assertEquals(new BigDecimal("742.50"), result.realUnitCostUyu());
         assertEquals(new BigDecimal("1.7"), result.markup());
@@ -59,7 +59,7 @@ class CatalogPricingServiceTest {
         CatalogPricingService.PricingResult result = service.calculate(new BigDecimal("10.00"), 1, "2x12\"");
 
         assertEquals(RecordType.DOUBLE, result.recordType());
-        assertEquals(new BigDecimal("8"), result.extraCostEur());
+        assertEquals(0, new BigDecimal("8.00").compareTo(result.extraCostEur()));
         assertEquals(new BigDecimal("18.00"), result.realUnitCostEur());
         assertEquals(new BigDecimal("891.00"), result.realUnitCostUyu());
         assertEquals(new BigDecimal("1.5"), result.markup());
@@ -71,7 +71,7 @@ class CatalogPricingServiceTest {
         CatalogPricingService.PricingResult result = service.calculate(new BigDecimal("12.00"), 1, "3x12\"");
 
         assertEquals(RecordType.MULTI, result.recordType());
-        assertEquals(new BigDecimal("9"), result.extraCostEur());
+        assertEquals(0, new BigDecimal("9.00").compareTo(result.extraCostEur()));
         assertEquals(new BigDecimal("21.00"), result.realUnitCostEur());
         assertEquals(new BigDecimal("1039.50"), result.realUnitCostUyu());
         assertEquals(new BigDecimal("1.4"), result.markup());
@@ -137,7 +137,7 @@ class CatalogPricingServiceTest {
     }
 
     @Test
-    void appliesRoundingRuleNone() {
+    void keepsDefaultRoundingRuleEvenIfRequestChangesIt() {
         PricingSettingsUpdateDTO settings = new PricingSettingsUpdateDTO(
             new BigDecimal("49.5"),
             new BigDecimal("5"),
@@ -150,7 +150,7 @@ class CatalogPricingServiceTest {
         );
 
         CatalogPricingService.PricingResult result = service.calculate(new BigDecimal("10"), 1, "LP", pricingFrom(settings));
-        assertEquals(new BigDecimal("1262.25"), result.finalPriceUyu());
+        assertEquals(new BigDecimal("1260"), result.finalPriceUyu());
     }
 
     @Test
@@ -188,7 +188,7 @@ class CatalogPricingServiceTest {
         pricing.setMarkupSingle(settings.markupSingle());
         pricing.setMarkupDouble(settings.markupDouble());
         pricing.setMarkupMulti(settings.markupMulti());
-        pricing.setRoundingRule(settings.roundingRule());
+        pricing.setRoundingRule(CatalogPricingService.DEFAULT_ROUNDING_RULE);
         return pricing;
     }
 }

@@ -4,6 +4,7 @@ import com.sonograma.dto.AudioPreviewDTO;
 import com.sonograma.dto.AudioPreviewRequestDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoService;
@@ -70,6 +71,14 @@ public class DiscoController {
             @PathVariable Long id,
             @RequestParam("cantidad") Integer cantidad) {
         return ResponseEntity.ok(discoService.actualizarCopias(id, cantidad));
+    }
+
+    @PatchMapping("/{idDisco}/copias/{idCopia}/estado")
+    public ResponseEntity<DiscoResponseDTO> cambiarEstadoCopia(
+            @PathVariable Long idDisco,
+            @PathVariable Long idCopia,
+            @RequestParam("nuevoEstado") EstadoCopiaDisco nuevoEstado) {
+        return ResponseEntity.ok(discoService.cambiarEstadoCopia(idDisco, idCopia, nuevoEstado));
     }
 
     @DeleteMapping("/{id}")
