@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
@@ -44,6 +45,18 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ErrorResponse(LocalDateTime.now(), 400, mensaje, request.getRequestURI()));
+    }
+
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<ErrorResponse> handleAsyncTimeout(
+            AsyncRequestTimeoutException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ErrorResponse(
+                        LocalDateTime.now(),
+                        503,
+                        "La descarga tardó demasiado y fue cancelada por timeout.",
+                        request.getRequestURI()
+                ));
     }
 
     @ExceptionHandler(RuntimeException.class)
