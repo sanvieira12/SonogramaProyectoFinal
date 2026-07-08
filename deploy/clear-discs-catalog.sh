@@ -41,6 +41,9 @@ docker exec -i "$PG_CONTAINER" psql \
   -d "$DB_NAME" <<SQL
 BEGIN;
 
+CREATE TEMP TABLE cleanup_options ON COMMIT DROP AS
+SELECT :vinylfuture_only::boolean AS vinylfuture_only;
+
 CREATE TEMP TABLE target_discos ON COMMIT DROP AS
 SELECT d.id_disco
 FROM disco d
@@ -108,7 +111,7 @@ BEGIN
   GET DIAGNOSTICS affected = ROW_COUNT;
   RAISE NOTICE 'discogs_import_row desvinculados: %', affected;
 
-  IF NOT :vinylfuture_only THEN
+  IF NOT (SELECT vinylfuture_only FROM cleanup_options) THEN
     DELETE FROM discogs_import_row;
     GET DIAGNOSTICS affected = ROW_COUNT;
     RAISE NOTICE 'discogs_import_row historial borrado: %', affected;
