@@ -89,4 +89,27 @@ describe('normalizeApiBase', () => {
       { headers: { Authorization: 'Bearer token-1' } },
     )
   })
+
+  it('downloads a copy QR as a PNG blob', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const blob = new Blob(['png'], { type: 'image/png' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'image/png',
+        'Content-Disposition': 'inline; filename="qr-42-2.png"',
+      }),
+      blob: () => Promise.resolve(blob),
+    })
+
+    await expect(api.qr.descargarCopia(42, 2)).resolves.toEqual({
+      blob,
+      contentDisposition: 'inline; filename="qr-42-2.png"',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/qr/descargar/42/2',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
 })

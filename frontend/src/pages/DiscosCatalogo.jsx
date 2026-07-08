@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import QRCode from 'react-qr-code'
 import { discoService } from '../services/discoService'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
@@ -7,6 +6,7 @@ import Paginacion from '../components/Paginacion'
 import CompactPlayer from '../components/CompactPlayer'
 import { stopAllPreviews } from '../components/audioPreviewPlayback'
 import { api, resolveApiUrl } from '../api/sonograma'
+import { downloadBlob } from '../utils/downloadBlob'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
 const FILTROS_CONDICION = [
@@ -169,68 +169,172 @@ function qrCopiesForDisco(disco) {
   }]
 }
 
-function QrModal({ disco, onClose, onUpdated }) {
+function sanitizeFilenamePart(value, fallback) {
+  const clean = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80)
+  return clean || fallback
+}
+
+function qrFilename(disco, copy) {
+  const code = sanitizeFilenamePart(disco?.codigoInterno || `disco_${disco?.idDisco || 'sin_codigo'}`, 'sin_codigo')
+  const album = sanitizeFilenamePart(disco?.album || 'album', 'album')
+  const copyLabel = copy?.copyNumber ? `_copia_${copy.copyNumber}` : ''
+  return `QR_${code}_${album}${copyLabel}.png`
+}
+
+function QrModal({ disco, loading, error, onClose, onUpdated }) {
+  const [selectedCopyKey, setSelectedCopyKey] = useState('')
+  const [imageError, setImageError] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
+
   if (!disco) return null
   const copies = qrCopiesForDisco(disco)
+  const selectedCopy = copies.find(copy => String(copy.id || copy.copyNumber || copy.codigoQr) === selectedCopyKey) || copies[0]
+  const saleUrl = selectedCopy ? (selectedCopy.content || buildSaleUrl(disco, selectedCopy.codigoQr)) : ''
+  const imageUrl = selectedCopy?.imageUrl
+    ? resolveApiUrl(selectedCopy.imageUrl)
+    : (selectedCopy?.copyNumber ? api.qr.urlDescargaCopia(disco.idDisco, selectedCopy.copyNumber) : '')
   const sourceLabel = disco.procedencia === 'DISCOGS'
     ? `${disco.artista} - ${disco.album}`
     : (disco.discogsUrl || disco.codigoInterno || 'Vinyl Future')
 
+  async function handleDownload() {
+    if (!selectedCopy?.copyNumber) {
+      setDownloadError('No hay una copia QR válida para descargar.')
+      return
+    }
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      const { blob, contentDisposition } = await api.qr.descargarCopia(disco.idDisco, selectedCopy.copyNumber)
+      downloadBlob(blob, qrFilename(disco, selectedCopy), contentDisposition)
+    } catch (err) {
+      setDownloadError(err.message || 'No se pudo descargar el QR')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-white dark:bg-stone-900 rounded-2xl border border-slate-200 dark:border-stone-700 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-stone-900 rounded-2xl border border-slate-200 dark:border-stone-700 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white/95 dark:bg-stone-900/95 backdrop-blur px-6 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-4">
           <div>
             <h2 className="font-bold text-slate-900 dark:text-white">{disco.album}</h2>
             <p className="text-sm text-slate-500 dark:text-stone-400">{disco.artista}</p>
             <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Código: {disco.codigoInterno || '—'} · Origen: {sourceLabel}</p>
           </div>
-          <button onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
+          <button type="button" onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
         </div>
-        <div className="grid sm:grid-cols-2 gap-4 p-6">
-          {copies.map(copy => {
-            const saleUrl = buildSaleUrl(disco, copy.codigoQr) || copy.content
-            return (
-              <article key={copy.id || copy.codigoQr} className="border border-slate-200 dark:border-stone-700 rounded-xl p-4 break-inside-avoid">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-3 text-center">
-                  Copia {copy.copyNumber || '—'} de {copies.length}
-                </p>
-                <div className="bg-white p-3 rounded-lg w-fit mx-auto">
-                  <QRCode value={saleUrl} size={180} />
-                </div>
-                <div className="mt-4 space-y-2 text-left">
-                  {[
-                    ['Disco', disco.album],
-                    ['Código catálogo', disco.codigoInterno],
-                    ['Identificador copia', copy.copyNumber ? `Copia ${copy.copyNumber}` : null],
-                    ['Estado', copy.estado || '—'],
-                    ['Código QR', copy.codigoQr],
-                    ['URL venta', saleUrl],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-                      <p className="text-xs font-medium text-slate-700 dark:text-stone-300 break-all">{value || '—'}</p>
-                    </div>
-                  ))}
-                </div>
-                {copy.id && (
+        <div className="p-6 space-y-5">
+          {loading && (
+            <div className="border border-slate-200 dark:border-stone-700 rounded-xl p-6 text-center">
+              <Spinner />
+            </div>
+          )}
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-sm rounded-xl px-4 py-3">
+              {error}
+            </div>
+          )}
+          {copies.length === 0 && (
+            <p className="text-sm text-slate-500 dark:text-stone-400 text-center py-8">Este disco no tiene copias físicas con QR.</p>
+          )}
+          {copies.length > 1 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">Copias físicas</p>
+              <div className="flex flex-wrap gap-2">
+                {copies.map(copy => {
+                  const key = String(copy.id || copy.copyNumber || copy.codigoQr)
+                  const active = key === String(selectedCopy?.id || selectedCopy?.copyNumber || selectedCopy?.codigoQr)
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCopyKey(key)
+                        setImageError('')
+                        setDownloadError('')
+                      }}
+                      className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
+                        active
+                          ? 'border-[#7E9FA8] bg-[#7E9FA8] text-white'
+                          : 'border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950 text-slate-600 dark:text-stone-400 hover:bg-slate-100 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      Copia {copy.copyNumber || '—'} · {copy.estado || '—'}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {selectedCopy && (
+            <article className="border border-slate-200 dark:border-stone-700 rounded-xl p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-stone-400 mb-4 text-center">
+                Mostrando copia {selectedCopy.copyNumber || '—'} de {copies.length}
+              </p>
+              <div className="bg-white p-4 rounded-xl w-fit mx-auto border border-slate-100">
+                {imageUrl && !imageError ? (
+                  <img
+                    src={imageUrl}
+                    alt={`QR ${disco.album} copia ${selectedCopy.copyNumber || ''}`}
+                    className="w-64 h-64 object-contain"
+                    onError={() => setImageError('No se pudo cargar la imagen QR.')}
+                  />
+                ) : (
+                  <div className="w-64 h-64 flex items-center justify-center text-center text-sm text-slate-500">
+                    {imageError || 'No hay imagen QR disponible.'}
+                  </div>
+                )}
+              </div>
+              <div className="mt-5 grid sm:grid-cols-2 gap-3 text-left">
+                {[
+                  ['Álbum', disco.album],
+                  ['Código/SKU', disco.codigoInterno],
+                  ['Copia', selectedCopy.copyNumber ? `Copia ${selectedCopy.copyNumber}` : null],
+                  ['Estado', selectedCopy.estado || '—'],
+                  ['Código QR', selectedCopy.codigoQr],
+                  ['URL destino', saleUrl],
+                ].map(([label, value]) => (
+                  <div key={label} className={label === 'URL destino' || label === 'Código QR' ? 'sm:col-span-2' : ''}>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                    <p className="text-xs font-medium text-slate-700 dark:text-stone-300 break-all">{value || '—'}</p>
+                  </div>
+                ))}
+              </div>
+              {downloadError && (
+                <p className="mt-4 text-sm text-red-600 dark:text-red-300">{downloadError}</p>
+              )}
+              <div className="mt-5 grid sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading || Boolean(imageError)}
+                  className="btn-primary w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {downloading ? 'Descargando...' : 'Descargar QR'}
+                </button>
+                {selectedCopy.id && (
                   <button
                     type="button"
                     onClick={async () => {
-                      const nuevoEstado = copy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
-                      const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, copy.id, nuevoEstado)
+                      const nuevoEstado = selectedCopy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
+                      const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, selectedCopy.id, nuevoEstado)
                       onUpdated(actualizado)
                     }}
-                    className="btn-secondary w-full mt-4"
+                    className="btn-secondary w-full"
                   >
-                    {copy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
+                    {selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
                   </button>
                 )}
-              </article>
-            )
-          })}
-          {copies.length === 0 && (
-            <p className="text-sm text-slate-500 dark:text-stone-400 sm:col-span-2 text-center py-8">Este disco no tiene copias físicas con QR.</p>
+              </div>
+            </article>
           )}
         </div>
       </div>
@@ -466,7 +570,7 @@ export default function DiscosCatalogo() {
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [hoveredDisco, setHoveredDisco] = useState(null)
   const [selectedDisco, setSelectedDisco] = useState(null)
-  const [qrDisco, setQrDisco] = useState(null)
+  const [qrState, setQrState] = useState({ disco: null, loading: false, error: '' })
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
   const [sortKey, setSortKey] = useState(null)
@@ -556,13 +660,18 @@ export default function DiscosCatalogo() {
   }
 
   async function abrirQr(disco) {
+    setQrState({ disco, loading: true, error: '' })
     try {
       const actualizado = await api.discos.porId(disco.idDisco)
       setDiscos(prev => prev.map(d => d.idDisco === actualizado.idDisco ? actualizado : d))
       setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
-      setQrDisco(actualizado)
-    } catch {
-      setQrDisco(disco)
+      setQrState({ disco: actualizado, loading: false, error: '' })
+    } catch (err) {
+      setQrState({
+        disco,
+        loading: false,
+        error: err.message || 'No se pudo cargar la información actualizada del QR.',
+      })
     }
   }
 
@@ -813,6 +922,13 @@ export default function DiscosCatalogo() {
                           >
                             Editar
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => abrirQr(d)}
+                            className="text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                          >
+                            Ver QR
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -852,12 +968,15 @@ export default function DiscosCatalogo() {
       />
 
       <QrModal
-        disco={qrDisco}
-        onClose={() => setQrDisco(null)}
+        key={qrState.disco?.idDisco || 'qr-modal'}
+        disco={qrState.disco}
+        loading={qrState.loading}
+        error={qrState.error}
+        onClose={() => setQrState({ disco: null, loading: false, error: '' })}
         onUpdated={(actualizado) => {
           setDiscos(prev => prev.map(item => item.idDisco === actualizado.idDisco ? actualizado : item))
           setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
-          setQrDisco(actualizado)
+          setQrState({ disco: actualizado, loading: false, error: '' })
         }}
       />
 

@@ -271,6 +271,24 @@ export const api = {
 
   qr: {
     urlDescarga: (idDisco) => `${BASE}/qr/descargar/${idDisco}`,
+    urlDescargaCopia: (idDisco, copyNumber) => `${BASE}/qr/descargar/${idDisco}/${copyNumber}`,
+    descargarCopia: async (idDisco, copyNumber) => {
+      const res = await fetch(`${BASE}/qr/descargar/${idDisco}/${copyNumber}`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) throw new Error(await readResponseMessage(res, 'No se pudo descargar el QR'))
+      const contentType = res.headers.get('Content-Type') || ''
+      if (!/image\/png/i.test(contentType)) {
+        throw new Error(await readResponseMessage(res, 'El servidor no devolvió una imagen PNG válida'))
+      }
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error('El QR se generó vacío o no se pudo preparar.')
+      return {
+        blob,
+        contentDisposition: res.headers.get('Content-Disposition') || '',
+      }
+    },
     escanear: (codigoQr) => request('POST', '/qr/escanear', { codigoQr }),
   },
 
