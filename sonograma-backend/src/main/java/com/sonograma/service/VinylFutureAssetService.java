@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -143,6 +144,30 @@ public class VinylFutureAssetService {
         Path localPath = localPath(urlOrPath);
         if (localPath == null) return null;
         return mediaDirectory.relativize(localPath).toString().replace('\\', '/');
+    }
+
+    public int clearStoredAssets() {
+        if (!Files.exists(mediaDirectory)) {
+            return 0;
+        }
+        try (var paths = Files.walk(mediaDirectory)) {
+            List<Path> toDelete = paths
+                .sorted(Comparator.reverseOrder())
+                .toList();
+            int deletedFiles = 0;
+            for (Path path : toDelete) {
+                if (path.equals(mediaDirectory)) {
+                    continue;
+                }
+                if (Files.isRegularFile(path)) {
+                    deletedFiles++;
+                }
+                Files.deleteIfExists(path);
+            }
+            return deletedFiles;
+        } catch (IOException ex) {
+            throw new IllegalStateException("No se pudieron limpiar los assets VinylFuture", ex);
+        }
     }
 
     private StoredAsset store(String sourceUrl, String filename, int maxSize, String accept) {

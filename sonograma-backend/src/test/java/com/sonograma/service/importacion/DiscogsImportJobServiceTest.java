@@ -1,7 +1,13 @@
 package com.sonograma.service.importacion;
 
 import com.sonograma.dto.DiscogsImportJobDTO;
+import com.sonograma.dto.DiscogsImportRowDTO;
 import com.sonograma.dto.TrackInfo;
+import com.sonograma.entity.DiscogsImportJob;
+import com.sonograma.entity.DiscogsImportRow;
+import com.sonograma.enums.DiscogsImportJobStatus;
+import com.sonograma.enums.DiscogsImportRowStatus;
+import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -22,6 +28,7 @@ import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -37,13 +44,18 @@ class DiscogsImportJobServiceTest {
     @Autowired
     private DiscogsImportJobRepository jobRepository;
 
+    @Autowired
+    private DiscoRepository discoRepository;
+
     @MockBean
     private DiscogsApiClient apiClient;
 
     @BeforeEach
     void clean() {
+        reset(apiClient);
         rowRepository.deleteAll();
         jobRepository.deleteAll();
+        discoRepository.deleteAll();
     }
 
     @Test
@@ -105,12 +117,45 @@ class DiscogsImportJobServiceTest {
         });
     }
 
+    @Test
+    void importParsedRowsMergesDuplicateDiscogsRowsIntoExistingCatalogStock() throws Exception {
+        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("duplicate.xlsx")
+                .nombreHoja("Links")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        rowRepository.saveAll(List.of(
+                parsedRow(job, 1, 999L),
+                parsedRow(job, 2, 1000L)
+        ));
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(2);
+        assertThat(discoRepository.count()).isEqualTo(1);
+        assertThat(imported.getRows())
+                .extracting(DiscogsImportRowDTO::getImportedCatalogProductId)
+                .doesNotContainNull()
+                .hasSize(2)
+                .allMatch(id -> id.equals(imported.getRows().get(0).getImportedCatalogProductId()));
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(2);
+            assertThat(disco.getCodigoInterno()).isEqualTo("CAT-1");
+        });
+    }
+
     private MockMultipartFile fixture() throws Exception {
+        return workbookWithUrls(List.of("https://discogs.com/release/999"));
+    }
+
+    private MockMultipartFile workbookWithUrls(List<String> urls) throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Links");
             sheet.createRow(0).createCell(0).setCellValue("Discogs URL");
-            sheet.createRow(1).createCell(0).setCellValue("https://discogs.com/release/999");
+            for (int index = 0; index < urls.size(); index++) {
+                sheet.createRow(index + 1).createCell(0).setCellValue(urls.get(index));
+            }
             workbook.write(output);
             return new MockMultipartFile(
                     "file",
@@ -140,9 +185,28 @@ class DiscogsImportJobServiceTest {
                 "Techno",
                 "VINILO",
                 null,
-                null,
+                "CAT-1",
                 "A1. Track",
                 List.of(new TrackInfo("A1", "Track", null, "https://youtube.test/track"))
         );
+    }
+
+    private DiscogsImportRow parsedRow(DiscogsImportJob job, int rowNumber, long releaseId) {
+        return DiscogsImportRow.builder()
+                .job(job)
+                .sourceExcelRowNumber(rowNumber)
+                .discogsType("release")
+                .discogsId(releaseId)
+                .resolvedReleaseId(releaseId)
+                .normalizedDiscogsUrl("https://discogs.com/release/" + releaseId)
+                .artist("Artist")
+                .title("Album")
+                .format("VINILO")
+                .catalogNumber("CAT-1")
+                .internalCode("CAT-1")
+                .sourceStatus("DISPONIBLE")
+                .status(DiscogsImportRowStatus.PARSED)
+                .tracksJson("[{\"label\":\"A1\",\"name\":\"Track\",\"mp3Url\":null,\"youtubeUrl\":\"https://youtube.test/track\"}]")
+                .build();
     }
 }

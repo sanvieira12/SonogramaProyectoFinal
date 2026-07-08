@@ -48,6 +48,13 @@ public class VinylFutureImportBatchService {
         return Optional.ofNullable(batches.get(importId));
     }
 
+    public int clearAll() {
+        int removed = batches.size();
+        batches.values().forEach(batch -> deleteZipIfExists(batch.zipPath()));
+        batches.clear();
+        return removed;
+    }
+
     private void cleanup() {
         Instant cutoff = Instant.now().minus(TTL);
         batches.entrySet().removeIf(entry -> {

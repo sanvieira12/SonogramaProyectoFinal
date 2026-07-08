@@ -47,8 +47,18 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
           AND (:canal IS NULL OR v.canalVenta = :canal)
           AND (:q IS NULL OR :q = ''
                OR LOWER(v.clienteNombreSnapshot) LIKE LOWER(CONCAT('%', :q, '%'))
-               OR LOWER(v.disco.artista) LIKE LOWER(CONCAT('%', :q, '%'))
-               OR LOWER(v.disco.album) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(COALESCE(v.disco.artista, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(COALESCE(v.disco.album, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR EXISTS (
+                    SELECT 1 FROM DetalleVenta dv
+                    WHERE dv.venta = v
+                      AND (
+                          LOWER(COALESCE(dv.artistaSnap, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                          OR LOWER(COALESCE(dv.albumSnap, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                          OR LOWER(COALESCE(dv.descripcionSnap, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                          OR LOWER(COALESCE(dv.codigoSnap, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                      )
+               )
                OR LOWER(COALESCE(v.numeroFactura, '')) LIKE LOWER(CONCAT('%', :q, '%')))
         ORDER BY v.fechaVenta DESC
         """)

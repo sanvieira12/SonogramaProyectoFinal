@@ -19,6 +19,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -85,6 +86,30 @@ public class DiscogsCoverService {
             return detected == null ? "image/jpeg" : detected;
         } catch (IOException ex) {
             return "image/jpeg";
+        }
+    }
+
+    public int clearStoredCovers() {
+        if (!Files.exists(coversDirectory)) {
+            return 0;
+        }
+        try (var paths = Files.walk(coversDirectory)) {
+            List<Path> toDelete = paths
+                    .sorted(Comparator.reverseOrder())
+                    .toList();
+            int deletedFiles = 0;
+            for (Path path : toDelete) {
+                if (path.equals(coversDirectory)) {
+                    continue;
+                }
+                if (Files.isRegularFile(path)) {
+                    deletedFiles++;
+                }
+                Files.deleteIfExists(path);
+            }
+            return deletedFiles;
+        } catch (IOException ex) {
+            throw new IllegalStateException("No se pudieron limpiar las portadas Discogs", ex);
         }
     }
 

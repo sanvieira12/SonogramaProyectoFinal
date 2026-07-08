@@ -177,9 +177,10 @@ public class DiscogsImportJobService {
                     rowRepository.save(row);
                     continue;
                 }
-                Disco disco = discoRepository.findByDiscogsUrl(row.getNormalizedDiscogsUrl())
-                        .orElseGet(() -> discoRepository.save(toDisco(row)));
-                updateDisco(disco, row);
+                java.util.Optional<Disco> existing = findExistingDisco(row);
+                Disco disco = existing
+                        .map(found -> mergeDisco(found, row))
+                        .orElseGet(() -> toDisco(row));
                 discoRepository.save(disco);
                 qrCopyService.synchronize(disco);
                 audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), parseTracks(row.getTracksJson()));
@@ -417,11 +418,10 @@ public class DiscogsImportJobService {
         if (!blank(row.getTracklist())) disco.setTracklist(row.getTracklist());
         if (!blank(row.getImageUrl())) disco.setImagenUrl(row.getImageUrl());
         disco.setPreviewUrl(null);
-        disco.setCondicion(CondicionDisco.USADO);
-        disco.setProcedencia("DISCOGS");
+        if (disco.getCondicion() == null) disco.setCondicion(CondicionDisco.USADO);
+        disco.setProcedencia(firstNonBlank(disco.getProcedencia(), "DISCOGS"));
         disco.setEstado(EstadoDisco.DISPONIBLE);
-        disco.setCantidadCopias(1);
-        disco.setFormato(row.getFormat());
+        disco.setFormato(firstNonBlank(disco.getFormato(), row.getFormat()));
         if (!blank(row.getInternalCode())) disco.setCodigoInterno(row.getInternalCode());
         if (row.getManualPriceUyu() != null) {
             disco.setPrecioVenta(row.getManualPriceUyu());
@@ -431,6 +431,40 @@ public class DiscogsImportJobService {
             disco.setTipoDisco(parseFormat(row.getFormat()));
             disco.setNotas(catalogNotes(row));
         }
+    }
+
+    private Optional<Disco> findExistingDisco(DiscogsImportRow row) {
+        if (!blank(row.getInternalCode())) {
+            Optional<Disco> byCode = discoRepository.findByCodigoInternoIgnoreCase(row.getInternalCode());
+            if (byCode.isPresent()) {
+                return byCode;
+            }
+        }
+        if (!blank(row.getNormalizedDiscogsUrl())) {
+            Optional<Disco> byUrl = discoRepository.findByDiscogsUrl(row.getNormalizedDiscogsUrl());
+            if (byUrl.isPresent()) {
+                return byUrl;
+            }
+        }
+        if (blank(row.getArtist()) || blank(row.getTitle())) {
+            return Optional.empty();
+        }
+        String normalizedFormat = normalize(row.getFormat());
+        return discoRepository.findByArtistaAndAlbumIgnoreCase(row.getArtist(), row.getTitle()).stream()
+                .filter(candidate -> normalizedFormat.isBlank()
+                        || normalize(candidate.getFormato()).isBlank()
+                        || normalize(candidate.getFormato()).equals(normalizedFormat))
+                .findFirst();
+    }
+
+    private Disco mergeDisco(Disco disco, DiscogsImportRow row) {
+        updateDisco(disco, row);
+        disco.setCantidadCopias(Math.max(0, Optional.ofNullable(disco.getCantidadCopias()).orElse(0)) + 1);
+        return disco;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private String catalogNotes(DiscogsImportRow row) {

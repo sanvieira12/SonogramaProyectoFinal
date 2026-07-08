@@ -6,6 +6,7 @@ import com.sonograma.repository.DiscoQrCopyRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,7 +39,7 @@ class DiscoQrCopyServiceTest {
             .build();
         List<DiscoQrCopy> stored = new ArrayList<>();
 
-        when(repository.findByIdDiscoOrderByCopyNumber(42L)).thenReturn(List.of());
+        when(repository.findByIdDiscoOrderByCopyNumber(42L)).thenAnswer(invocation -> new ArrayList<>(stored));
         when(repository.save(any(DiscoQrCopy.class))).thenAnswer(invocation -> {
             DiscoQrCopy copy = invocation.getArgument(0);
             copy.setId((long) stored.size() + 1);
@@ -58,16 +59,26 @@ class DiscoQrCopyServiceTest {
     @Test
     void synchronizeRemovesQrEntriesWhenStockShrinks() {
         Disco disco = Disco.builder().idDisco(7L).cantidadCopias(1).build();
-        List<DiscoQrCopy> current = List.of(
+        List<DiscoQrCopy> stored = new ArrayList<>(List.of(
             DiscoQrCopy.builder().id(1L).idDisco(7L).copyNumber(1).codigoQr("one").build(),
             DiscoQrCopy.builder().id(2L).idDisco(7L).copyNumber(2).codigoQr("two").build()
-        );
-        when(repository.findByIdDiscoOrderByCopyNumber(7L)).thenReturn(current);
+        ));
+        when(repository.findByIdDiscoOrderByCopyNumber(7L)).thenAnswer(invocation -> new ArrayList<>(stored));
+        doAnswer(invocation -> {
+            List<DiscoQrCopy> removed = invocation.getArgument(0);
+            stored.removeIf(copy -> removed.stream().anyMatch(candidate -> candidate.getId().equals(copy.getId())));
+            return null;
+        }).when(repository).deleteAll(anyList());
 
         List<DiscoQrCopy> result = service.synchronize(disco);
 
         assertEquals(1, result.size());
         assertEquals("one", disco.getCodigoQr());
-        verify(repository).deleteAll(List.of(current.get(1)));
+        ArgumentCaptor<Iterable<DiscoQrCopy>> removedCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(repository).deleteAll(removedCaptor.capture());
+        List<DiscoQrCopy> removed = new ArrayList<>();
+        removedCaptor.getValue().forEach(removed::add);
+        assertEquals(1, removed.size());
+        assertEquals(2L, removed.get(0).getId());
     }
 }
