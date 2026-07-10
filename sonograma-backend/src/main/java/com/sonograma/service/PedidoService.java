@@ -68,8 +68,14 @@ public class PedidoService {
         Pedido pedido = Pedido.builder()
             .numeroFactura(invoice.numeroFactura())
             .fechaFactura(invoice.fechaFactura())
-            .proveedor(invoice.proveedor() != null ? invoice.proveedor() : "Vinyl Future")
-            .envio(invoice.envio())
+            .proveedor(firstNonBlank(
+                ImportMetadataNormalizer.normalizeSource(invoice.proveedor()),
+                ImportMetadataNormalizer.SOURCE_FUTURE
+            ))
+            .envio(ImportMetadataNormalizer.normalizeShipping(
+                ImportMetadataNormalizer.normalizeSource(invoice.proveedor()),
+                invoice.envio()
+            ))
             .pago(invoice.pago())
             .unidadPeso(invoice.unidadPeso())
             .moneda(invoice.moneda() != null ? invoice.moneda() : "EUR")

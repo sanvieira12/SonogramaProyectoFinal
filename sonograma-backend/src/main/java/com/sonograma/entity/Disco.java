@@ -56,7 +56,7 @@ public class Disco {
     @Column(name = "tipo_disco")
     private TipoDisco tipoDisco;
 
-    @Column(name = "costo", precision = 10, scale = 2)
+    @Column(name = "costo", precision = 14, scale = 6)
     private BigDecimal costo;
 
     @Column(name = "costo_moneda", length = 10)
@@ -68,10 +68,10 @@ public class Disco {
     @Column(name = "fecha_factura_compra")
     private LocalDate fechaFacturaCompra;
 
-    @Column(name = "precio_venta", precision = 10, scale = 2)
+    @Column(name = "precio_venta", precision = 14, scale = 6)
     private BigDecimal precioVenta;
 
-    @Column(name = "manual_markup", precision = 10, scale = 4)
+    @Column(name = "manual_markup", precision = 14, scale = 8)
     private BigDecimal manualMarkup;
 
     @Column(name = "formato", length = 120)

@@ -141,6 +141,7 @@ class DiscogsImportJobServiceTest {
         assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
             assertThat(disco.getCantidadCopias()).isEqualTo(2);
             assertThat(disco.getCodigoInterno()).isEqualTo("CAT-1");
+            assertThat(disco.getProcedencia()).isEqualTo("Discogs");
         });
     }
 

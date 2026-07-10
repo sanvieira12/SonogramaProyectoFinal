@@ -35,28 +35,28 @@ public class PedidoItem {
     @Column(name = "formato")
     private String formato;
 
-    @Column(name = "precio_unitario_eur", precision = 10, scale = 2)
+    @Column(name = "precio_unitario_eur", precision = 14, scale = 6)
     private BigDecimal precioUnitarioEur;
 
     @Column(name = "cantidad")
     private Integer cantidad;
 
-    @Column(name = "total_linea_eur", precision = 10, scale = 2)
+    @Column(name = "total_linea_eur", precision = 14, scale = 6)
     private BigDecimal totalLineaEur;
 
-    @Column(name = "extra_costo_eur", precision = 10, scale = 2)
+    @Column(name = "extra_costo_eur", precision = 14, scale = 6)
     private BigDecimal extraCostoEur;
 
-    @Column(name = "costo_real_eur", precision = 10, scale = 2)
+    @Column(name = "costo_real_eur", precision = 14, scale = 6)
     private BigDecimal costoRealEur;
 
-    @Column(name = "costo_real_uyu", precision = 10, scale = 2)
+    @Column(name = "costo_real_uyu", precision = 14, scale = 6)
     private BigDecimal costoRealUyu;
 
-    @Column(name = "markup", precision = 8, scale = 4)
+    @Column(name = "markup", precision = 14, scale = 8)
     private BigDecimal markup;
 
-    @Column(name = "precio_final_uyu", precision = 10, scale = 2)
+    @Column(name = "precio_final_uyu", precision = 14, scale = 6)
     private BigDecimal precioFinalUyu;
 
     @Column(name = "portada_url")

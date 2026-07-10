@@ -30,42 +30,42 @@ const rows = [
     idDisco: 1,
     invoiceNumber: 'A-1',
     invoiceDate: '2026-07-10',
-    supplier: 'Proveedor 1',
-    shipping: 12,
+    supplier: 'Future',
+    shipping: 'UPS',
     code: 'COD-1',
     artist: 'Artista 1',
     title: 'Título 1',
     format: 'LP',
     type: 'SINGLE',
-    unitPriceEur: 10,
+    unitPriceEur: 13.3644,
     quantity: 1,
-    unitLineTotalEur: 10,
-    extraCostEur: 5,
-    realCostEur: 15,
-    realCostUyu: 742.5,
+    unitLineTotalEur: 13.3644,
+    extraCostEur: 5.1256,
+    realCostEur: 18.49,
+    realCostUyu: 912.8513,
     markup: 1.7,
-    finalSalePriceUyu: 1260,
+    finalSalePriceUyu: 2819.7364,
     pricingMode: 'AUTO',
   },
   {
     idDisco: 2,
     invoiceNumber: 'B-2',
     invoiceDate: '2026-07-11',
-    supplier: 'Proveedor Dos',
-    shipping: 18,
+    supplier: 'Discogs',
+    shipping: 'Correo',
     code: 'ZX-200',
     artist: 'Árbol Negro',
     title: 'Canción Íntima',
     format: '2x12"',
     type: 'DOUBLE',
-    unitPriceEur: 12,
+    unitPriceEur: 12.75,
     quantity: 1,
-    unitLineTotalEur: 12,
-    extraCostEur: 8,
-    realCostEur: 20,
-    realCostUyu: 990,
+    unitLineTotalEur: 12.75,
+    extraCostEur: 8.125,
+    realCostEur: 20.875,
+    realCostUyu: 1031.62375,
     markup: 1.5,
-    finalSalePriceUyu: 1480,
+    finalSalePriceUyu: 1480.5,
     pricingMode: 'MANUAL',
   },
 ]
@@ -82,8 +82,8 @@ describe('PricingSettingsPage', () => {
     api.pricing.apply.mockResolvedValue({ updatedCount: 1 })
     api.pricing.updateMarkup.mockResolvedValue({
       idDisco: 1,
-      markup: 2.1,
-      finalSalePriceUyu: 1560,
+      markup: 2.1234,
+      finalSalePriceUyu: 1560.8754,
       pricingMode: 'MANUAL',
     })
   })
@@ -95,7 +95,6 @@ describe('PricingSettingsPage', () => {
     expect(screen.getByText('Costo extra disco simple (EUR)')).toBeInTheDocument()
     expect(screen.getByText('Actualizar vista previa')).toBeInTheDocument()
     expect(screen.getByText('Discos en la vista previa')).toBeInTheDocument()
-    expect(screen.getByText('Ningún disco seleccionado')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aplicar a seleccionados' })).toBeDisabled()
   })
 
@@ -104,12 +103,44 @@ describe('PricingSettingsPage', () => {
 
     await screen.findByRole('columnheader', { name: 'Actualizar' })
     expect(screen.queryByText('Multiplicador aplicado al costo real')).not.toBeInTheDocument()
+    expect(screen.queryByText('Vista previa de recálculo')).not.toBeInTheDocument()
+    expect(screen.queryByText('Impacto de los costos y precios con la configuración actual.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ningún disco seleccionado')).not.toBeInTheDocument()
 
     const headers = screen.getAllByRole('columnheader')
     expect(headers.some(header => header.textContent?.includes('Actualizar'))).toBe(true)
 
     const saveButtons = screen.getAllByRole('button', { name: /Guardar markup del disco/i })
     expect(saveButtons).toHaveLength(2)
+  })
+
+  it('mantiene Guardar markup y Guardando… en una sola línea con clases compactas', async () => {
+    let resolveUpdate
+    api.pricing.updateMarkup.mockImplementation(() => new Promise(resolve => {
+      resolveUpdate = resolve
+    }))
+
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    const button = screen.getByRole('button', { name: 'Guardar markup del disco Artista 1' })
+    expect(button.className).toContain('whitespace-nowrap')
+    expect(button.className).toContain('min-w-[140px]')
+
+    fireEvent.click(button)
+
+    const savingButton = await screen.findByRole('button', { name: 'Guardar markup del disco Artista 1' })
+    expect(savingButton).toHaveTextContent('Guardando…')
+    expect(savingButton.className).toContain('whitespace-nowrap')
+
+    resolveUpdate({
+      idDisco: 1,
+      markup: 2.1234,
+      finalSalePriceUyu: 1560.8754,
+      pricingMode: 'MANUAL',
+    })
+
+    await screen.findByText('Markup actualizado correctamente.')
   })
 
   it('busca por artista de forma case-insensitive y accent-insensitive', async () => {
@@ -138,7 +169,7 @@ describe('PricingSettingsPage', () => {
     fireEvent.change(searchInput, { target: { value: 'ZX-200' } })
     expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
 
-    fireEvent.change(searchInput, { target: { value: 'proveedor dos' } })
+    fireEvent.change(searchInput, { target: { value: 'discogs' } })
     expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
   })
 
@@ -164,23 +195,20 @@ describe('PricingSettingsPage', () => {
     await screen.findByText('2 resultados')
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar disco Artista 1' }))
-    expect(screen.getByText('1 disco seleccionado')).toBeInTheDocument()
 
     const searchInput = screen.getByRole('searchbox', { name: 'Buscar discos en stock' })
     fireEvent.change(searchInput, { target: { value: 'Árbol' } })
 
     expect(screen.getByText('1 resultado')).toBeInTheDocument()
-    expect(screen.getByText('1 disco seleccionado')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los discos visibles' }))
-    expect(screen.getByText('2 discos seleccionados')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar a seleccionados' }))
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar cambios' }))
 
     await waitFor(() => {
       expect(api.pricing.apply).toHaveBeenCalledWith(
-        expect.objectContaining({ eurUyuRate: 49.5 }),
+        expect.objectContaining({ eurUyuRate: '49.5' }),
         'selected',
         expect.arrayContaining([1, 2]),
       )
@@ -191,11 +219,10 @@ describe('PricingSettingsPage', () => {
     renderPage()
 
     await screen.findByText('2 resultados')
-    fireEvent.click(screen.getByRole('button', { name: 'Seleccionar todos' }))
-    expect(screen.getByText('2 discos seleccionados')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Seleccionar visibles' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Deseleccionar todos' }))
-    expect(screen.getByText('Ningún disco seleccionado')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Deseleccionar visibles' }))
+    expect(screen.getByRole('button', { name: 'Aplicar a seleccionados' })).toBeDisabled()
   })
 
   it('mantiene la selección después de actualizar la vista previa', async () => {
@@ -215,6 +242,29 @@ describe('PricingSettingsPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Seleccionar disco Artista 1' })).toBeChecked()
   })
 
+  it('ordena proveedor en ambos sentidos y permite volver al orden base', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+
+    const supplierSort = screen.getByRole('button', { name: 'Ordenar proveedor de A a Z' })
+    fireEvent.click(supplierSort)
+
+    let supplierCells = screen.getAllByRole('cell').filter(cell => cell.textContent === 'Discogs' || cell.textContent === 'Future')
+    expect(supplierCells[0]).toHaveTextContent('Discogs')
+    expect(screen.getByRole('columnheader', { name: /Proveedor/ })).toHaveAttribute('aria-sort', 'ascending')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ordenar proveedor de Z a A' }))
+    supplierCells = screen.getAllByRole('cell').filter(cell => cell.textContent === 'Discogs' || cell.textContent === 'Future')
+    expect(supplierCells[0]).toHaveTextContent('Future')
+    expect(screen.getByRole('columnheader', { name: /Proveedor/ })).toHaveAttribute('aria-sort', 'descending')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restablecer orden de proveedor' }))
+    supplierCells = screen.getAllByRole('cell').filter(cell => cell.textContent === 'Discogs' || cell.textContent === 'Future')
+    expect(supplierCells[0]).toHaveTextContent('Future')
+    expect(screen.getByRole('columnheader', { name: /Proveedor/ })).toHaveAttribute('aria-sort', 'none')
+  })
+
   it('valida y guarda el markup individual', async () => {
     renderPage()
 
@@ -227,13 +277,52 @@ describe('PricingSettingsPage', () => {
     expect(screen.getByText('Completá markup.')).toBeInTheDocument()
     expect(api.pricing.updateMarkup).not.toHaveBeenCalled()
 
-    fireEvent.change(markupInput, { target: { value: '2.1' } })
+    fireEvent.change(markupInput, { target: { value: '2.1234' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar markup del disco Artista 1' }))
 
     await waitFor(() => {
-      expect(api.pricing.updateMarkup).toHaveBeenCalledWith(1, 2.1)
+      expect(api.pricing.updateMarkup).toHaveBeenCalledWith(1, '2.1234')
     })
     expect(await screen.findByText('Markup actualizado correctamente.')).toBeInTheDocument()
+  })
+
+  it('no renderiza Manual ni Automático en la columna Actualizar', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+
+    const firstRow = screen.getByRole('checkbox', { name: 'Seleccionar disco Artista 1' }).closest('tr')
+    const secondRow = screen.getByRole('checkbox', { name: 'Seleccionar disco Árbol Negro' }).closest('tr')
+    const firstLastCell = within(firstRow).getAllByRole('cell').at(-1)
+    const secondLastCell = within(secondRow).getAllByRole('cell').at(-1)
+
+    expect(within(firstLastCell).queryByText('Automático')).not.toBeInTheDocument()
+    expect(within(secondLastCell).queryByText('Manual')).not.toBeInTheDocument()
+  })
+
+  it('muestra precios finales con decimales sin forzar cero decimales', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+
+    expect(screen.getByText('2.819,7364')).toBeInTheDocument()
+    expect(screen.getByText('1.480,5')).toBeInTheDocument()
+    expect(screen.queryByText('2.820')).not.toBeInTheDocument()
+  })
+
+  it('formatea para mostrar sin alterar el valor usado en el guardado', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    expect(screen.getAllByText('13,3644').length).toBeGreaterThan(0)
+
+    const markupInput = screen.getByRole('spinbutton', { name: 'Markup del disco Artista 1' })
+    fireEvent.change(markupInput, { target: { value: '1.4567' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar markup del disco Artista 1' }))
+
+    await waitFor(() => {
+      expect(api.pricing.updateMarkup).toHaveBeenCalledWith(1, '1.4567')
+    })
   })
 
   it('el botón de guardar markup está en la última columna reutilizada', async () => {

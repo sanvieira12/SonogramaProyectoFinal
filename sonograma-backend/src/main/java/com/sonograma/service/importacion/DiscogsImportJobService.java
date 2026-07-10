@@ -14,6 +14,7 @@ import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -388,7 +389,7 @@ public class DiscogsImportJobService {
                 .imagenUrl(row.getImageUrl())
                 .previewUrl(null)
                 .discogsUrl(row.getNormalizedDiscogsUrl())
-                .procedencia("DISCOGS")
+                .procedencia(ImportMetadataNormalizer.SOURCE_DISCOGS)
                 .notas(catalogNotes(row))
                 .build();
         return disco;
@@ -419,7 +420,10 @@ public class DiscogsImportJobService {
         if (!blank(row.getImageUrl())) disco.setImagenUrl(row.getImageUrl());
         disco.setPreviewUrl(null);
         if (disco.getCondicion() == null) disco.setCondicion(CondicionDisco.USADO);
-        disco.setProcedencia(firstNonBlank(disco.getProcedencia(), "DISCOGS"));
+        disco.setProcedencia(firstNonBlank(
+            ImportMetadataNormalizer.normalizeSource(disco.getProcedencia()),
+            ImportMetadataNormalizer.SOURCE_DISCOGS
+        ));
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setFormato(firstNonBlank(disco.getFormato(), row.getFormat()));
         if (!blank(row.getInternalCode())) disco.setCodigoInterno(row.getInternalCode());

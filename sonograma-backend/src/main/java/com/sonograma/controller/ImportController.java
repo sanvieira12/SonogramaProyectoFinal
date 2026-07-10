@@ -22,6 +22,7 @@ import com.sonograma.service.CatalogPricingService;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
+import com.sonograma.service.ImportMetadataNormalizer;
 import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.VinylFutureAssetService;
@@ -441,7 +442,7 @@ public class ImportController {
         disco.setCodigoInterno(catalogCode);
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
-        disco.setProcedencia("VINYL_FUTURE");
+        disco.setProcedencia(ImportMetadataNormalizer.SOURCE_FUTURE);
         disco.setTipoDisco(parseFormat(format));
         disco.setCondicion(parseCondition(page != null ? page.condition() : null));
         disco.setCantidadCopias(item.cantidad() != null ? item.cantidad() : 1);
@@ -511,7 +512,10 @@ public class ImportController {
         disco.setArtista(firstNonBlank(disco.getArtista(), page != null ? page.artist() : null, item.artista()));
         disco.setAlbum(firstNonBlank(disco.getAlbum(), page != null ? page.title() : null, item.album()));
         disco.setEstado(EstadoDisco.DISPONIBLE);
-        disco.setProcedencia(firstNonBlank(disco.getProcedencia(), "VINYL_FUTURE"));
+        disco.setProcedencia(firstNonBlank(
+            ImportMetadataNormalizer.normalizeSource(disco.getProcedencia()),
+            ImportMetadataNormalizer.SOURCE_FUTURE
+        ));
         if (blank(disco.getCodigoQr())) {
             disco.setCodigoQr(UUID.randomUUID().toString());
         }

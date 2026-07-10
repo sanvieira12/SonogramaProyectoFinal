@@ -39,7 +39,7 @@ public class VinylFutureMediaRepairRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         List<Disco> discos = discoRepository.findAll().stream()
-            .filter(disco -> "VINYL_FUTURE".equalsIgnoreCase(disco.getProcedencia()))
+            .filter(disco -> ImportMetadataNormalizer.isFutureSource(disco.getProcedencia()))
             .filter(disco -> disco.getFechaIngreso() != null)
             .filter(disco -> repairDate.equals(disco.getFechaIngreso().toLocalDate()))
             .sorted(Comparator.comparing(Disco::getIdDisco))

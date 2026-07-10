@@ -75,10 +75,10 @@ public class Pedido {
     @Column(name = "texto_extraido", columnDefinition = "TEXT")
     private String textoExtraido;
 
-    @Column(name = "franqueo", precision = 10, scale = 2)
+    @Column(name = "franqueo", precision = 14, scale = 6)
     private BigDecimal franqueo;
 
-    @Column(name = "tarifas", precision = 10, scale = 2)
+    @Column(name = "tarifas", precision = 14, scale = 6)
     private BigDecimal tarifas;
 
     @Column(name = "neto", precision = 10, scale = 2)
@@ -98,23 +98,23 @@ public class Pedido {
     @Builder.Default
     private ImportStatus importStatus = ImportStatus.PARSED;
 
-    @Column(name = "tipo_cambio", precision = 10, scale = 4)
+    @Column(name = "tipo_cambio", precision = 14, scale = 8)
     @Builder.Default
     private BigDecimal tipoCambio = new BigDecimal("50");
 
-    @Column(name = "extra_costo_simple", precision = 10, scale = 2)
+    @Column(name = "extra_costo_simple", precision = 14, scale = 6)
     @Builder.Default
     private BigDecimal extraCostoSimple = new BigDecimal("5");
 
-    @Column(name = "extra_costo_doble", precision = 10, scale = 2)
+    @Column(name = "extra_costo_doble", precision = 14, scale = 6)
     @Builder.Default
     private BigDecimal extraCostoDoble = new BigDecimal("8");
 
-    @Column(name = "markup_simple", precision = 8, scale = 4)
+    @Column(name = "markup_simple", precision = 14, scale = 8)
     @Builder.Default
     private BigDecimal markupSimple = new BigDecimal("1.6");
 
-    @Column(name = "markup_doble", precision = 8, scale = 4)
+    @Column(name = "markup_doble", precision = 14, scale = 8)
     @Builder.Default
     private BigDecimal markupDoble = new BigDecimal("1.4");
 

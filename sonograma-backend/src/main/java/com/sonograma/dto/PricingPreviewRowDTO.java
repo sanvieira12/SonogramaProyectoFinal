@@ -5,7 +5,7 @@ public record PricingPreviewRowDTO(
     String invoiceNumber,
     java.time.LocalDate invoiceDate,
     String supplier,
-    java.math.BigDecimal shipping,
+    String shipping,
     String code,
     String artist,
     String title,

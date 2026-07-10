@@ -93,7 +93,10 @@ public class CatalogCleanupService {
         String sql = """
             SELECT d.id_disco
             FROM disco d
-            WHERE (:vinylFutureOnly = false OR UPPER(COALESCE(d.procedencia, '')) = 'VINYL_FUTURE')
+            WHERE (
+                :vinylFutureOnly = false
+                OR UPPER(REPLACE(COALESCE(d.procedencia, ''), ' ', '_')) IN ('VINYL_FUTURE', 'FUTURE')
+            )
             ORDER BY d.id_disco
             """;
         Query query = entityManager.createNativeQuery(sql);

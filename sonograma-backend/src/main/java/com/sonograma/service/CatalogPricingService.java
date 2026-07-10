@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,12 +50,13 @@ public class CatalogPricingService {
     public static final BigDecimal DEFAULT_MARKUP_SINGLE = new BigDecimal("1.7");
     public static final BigDecimal DEFAULT_MARKUP_DOUBLE = new BigDecimal("1.5");
     public static final BigDecimal DEFAULT_MARKUP_MULTI = new BigDecimal("1.4");
-    public static final PricingRoundingRule DEFAULT_ROUNDING_RULE = PricingRoundingRule.NEAREST_10;
+    public static final PricingRoundingRule DEFAULT_ROUNDING_RULE = PricingRoundingRule.NONE;
     public static final BigDecimal TIPO_CAMBIO = DEFAULT_EUR_UYU_RATE;
     public static final BigDecimal EXTRA_SIMPLE = DEFAULT_EXTRA_SINGLE;
     public static final BigDecimal EXTRA_DOBLE = DEFAULT_EXTRA_DOUBLE;
     public static final BigDecimal MARKUP_SIMPLE = DEFAULT_MARKUP_SINGLE;
     public static final BigDecimal MARKUP_DOBLE = DEFAULT_MARKUP_DOUBLE;
+    private static final int LEGACY_MARKUP_DIVISION_SCALE = 12;
 
     private final PricingSettingsRepository pricingSettingsRepository;
     private final DiscoRepository discoRepository;
@@ -195,14 +197,12 @@ public class CatalogPricingService {
         BigDecimal extra = extraForRecordType(recordType, settings);
         BigDecimal markup = markupOverride != null ? markupOverride : markupForRecordType(recordType, settings);
 
-        BigDecimal lineTotal = unitPriceEur.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal extraLineCostEur = extra.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal finalPriceUyu = applyRounding(
-            unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup),
-            DEFAULT_ROUNDING_RULE
-        );
+        BigDecimal quantityFactor = BigDecimal.valueOf(normalizedQuantity);
+        BigDecimal lineTotal = unitPriceEur.multiply(quantityFactor);
+        BigDecimal extraLineCostEur = extra.multiply(quantityFactor);
+        BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur);
+        BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate());
+        BigDecimal finalPriceUyu = unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup);
 
         return new PricingResult(recordType, lineTotal, extraLineCostEur, realLineCostEur, realLineCostUyu, markup, finalPriceUyu);
     }
@@ -289,12 +289,20 @@ public class CatalogPricingService {
     public PricingPreviewRowDTO toPreviewRow(Disco disco, PricingSettings settings, Map<String, Pedido> pedidosByInvoice) {
         PricingResult pricing = calculateForDisco(disco, settings);
         Pedido pedido = pedidoForDisco(disco, pedidosByInvoice);
+        String supplier = ImportMetadataNormalizer.resolveDisplaySupplier(
+            disco.getProcedencia(),
+            pedido != null ? pedido.getProveedor() : null
+        );
+        String shipping = ImportMetadataNormalizer.normalizeShipping(
+            supplier,
+            pedido != null ? pedido.getEnvio() : null
+        );
         return new PricingPreviewRowDTO(
             disco.getIdDisco(),
             blankToNull(disco.getNumeroFacturaCompra()),
             disco.getFechaFacturaCompra(),
-            pedido != null ? blankToNull(pedido.getProveedor()) : null,
-            pedido != null ? firstNonNull(pedido.getFranqueo(), pedido.getTarifas()) : null,
+            supplier,
+            shipping,
             disco.getCodigoInterno(),
             disco.getArtista(),
             disco.getAlbum(),
@@ -333,7 +341,11 @@ public class CatalogPricingService {
         if (base.compareTo(BigDecimal.ZERO) <= 0) {
             return null;
         }
-        return disco.getPrecioVenta().divide(base, 4, RoundingMode.HALF_UP);
+        // Legacy manual rows may not have manual_markup persisted. A bounded scale is only used
+        // here to derive a usable ratio from the stored manual sale price when division is non-terminating.
+        return disco.getPrecioVenta()
+            .divide(base, LEGACY_MARKUP_DIVISION_SCALE, RoundingMode.HALF_UP)
+            .stripTrailingZeros();
     }
 
     private BigDecimal extraForRecordType(RecordType recordType, PricingSettings settings) {
@@ -410,22 +422,6 @@ public class CatalogPricingService {
         return pedidosByInvoice.get(invoiceNumber);
     }
 
-    private BigDecimal applyRounding(BigDecimal value, PricingRoundingRule rule) {
-        if (value == null) {
-            return null;
-        }
-        return switch (rule) {
-            case NONE -> value.setScale(2, RoundingMode.HALF_UP);
-            case NEAREST_10 -> roundToNearest(value, BigDecimal.TEN);
-            case NEAREST_50 -> roundToNearest(value, new BigDecimal("50"));
-            case NEAREST_100 -> roundToNearest(value, new BigDecimal("100"));
-        };
-    }
-
-    private BigDecimal roundToNearest(BigDecimal value, BigDecimal increment) {
-        return value.divide(increment, 0, RoundingMode.HALF_UP).multiply(increment).setScale(0, RoundingMode.HALF_UP);
-    }
-
     private int normalizeQuantity(Integer quantity) {
         return quantity != null && quantity > 0 ? quantity : 1;
     }
@@ -444,15 +440,6 @@ public class CatalogPricingService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.strip();
-    }
-
-    private BigDecimal firstNonNull(BigDecimal... values) {
-        for (BigDecimal value : values) {
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
     }
 
     private void validateSettings(PricingSettingsUpdateDTO request) {
@@ -475,7 +462,7 @@ public class CatalogPricingService {
         if (markup == null || markup.compareTo(BigDecimal.ZERO) <= 0) {
             throw new NegocioException(message);
         }
-        return markup.setScale(4, RoundingMode.HALF_UP).stripTrailingZeros();
+        return markup.round(MathContext.DECIMAL128).stripTrailingZeros();
     }
 
     private PricingSettings defaultSettings() {

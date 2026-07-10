@@ -13,9 +13,9 @@ const EMPTY = {
 
 const FIELD_CONFIG = {
   eurUyuRate: { label: 'Cotización EUR/UYU', minExclusive: 0, step: '0.0001' },
-  extraCostSingleEur: { label: 'Costo extra disco simple (EUR)', minInclusive: 0, step: '0.01' },
-  extraCostDoubleEur: { label: 'Costo extra disco doble (EUR)', minInclusive: 0, step: '0.01' },
-  extraCostMultiEur: { label: 'Costo extra disco múltiple (EUR)', minInclusive: 0, step: '0.01' },
+  extraCostSingleEur: { label: 'Costo extra disco simple (EUR)', minInclusive: 0, step: '0.0001' },
+  extraCostDoubleEur: { label: 'Costo extra disco doble (EUR)', minInclusive: 0, step: '0.0001' },
+  extraCostMultiEur: { label: 'Costo extra disco múltiple (EUR)', minInclusive: 0, step: '0.0001' },
   markupSingle: { label: 'Markup disco simple', minExclusive: 0, step: '0.0001' },
   markupDouble: { label: 'Markup disco doble', minExclusive: 0, step: '0.0001' },
   markupMulti: { label: 'Markup disco múltiple', minExclusive: 0, step: '0.0001' },
@@ -25,11 +25,6 @@ const TYPE_LABELS = {
   SINGLE: 'Simple',
   DOUBLE: 'Doble',
   MULTI: 'Múltiple',
-}
-
-const MODE_LABELS = {
-  AUTO: 'Automático',
-  MANUAL: 'Manual',
 }
 
 function toForm(settings) {
@@ -67,7 +62,7 @@ function parseDecimalInput(value, { label, minInclusive, minExclusive }) {
   if (minInclusive != null && parsed < minInclusive) {
     return { error: `${label} no puede ser negativo.` }
   }
-  return { value: parsed }
+  return { value: normalized }
 }
 
 function validateForm(form) {
@@ -90,13 +85,12 @@ function validateForm(form) {
   }
 }
 
-function money(value, digits = 0) {
+function formatDecimal(value, maximumFractionDigits = 6) {
   if (value == null || value === '') return '—'
   const number = Number(value)
   if (!Number.isFinite(number)) return '—'
   return number.toLocaleString('es-UY', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    maximumFractionDigits,
   })
 }
 
@@ -109,12 +103,6 @@ function dateLabel(value) {
     month: '2-digit',
     year: 'numeric',
   })
-}
-
-function selectedCountLabel(count) {
-  if (count === 0) return 'Ningún disco seleccionado'
-  if (count === 1) return '1 disco seleccionado'
-  return `${count} discos seleccionados`
 }
 
 function markupDraftValue(value) {
@@ -132,7 +120,6 @@ function normalizeSearchValue(value) {
 
 function searchableValuesForRow(row) {
   const formattedDate = dateLabel(row.invoiceDate)
-  const formattedMode = MODE_LABELS[row.pricingMode] || row.pricingMode || ''
   const formattedType = TYPE_LABELS[row.type] || row.type || ''
   const numericValues = [
     row.unitPriceEur,
@@ -149,13 +136,13 @@ function searchableValuesForRow(row) {
     row.invoiceNumber,
     formattedDate,
     row.supplier,
+    row.shipping,
     row.code,
     row.artist,
     row.title,
     row.format,
     formattedType,
-    formattedMode,
-    ...numericValues.flatMap(value => [value, money(value, 2), money(value, 0)]),
+    ...numericValues.flatMap(value => [value, formatDecimal(value)]),
   ]
     .map(normalizeSearchValue)
     .filter(Boolean)
@@ -235,6 +222,7 @@ export default function PricingSettingsPage() {
   const [savingMarkupId, setSavingMarkupId] = useState(null)
   const [selectedDialogOpen, setSelectedDialogOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [supplierSort, setSupplierSort] = useState('none')
 
   function syncRows(nextRows) {
     setPreview(nextRows)
@@ -282,10 +270,31 @@ export default function PricingSettingsPage() {
     if (!normalizedSearch) return preview
     return preview.filter(row => searchableValuesForRow(row).some(value => value.includes(normalizedSearch)))
   }, [normalizedSearch, preview])
-  const visibleIds = useMemo(() => filteredPreview.map(row => row.idDisco).filter(Boolean), [filteredPreview])
+  const sortedPreview = useMemo(() => {
+    if (supplierSort === 'none') return filteredPreview
+    const factor = supplierSort === 'asc' ? 1 : -1
+    return [...filteredPreview].sort((left, right) => {
+      const bySupplier = normalizeSearchValue(left.supplier).localeCompare(
+        normalizeSearchValue(right.supplier),
+        'es',
+        { sensitivity: 'base' }
+      )
+      if (bySupplier !== 0) return bySupplier * factor
+      return (left.idDisco ?? 0) - (right.idDisco ?? 0)
+    })
+  }, [filteredPreview, supplierSort])
+  const visibleIds = useMemo(() => sortedPreview.map(row => row.idDisco).filter(Boolean), [sortedPreview])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
   const selectedCount = selectedIds.size
-  const visibleCount = filteredPreview.length
+  const visibleCount = sortedPreview.length
+
+  function toggleSupplierSort() {
+    setSupplierSort(current => {
+      if (current === 'none') return 'asc'
+      if (current === 'asc') return 'desc'
+      return 'none'
+    })
+  }
 
   function setField(field, value) {
     setForm(current => ({ ...current, [field]: value }))
@@ -437,12 +446,21 @@ export default function PricingSettingsPage() {
     setError('')
     setMessage('')
     try {
-      await api.pricing.updateMarkup(row.idDisco, parsed.value)
+      const response = await api.pricing.updateMarkup(row.idDisco, parsed.value)
+      syncRows(preview.map(item => (
+        item.idDisco === row.idDisco
+          ? {
+              ...item,
+              markup: response.markup,
+              finalSalePriceUyu: response.finalSalePriceUyu,
+              pricingMode: response.pricingMode,
+            }
+          : item
+      )))
       setMarkupFeedback(current => ({
         ...current,
         [row.idDisco]: { type: 'success', message: 'Markup actualizado correctamente.' },
       }))
-      await refreshPreview()
     } catch (err) {
       setMarkupFeedback(current => ({
         ...current,
@@ -515,30 +533,11 @@ export default function PricingSettingsPage() {
         </div>
         <div className="card p-4">
           <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor total proyectado</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">UYU ${money(totals.total, 0)}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">UYU ${formatDecimal(totals.total)}</p>
         </div>
       </section>
 
       <section className="card overflow-hidden">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-stone-800">
-          <div>
-            <h2 className="font-semibold text-slate-900 dark:text-white">Vista previa de recálculo</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-stone-500">Impacto de los costos y precios con la configuración actual.</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-medium text-slate-700 dark:text-stone-300">{selectedCountLabel(selectedCount)}</p>
-            <button
-              type="button"
-              className="mt-2 text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-4 hover:text-slate-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-white"
-              onClick={allVisibleSelected ? clearAllSelections : toggleAllVisible}
-              disabled={preview.length === 0}
-            >
-              {allVisibleSelected ? 'Deseleccionar todos' : 'Seleccionar todos'}
-            </button>
-            {loading || previewing ? <p className="mt-2 text-xs text-slate-400 dark:text-stone-500">Actualizando…</p> : null}
-          </div>
-        </div>
-
         <div className="sticky top-0 z-20 border-b border-slate-100 bg-white px-5 py-3 dark:border-stone-800 dark:bg-stone-950">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
@@ -565,6 +564,7 @@ export default function PricingSettingsPage() {
                 : `${visibleCount} ${visibleCount === 1 ? 'resultado' : 'resultados'}`}
             </p>
           </div>
+          {loading || previewing ? <p className="mt-2 text-xs text-slate-400 dark:text-stone-500">Actualizando…</p> : null}
         </div>
 
         <div className="max-h-[70vh] overflow-auto">
@@ -572,18 +572,53 @@ export default function PricingSettingsPage() {
             <thead className="bg-slate-50 dark:bg-stone-950">
               <tr className="text-left">
                 <th className="sticky left-0 top-0 z-30 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-stone-800 dark:bg-stone-950">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleSelected}
-                    onChange={toggleAllVisible}
-                    disabled={visibleIds.length === 0}
-                    aria-label={allVisibleSelected ? 'Deseleccionar todos los discos visibles' : 'Seleccionar todos los discos visibles'}
-                  />
+                  <div className="flex min-w-[140px] items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                      disabled={visibleIds.length === 0}
+                      aria-label={allVisibleSelected ? 'Deseleccionar todos los discos visibles' : 'Seleccionar todos los discos visibles'}
+                    />
+                    <button
+                      type="button"
+                      className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-stone-400 dark:text-stone-500 dark:hover:text-stone-300"
+                      onClick={allVisibleSelected ? clearAllSelections : toggleAllVisible}
+                      disabled={visibleIds.length === 0}
+                    >
+                      {allVisibleSelected ? 'Deseleccionar visibles' : 'Seleccionar visibles'}
+                    </button>
+                  </div>
+                </th>
+                <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-500">
+                  Número de factura
+                </th>
+                <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-500">
+                  Fecha de factura
+                </th>
+                <th
+                  className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-500"
+                  aria-sort={supplierSort === 'asc' ? 'ascending' : supplierSort === 'desc' ? 'descending' : 'none'}
+                >
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-left focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    onClick={toggleSupplierSort}
+                    aria-label={
+                      supplierSort === 'asc'
+                        ? 'Ordenar proveedor de Z a A'
+                        : supplierSort === 'desc'
+                          ? 'Restablecer orden de proveedor'
+                          : 'Ordenar proveedor de A a Z'
+                    }
+                  >
+                    <span>Proveedor</span>
+                    <span aria-hidden="true" className="inline-block min-w-[1ch] text-[10px]">
+                      {supplierSort === 'asc' ? '▲' : supplierSort === 'desc' ? '▼' : '↕'}
+                    </span>
+                  </button>
                 </th>
                 {[
-                  'Número de factura',
-                  'Fecha de factura',
-                  'Proveedor',
                   'Envío',
                   'Código',
                   'Artista',
@@ -610,7 +645,7 @@ export default function PricingSettingsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {filteredPreview.map(row => {
+              {sortedPreview.map(row => {
                 const selected = selectedIds.has(row.idDisco)
                 const feedback = markupFeedback[row.idDisco]
                 const savingMarkup = savingMarkupId === row.idDisco
@@ -631,18 +666,18 @@ export default function PricingSettingsPage() {
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.invoiceNumber || '—'}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{dateLabel(row.invoiceDate)}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.supplier || '—'}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.shipping, 2)}</td>
+                    <td className="px-4 py-2 text-slate-700 dark:text-stone-300">{row.shipping || '—'}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.code || '—'}</td>
                     <td className="px-4 py-2 font-medium text-slate-900 dark:text-white">{row.artist || '—'}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.title || '—'}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.format || '—'}</td>
                     <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{TYPE_LABELS[row.type] || row.type || '—'}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitPriceEur, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{formatDecimal(row.unitPriceEur)}</td>
                     <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{row.quantity ?? '—'}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitLineTotalEur, 2)}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.extraCostEur, 2)}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostEur, 2)}</td>
-                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostUyu, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{formatDecimal(row.unitLineTotalEur)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{formatDecimal(row.extraCostEur)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{formatDecimal(row.realCostEur)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{formatDecimal(row.realCostUyu)}</td>
                     <td className="px-4 py-2 align-middle">
                       <div className="flex items-center">
                         <input
@@ -663,12 +698,12 @@ export default function PricingSettingsPage() {
                         />
                       </div>
                     </td>
-                    <td className="px-4 py-2 tabular-nums font-semibold text-slate-900 dark:text-white">{money(row.finalSalePriceUyu, 0)}</td>
+                    <td className="px-4 py-2 tabular-nums font-semibold text-slate-900 dark:text-white">{formatDecimal(row.finalSalePriceUyu)}</td>
                     <td className="px-4 py-2">
                       <div className="flex flex-col items-start gap-1">
                         <button
                           type="button"
-                          className="btn-secondary h-9 px-3 py-1.5 text-xs"
+                          className="btn-secondary inline-flex h-9 min-w-[140px] items-center justify-center whitespace-nowrap px-4 py-1.5 text-xs"
                           onClick={() => saveMarkup(row)}
                           disabled={savingMarkup}
                           aria-label={`Guardar markup del disco ${row.artist || row.title || row.idDisco}`}
@@ -679,11 +714,6 @@ export default function PricingSettingsPage() {
                           <p className={`text-[11px] leading-tight ${feedback.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                             {feedback.message}
                           </p>
-                        ) : null}
-                        {!feedback ? (
-                          <span className="text-[11px] leading-tight text-slate-500 dark:text-stone-500">
-                            {MODE_LABELS[row.pricingMode] || row.pricingMode}
-                          </span>
                         ) : null}
                       </div>
                     </td>

@@ -12,6 +12,7 @@ import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -110,7 +111,7 @@ public class DiscogsImportService {
                 .estado(EstadoDisco.DISPONIBLE.name())
                 .condicion(CondicionDisco.USADO.name())
                 .cantidadCopias(1)
-                .procedencia("DISCOGS")
+                .procedencia(ImportMetadataNormalizer.SOURCE_DISCOGS)
                 .notas(cover.warning() == null ? null : "Portada: " + cover.warning())
                 .errores(new ArrayList<>())
                 .build();

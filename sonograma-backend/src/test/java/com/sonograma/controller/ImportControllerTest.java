@@ -68,6 +68,7 @@ class ImportControllerTest {
 
     @Test
     void catalogImportPersistsStructuredDataWithoutBuildingZip() throws Exception {
+        final Disco[] savedDisco = new Disco[1];
         InvoiceItem item = new InvoiceItem(
             "CAT-123", "Invoice Artist", "Invoice Album", "2x12",
             new BigDecimal("12.00"), 2, new BigDecimal("24.00")
@@ -100,6 +101,7 @@ class ImportControllerTest {
         when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.empty());
         when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);
+            savedDisco[0] = disco;
             disco.setIdDisco(10L);
             return disco;
         });
@@ -157,6 +159,8 @@ class ImportControllerTest {
             assertThat(job.totalItems()).isEqualTo(1);
             assertThat(job.totalQuantity()).isEqualTo(2);
         });
+        assertThat(savedDisco[0]).isNotNull();
+        assertThat(savedDisco[0].getProcedencia()).isEqualTo("Future");
         verify(audioPreviewService).guardarDesdeTracks(10L, storedPage.tracks());
         verify(zipBundleService).buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_0031-188471"));
         controller.shutdownImportPool();

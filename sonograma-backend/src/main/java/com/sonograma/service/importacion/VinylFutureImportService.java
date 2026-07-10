@@ -11,6 +11,7 @@ import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CatalogPricingService;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -256,7 +257,7 @@ public class VinylFutureImportService {
         req.setImagenUrl(preview.getImagenUrl());
         req.setPreviewUrl(preview.getPreviewUrl());
         req.setDiscogsUrl(preview.getDiscogsUrl());
-        req.setProcedencia(preview.getProcedencia());
+        req.setProcedencia(ImportMetadataNormalizer.SOURCE_FUTURE);
 
         if (preview.getCondicion() != null) {
             try {
