@@ -1,0 +1,2 @@
+ALTER TABLE disco
+    ADD COLUMN IF NOT EXISTS manual_markup NUMERIC(10,4);

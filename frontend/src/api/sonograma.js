@@ -148,7 +148,8 @@ export const api = {
     settings: () => request('GET', '/pricing/settings'),
     updateSettings: (settings) => request('PUT', '/pricing/settings', settings),
     preview: (settings) => request('POST', '/pricing/preview', { settings }),
-    apply: (settings, scope) => request('POST', '/pricing/apply', { settings, scope }),
+    apply: (settings, scope, selectedIds = []) => request('POST', '/pricing/apply', { settings, scope, selectedIds }),
+    updateMarkup: (id, markup) => request('PATCH', `/pricing/discs/${id}/markup`, { markup }),
     reset: () => request('POST', '/pricing/reset'),
   },
 

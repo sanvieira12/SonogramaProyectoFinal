@@ -71,6 +71,9 @@ public class Disco {
     @Column(name = "precio_venta", precision = 10, scale = 2)
     private BigDecimal precioVenta;
 
+    @Column(name = "manual_markup", precision = 10, scale = 4)
+    private BigDecimal manualMarkup;
+
     @Column(name = "formato", length = 120)
     private String formato;
 

@@ -34,6 +34,14 @@ public class PricingController {
         return ResponseEntity.ok(catalogPricingService.apply(request));
     }
 
+    @PatchMapping("/discs/{id}/markup")
+    public ResponseEntity<PricingMarkupUpdateResponseDTO> updateMarkup(
+        @PathVariable Long id,
+        @Valid @RequestBody PricingMarkupUpdateRequestDTO request
+    ) {
+        return ResponseEntity.ok(catalogPricingService.updateDiscMarkup(id, request));
+    }
+
     @PostMapping("/reset")
     public ResponseEntity<PricingSettingsDTO> reset() {
         return ResponseEntity.ok(catalogPricingService.resetToDefaults());

@@ -1,6 +1,15 @@
 package com.sonograma.service;
 
-import com.sonograma.dto.*;
+import com.sonograma.dto.DiscoRequestDTO;
+import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.PricingApplyRequestDTO;
+import com.sonograma.dto.PricingApplyResponseDTO;
+import com.sonograma.dto.PricingMarkupUpdateRequestDTO;
+import com.sonograma.dto.PricingMarkupUpdateResponseDTO;
+import com.sonograma.dto.PricingPreviewResponseDTO;
+import com.sonograma.dto.PricingPreviewRowDTO;
+import com.sonograma.dto.PricingSettingsDTO;
+import com.sonograma.dto.PricingSettingsUpdateDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PricingSettings;
@@ -8,6 +17,7 @@ import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.PricingRoundingRule;
 import com.sonograma.enums.RecordType;
 import com.sonograma.exception.NegocioException;
+import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.PedidoRepository;
 import com.sonograma.repository.PricingSettingsRepository;
@@ -17,7 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -87,35 +99,60 @@ public class CatalogPricingService {
 
     public PricingApplyResponseDTO apply(PricingApplyRequestDTO request) {
         validateSettings(request.settings());
-        boolean includeManual = "all".equalsIgnoreCase(request.scope());
-        if (!includeManual && !"automatic".equalsIgnoreCase(request.scope())) {
-            throw new NegocioException("El alcance debe ser 'automatic' o 'all'");
-        }
+        Scope scope = parseScope(request.scope());
+        List<Long> selectedIds = normalizeSelectedIds(request.selectedIds(), scope == Scope.SELECTED);
 
         PricingSettings settings = pricingSettingsRepository.findById(PricingSettings.SINGLETON_ID)
             .orElseGet(this::defaultSettings);
         applySettings(settings, request.settings());
         PricingSettings savedSettings = pricingSettingsRepository.save(settings);
 
+        List<Disco> discos = loadTargetDiscos(scope, selectedIds);
         int updated = 0;
-        List<Disco> discos = discoRepository.findAll();
         for (Disco disco : discos) {
             PricingMode mode = disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO;
-            if (!includeManual && mode == PricingMode.MANUAL) {
+            if (scope == Scope.AUTOMATIC && mode == PricingMode.MANUAL) {
                 continue;
             }
-            PricingResult result = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), savedSettings);
+            PricingResult result = calculate(
+                disco.getCosto(),
+                disco.getCantidadCopias(),
+                disco.getFormato(),
+                savedSettings
+            );
             if (result == null) {
                 continue;
             }
             disco.setPrecioVenta(result.finalPriceUyu());
-            if (includeManual || mode == PricingMode.AUTO) {
-                disco.setPricingMode(PricingMode.AUTO);
-            }
+            disco.setPricingMode(PricingMode.AUTO);
+            disco.setManualMarkup(null);
             updated++;
         }
-        discoRepository.saveAll(discos);
+        if (!discos.isEmpty()) {
+            discoRepository.saveAll(discos);
+        }
         return new PricingApplyResponseDTO(toDto(savedSettings), updated);
+    }
+
+    public PricingMarkupUpdateResponseDTO updateDiscMarkup(Long id, PricingMarkupUpdateRequestDTO request) {
+        BigDecimal markup = normalizeMarkup(request.markup(), "El markup debe ser mayor a 0");
+        Disco disco = discoRepository.findById(id)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+        PricingSettings settings = getOrCreateSettings();
+        PricingResult result = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings, markup);
+        if (result == null) {
+            throw new NegocioException("No se pudo recalcular el precio final del disco seleccionado");
+        }
+        disco.setManualMarkup(markup);
+        disco.setPricingMode(PricingMode.MANUAL);
+        disco.setPrecioVenta(result.finalPriceUyu());
+        Disco saved = discoRepository.save(disco);
+        return new PricingMarkupUpdateResponseDTO(
+            saved.getIdDisco(),
+            markup,
+            saved.getPrecioVenta(),
+            saved.getPricingMode().name()
+        );
     }
 
     @Transactional(readOnly = true)
@@ -139,28 +176,33 @@ public class CatalogPricingService {
     }
 
     public PricingResult calculate(BigDecimal unitPriceEur, Integer quantity, String format, PricingSettings settings) {
+        return calculate(unitPriceEur, quantity, format, settings, null);
+    }
+
+    public PricingResult calculate(
+        BigDecimal unitPriceEur,
+        Integer quantity,
+        String format,
+        PricingSettings settings,
+        BigDecimal markupOverride
+    ) {
         if (unitPriceEur == null || unitPriceEur.compareTo(BigDecimal.ZERO) <= 0) {
             return null;
         }
 
         RecordType recordType = detectRecordType(format);
         int normalizedQuantity = normalizeQuantity(quantity);
-        BigDecimal extra = switch (recordType) {
-            case DOUBLE -> settings.getExtraCostDoubleEur();
-            case MULTI -> settings.getExtraCostMultiEur();
-            case SINGLE -> settings.getExtraCostSingleEur();
-        };
-        BigDecimal markup = switch (recordType) {
-            case DOUBLE -> settings.getMarkupDouble();
-            case MULTI -> settings.getMarkupMulti();
-            case SINGLE -> settings.getMarkupSingle();
-        };
+        BigDecimal extra = extraForRecordType(recordType, settings);
+        BigDecimal markup = markupOverride != null ? markupOverride : markupForRecordType(recordType, settings);
 
         BigDecimal lineTotal = unitPriceEur.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal extraLineCostEur = extra.multiply(BigDecimal.valueOf(normalizedQuantity)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur).setScale(2, RoundingMode.HALF_UP);
         BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal finalPriceUyu = applyRounding(unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup), DEFAULT_ROUNDING_RULE);
+        BigDecimal finalPriceUyu = applyRounding(
+            unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup),
+            DEFAULT_ROUNDING_RULE
+        );
 
         return new PricingResult(recordType, lineTotal, extraLineCostEur, realLineCostEur, realLineCostUyu, markup, finalPriceUyu);
     }
@@ -216,6 +258,7 @@ public class CatalogPricingService {
             if (pricing != null) {
                 disco.setPrecioVenta(pricing.finalPriceUyu());
                 disco.setPricingMode(PricingMode.AUTO);
+                disco.setManualMarkup(null);
                 return;
             }
         }
@@ -224,12 +267,14 @@ public class CatalogPricingService {
             PricingResult pricing = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato());
             if (pricing != null) {
                 disco.setPrecioVenta(pricing.finalPriceUyu());
+                disco.setManualMarkup(null);
             }
         }
     }
 
     public void enrichDiscoResponse(Disco disco, DiscoResponseDTO dto) {
-        PricingResult pricing = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato());
+        PricingSettings settings = getOrCreateSettings();
+        PricingResult pricing = calculateForDisco(disco, settings);
         if (pricing == null) {
             return;
         }
@@ -242,7 +287,7 @@ public class CatalogPricingService {
     }
 
     public PricingPreviewRowDTO toPreviewRow(Disco disco, PricingSettings settings, Map<String, Pedido> pedidosByInvoice) {
-        PricingResult pricing = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings);
+        PricingResult pricing = calculateForDisco(disco, settings);
         Pedido pedido = pedidoForDisco(disco, pedidosByInvoice);
         return new PricingPreviewRowDTO(
             disco.getIdDisco(),
@@ -262,9 +307,85 @@ public class CatalogPricingService {
             pricing != null ? pricing.realUnitCostEur() : null,
             pricing != null ? pricing.realUnitCostUyu() : null,
             pricing != null ? pricing.markup() : null,
-            pricing != null ? pricing.finalPriceUyu() : null,
+            pricing != null ? pricing.finalPriceUyu() : disco.getPrecioVenta(),
             (disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO).name()
         );
+    }
+
+    private PricingResult calculateForDisco(Disco disco, PricingSettings settings) {
+        BigDecimal markupOverride = effectiveMarkupOverride(disco, settings);
+        return calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings, markupOverride);
+    }
+
+    private BigDecimal effectiveMarkupOverride(Disco disco, PricingSettings settings) {
+        if (disco.getManualMarkup() != null) {
+            return disco.getManualMarkup();
+        }
+        PricingMode mode = disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO;
+        if (mode != PricingMode.MANUAL || disco.getPrecioVenta() == null || disco.getCosto() == null
+            || disco.getCosto().compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+        RecordType recordType = detectRecordType(disco.getFormato());
+        BigDecimal base = disco.getCosto()
+            .add(extraForRecordType(recordType, settings))
+            .multiply(settings.getEurUyuRate());
+        if (base.compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+        return disco.getPrecioVenta().divide(base, 4, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal extraForRecordType(RecordType recordType, PricingSettings settings) {
+        return switch (recordType) {
+            case DOUBLE -> settings.getExtraCostDoubleEur();
+            case MULTI -> settings.getExtraCostMultiEur();
+            case SINGLE -> settings.getExtraCostSingleEur();
+        };
+    }
+
+    private BigDecimal markupForRecordType(RecordType recordType, PricingSettings settings) {
+        return switch (recordType) {
+            case DOUBLE -> settings.getMarkupDouble();
+            case MULTI -> settings.getMarkupMulti();
+            case SINGLE -> settings.getMarkupSingle();
+        };
+    }
+
+    private List<Disco> loadTargetDiscos(Scope scope, List<Long> selectedIds) {
+        if (scope == Scope.SELECTED) {
+            return new ArrayList<>(discoRepository.findAllById(selectedIds));
+        }
+        return new ArrayList<>(discoRepository.findAll());
+    }
+
+    private Scope parseScope(String rawScope) {
+        if (rawScope == null) {
+            throw new NegocioException("El alcance es obligatorio");
+        }
+        return switch (rawScope.strip().toLowerCase(Locale.ROOT)) {
+            case "automatic" -> Scope.AUTOMATIC;
+            case "all" -> Scope.ALL;
+            case "selected" -> Scope.SELECTED;
+            default -> throw new NegocioException("El alcance debe ser 'automatic', 'all' o 'selected'");
+        };
+    }
+
+    private List<Long> normalizeSelectedIds(List<Long> selectedIds, boolean required) {
+        if (!required) {
+            return selectedIds == null ? List.of() : selectedIds;
+        }
+        if (selectedIds == null || selectedIds.isEmpty()) {
+            throw new NegocioException("Debés seleccionar al menos un disco");
+        }
+        LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+        for (Long id : selectedIds) {
+            if (id == null || id <= 0) {
+                throw new NegocioException("Los IDs seleccionados son inválidos");
+            }
+            normalized.add(id);
+        }
+        return List.copyOf(normalized);
     }
 
     private Map<String, Pedido> pedidosByInvoiceNumber(List<Disco> discos) {
@@ -350,6 +471,13 @@ public class CatalogPricingService {
         }
     }
 
+    private BigDecimal normalizeMarkup(BigDecimal markup, String message) {
+        if (markup == null || markup.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new NegocioException(message);
+        }
+        return markup.setScale(4, RoundingMode.HALF_UP).stripTrailingZeros();
+    }
+
     private PricingSettings defaultSettings() {
         return PricingSettings.builder()
             .id(PricingSettings.SINGLETON_ID)
@@ -414,5 +542,11 @@ public class CatalogPricingService {
         ) {
             this(RecordType.SINGLE, null, extraCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
         }
+    }
+
+    private enum Scope {
+        AUTOMATIC,
+        ALL,
+        SELECTED
     }
 }
