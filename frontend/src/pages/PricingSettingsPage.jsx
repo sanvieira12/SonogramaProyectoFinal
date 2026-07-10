@@ -122,6 +122,45 @@ function markupDraftValue(value) {
   return String(value)
 }
 
+function normalizeSearchValue(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function searchableValuesForRow(row) {
+  const formattedDate = dateLabel(row.invoiceDate)
+  const formattedMode = MODE_LABELS[row.pricingMode] || row.pricingMode || ''
+  const formattedType = TYPE_LABELS[row.type] || row.type || ''
+  const numericValues = [
+    row.unitPriceEur,
+    row.quantity,
+    row.unitLineTotalEur,
+    row.extraCostEur,
+    row.realCostEur,
+    row.realCostUyu,
+    row.markup,
+    row.finalSalePriceUyu,
+  ]
+
+  return [
+    row.invoiceNumber,
+    formattedDate,
+    row.supplier,
+    row.code,
+    row.artist,
+    row.title,
+    row.format,
+    formattedType,
+    formattedMode,
+    ...numericValues.flatMap(value => [value, money(value, 2), money(value, 0)]),
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean)
+}
+
 function InputField({ field, value, onChange, error }) {
   const config = FIELD_CONFIG[field]
   const inputId = `pricing-${field}`
@@ -195,6 +234,14 @@ export default function PricingSettingsPage() {
   const [markupFeedback, setMarkupFeedback] = useState({})
   const [savingMarkupId, setSavingMarkupId] = useState(null)
   const [selectedDialogOpen, setSelectedDialogOpen] = useState(false)
+  const [search, setSearch] = useState('')
+
+  function syncRows(nextRows) {
+    setPreview(nextRows)
+    setMarkupDrafts(Object.fromEntries(nextRows.map(row => [row.idDisco, markupDraftValue(row.markup)])))
+    const nextIds = new Set(nextRows.map(row => row.idDisco))
+    setSelectedIds(current => new Set([...current].filter(id => nextIds.has(id))))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -209,7 +256,7 @@ export default function PricingSettingsPage() {
         setForm(nextForm)
         const previewData = await api.pricing.preview(validateForm(nextForm).payload)
         if (cancelled) return
-        setPreview(previewData.rows || [])
+        syncRows(previewData.rows || [])
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -221,12 +268,6 @@ export default function PricingSettingsPage() {
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => {
-    setMarkupDrafts(Object.fromEntries(preview.map(row => [row.idDisco, markupDraftValue(row.markup)])))
-    const visibleIds = new Set(preview.map(row => row.idDisco))
-    setSelectedIds(current => new Set([...current].filter(id => visibleIds.has(id))))
-  }, [preview])
-
   const totals = useMemo(() => {
     return preview.reduce((acc, row) => {
       acc.total += Number(row.finalSalePriceUyu || 0)
@@ -236,9 +277,15 @@ export default function PricingSettingsPage() {
     }, { total: 0, auto: 0, manual: 0 })
   }, [preview])
 
-  const visibleIds = useMemo(() => preview.map(row => row.idDisco).filter(Boolean), [preview])
+  const normalizedSearch = normalizeSearchValue(search)
+  const filteredPreview = useMemo(() => {
+    if (!normalizedSearch) return preview
+    return preview.filter(row => searchableValuesForRow(row).some(value => value.includes(normalizedSearch)))
+  }, [normalizedSearch, preview])
+  const visibleIds = useMemo(() => filteredPreview.map(row => row.idDisco).filter(Boolean), [filteredPreview])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
   const selectedCount = selectedIds.size
+  const visibleCount = filteredPreview.length
 
   function setField(field, value) {
     setForm(current => ({ ...current, [field]: value }))
@@ -264,7 +311,7 @@ export default function PricingSettingsPage() {
     setError('')
     try {
       const data = await api.pricing.preview(validation.payload)
-      setPreview(data.rows || [])
+      syncRows(data.rows || [])
       if (successMessage) setMessage(successMessage)
       return true
     } catch (err) {
@@ -294,6 +341,10 @@ export default function PricingSettingsPage() {
       }
       return next
     })
+  }
+
+  function clearAllSelections() {
+    setSelectedIds(new Set())
   }
 
   async function apply(scope) {
@@ -479,12 +530,40 @@ export default function PricingSettingsPage() {
             <button
               type="button"
               className="mt-2 text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-4 hover:text-slate-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-white"
-              onClick={toggleAllVisible}
-              disabled={visibleIds.length === 0}
+              onClick={allVisibleSelected ? clearAllSelections : toggleAllVisible}
+              disabled={preview.length === 0}
             >
               {allVisibleSelected ? 'Deseleccionar todos' : 'Seleccionar todos'}
             </button>
             {loading || previewing ? <p className="mt-2 text-xs text-slate-400 dark:text-stone-500">Actualizando…</p> : null}
+          </div>
+        </div>
+
+        <div className="sticky top-0 z-20 border-b border-slate-100 bg-white px-5 py-3 dark:border-stone-800 dark:bg-stone-950">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="search"
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                placeholder="Buscar por artista, título, código, proveedor, factura…"
+                aria-label="Buscar discos en stock"
+                className="input h-10 max-w-2xl"
+              />
+              <button
+                type="button"
+                className="btn-secondary h-10 px-3 py-2 text-sm"
+                onClick={() => setSearch('')}
+                disabled={search.trim() === ''}
+              >
+                Limpiar búsqueda
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-stone-400">
+              {normalizedSearch && visibleCount === 0
+                ? 'Sin resultados para esta búsqueda'
+                : `${visibleCount} ${visibleCount === 1 ? 'resultado' : 'resultados'}`}
+            </p>
           </div>
         </div>
 
@@ -519,7 +598,7 @@ export default function PricingSettingsPage() {
                   'Costo real (UYU)',
                   'Markup',
                   'Precio final de venta (UYU)',
-                  'Modo',
+                  'Actualizar',
                 ].map(label => (
                   <th
                     key={label}
@@ -531,13 +610,13 @@ export default function PricingSettingsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {preview.map(row => {
+              {filteredPreview.map(row => {
                 const selected = selectedIds.has(row.idDisco)
                 const feedback = markupFeedback[row.idDisco]
                 const savingMarkup = savingMarkupId === row.idDisco
                 const stickyCellClass = selected
-                  ? 'sticky left-0 z-10 bg-stone-100 px-4 py-3 dark:bg-stone-900'
-                  : 'sticky left-0 z-10 bg-white px-4 py-3 dark:bg-stone-950'
+                  ? 'sticky left-0 z-10 bg-stone-100 px-4 py-2 dark:bg-stone-900'
+                  : 'sticky left-0 z-10 bg-white px-4 py-2 dark:bg-stone-950'
 
                 return (
                   <tr key={row.idDisco} className={selected ? 'bg-stone-50 dark:bg-stone-900/40' : 'bg-white dark:bg-stone-950'}>
@@ -549,26 +628,26 @@ export default function PricingSettingsPage() {
                         aria-label={`Seleccionar disco ${row.artist || row.title || row.idDisco}`}
                       />
                     </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.invoiceNumber || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{dateLabel(row.invoiceDate)}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.supplier || '—'}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.shipping, 2)}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.code || '—'}</td>
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{row.artist || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.title || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{row.format || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{TYPE_LABELS[row.type] || row.type || '—'}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitPriceEur, 2)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{row.quantity ?? '—'}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitLineTotalEur, 2)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.extraCostEur, 2)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostEur, 2)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostUyu, 2)}</td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="space-y-2">
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.invoiceNumber || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{dateLabel(row.invoiceDate)}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.supplier || '—'}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.shipping, 2)}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.code || '—'}</td>
+                    <td className="px-4 py-2 font-medium text-slate-900 dark:text-white">{row.artist || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.title || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{row.format || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 dark:text-stone-400">{TYPE_LABELS[row.type] || row.type || '—'}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitPriceEur, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{row.quantity ?? '—'}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.unitLineTotalEur, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.extraCostEur, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostEur, 2)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-700 dark:text-stone-300">{money(row.realCostUyu, 2)}</td>
+                    <td className="px-4 py-2 align-middle">
+                      <div className="flex items-center">
                         <input
                           type="number"
-                          className={`input min-w-[8rem] py-1.5 text-xs ${feedback?.type === 'error' ? 'border-red-400 dark:border-red-700' : ''}`}
+                          className={`input h-9 min-w-[8rem] py-1.5 text-sm ${feedback?.type === 'error' ? 'border-red-400 dark:border-red-700' : ''}`}
                           value={markupDrafts[row.idDisco] ?? ''}
                           step="0.0001"
                           min="0.0001"
@@ -582,32 +661,42 @@ export default function PricingSettingsPage() {
                             }
                           }}
                         />
-                        <p className="text-[11px] text-slate-500 dark:text-stone-500">Multiplicador aplicado al costo real</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 tabular-nums font-semibold text-slate-900 dark:text-white">{money(row.finalSalePriceUyu, 0)}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-col items-start gap-1">
                         <button
                           type="button"
-                          className="btn-secondary px-3 py-1.5 text-xs"
+                          className="btn-secondary h-9 px-3 py-1.5 text-xs"
                           onClick={() => saveMarkup(row)}
                           disabled={savingMarkup}
                           aria-label={`Guardar markup del disco ${row.artist || row.title || row.idDisco}`}
                         >
-                          {savingMarkup ? 'Guardando...' : 'Guardar markup'}
+                          {savingMarkup ? 'Guardando…' : 'Guardar markup'}
                         </button>
                         {feedback ? (
-                          <p className={`text-xs ${feedback.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          <p className={`text-[11px] leading-tight ${feedback.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                             {feedback.message}
                           </p>
                         ) : null}
+                        {!feedback ? (
+                          <span className="text-[11px] leading-tight text-slate-500 dark:text-stone-500">
+                            {MODE_LABELS[row.pricingMode] || row.pricingMode}
+                          </span>
+                        ) : null}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 tabular-nums font-semibold text-slate-900 dark:text-white">{money(row.finalSalePriceUyu, 0)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${row.pricingMode === 'MANUAL' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`}>
-                        {MODE_LABELS[row.pricingMode] || row.pricingMode}
-                      </span>
                     </td>
                   </tr>
                 )
               })}
+              {!loading && preview.length > 0 && filteredPreview.length === 0 ? (
+                <tr>
+                  <td colSpan={19} className="px-4 py-10 text-center text-slate-500 dark:text-stone-500">
+                    Sin resultados para esta búsqueda
+                  </td>
+                </tr>
+              ) : null}
               {!loading && preview.length === 0 ? (
                 <tr>
                   <td colSpan={19} className="px-4 py-10 text-center text-slate-500 dark:text-stone-500">
