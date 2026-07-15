@@ -255,6 +255,8 @@ export const api = {
   preVentas: {
     listar: () => request('GET', '/pre-ventas'),
     crear: (payload) => request('POST', '/pre-ventas', payload),
+    marcarPagada: (id) => request('POST', `/pre-ventas/${id}/marcar-pagada`),
+    eliminar: (id) => request('DELETE', `/pre-ventas/${id}`),
   },
 
   gastosTienda: {

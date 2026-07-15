@@ -11,6 +11,7 @@ import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CatalogPricingService;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class VinylFutureImportService {
     private final CatalogPricingService catalogPricingService;
     private final DiscoQrCopyService qrCopyService;
     private final AudioPreviewService audioPreviewService;
+    private final PreVentaCodeMatcher preVentaCodeMatcher;
 
     private static final Map<String, String> COLUMN_ALIASES = new HashMap<>();
 
@@ -136,6 +138,7 @@ public class VinylFutureImportService {
                 qrCopyService.synchronize(disco);
                 audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
                 disco = discoRepository.save(disco);
+                preVentaCodeMatcher.linkPendingPreSales(disco);
                 DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
                 dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
                 dto.setQrCopies(qrCopyService.listDtos(disco));

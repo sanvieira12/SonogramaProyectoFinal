@@ -16,6 +16,7 @@ public class PreVentaRequestDTO {
     private Long idCliente;
     private Long idDisco;
     private String descripcion;
+    private String codigoDisco;
     @NotNull
     private Integer cantidad;
     @NotNull

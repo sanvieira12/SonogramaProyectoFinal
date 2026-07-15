@@ -14,6 +14,7 @@ import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +48,7 @@ public class DiscogsImportJobService {
     private final ObjectMapper objectMapper;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
+    private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final ExecutorService jobExecutor = Executors.newSingleThreadExecutor();
 
     public DiscogsImportJobDTO createJob(MultipartFile file) {
@@ -172,6 +174,7 @@ public class DiscogsImportJobService {
                 if (row.getImportedCatalogProduct() != null) {
                     updateDisco(row.getImportedCatalogProduct(), row);
                     Disco disco = discoRepository.save(row.getImportedCatalogProduct());
+                    preVentaCodeMatcher.linkPendingPreSales(disco);
                     qrCopyService.synchronize(disco);
                     audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), parseTracks(row.getTracksJson()));
                     row.setStatus(DiscogsImportRowStatus.IMPORTED);
@@ -183,6 +186,7 @@ public class DiscogsImportJobService {
                         .map(found -> mergeDisco(found, row))
                         .orElseGet(() -> toDisco(row));
                 discoRepository.save(disco);
+                preVentaCodeMatcher.linkPendingPreSales(disco);
                 qrCopyService.synchronize(disco);
                 audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), parseTracks(row.getTracksJson()));
                 row.setImportedCatalogProduct(disco);
@@ -327,6 +331,7 @@ public class DiscogsImportJobService {
             if (row.getImportedCatalogProduct() != null) {
                 updateDisco(row.getImportedCatalogProduct(), row);
                 Disco disco = discoRepository.save(row.getImportedCatalogProduct());
+                preVentaCodeMatcher.linkPendingPreSales(disco);
                 qrCopyService.synchronize(disco);
                 discoRepository.save(disco);
                 audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), result.tracks());

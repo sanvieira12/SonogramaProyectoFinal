@@ -12,6 +12,7 @@ import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class DiscogsImportService {
     private final DiscogsCoverService coverService;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
+    private final PreVentaCodeMatcher preVentaCodeMatcher;
 
     public DiscoImportPreviewDTO fetchDesdeLink(String url) {
         Optional<DiscogsLinkParser.DiscogsLink> link = discogsLinkParser.parse(url);
@@ -64,7 +66,9 @@ public class DiscogsImportService {
         disco = discoRepository.save(disco);
         qrCopyService.synchronize(disco);
         audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
-        DiscoResponseDTO dto = DiscoMapper.toDTO(discoRepository.save(disco));
+        disco = discoRepository.save(disco);
+        preVentaCodeMatcher.linkPendingPreSales(disco);
+        DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
         dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
         dto.setQrCopies(qrCopyService.listDtos(disco));
         return dto;

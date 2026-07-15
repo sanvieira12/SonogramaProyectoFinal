@@ -47,4 +47,6 @@ public class VentaResponseDTO {
     private String tipoMovimiento;
     private String descripcionMovimiento;
     private BigDecimal montoMovimiento;
+    private String origen;
+    private Long idPreVentaOrigen;
 }

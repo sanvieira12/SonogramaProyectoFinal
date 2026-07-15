@@ -22,6 +22,22 @@ import static org.mockito.Mockito.when;
 class EstadisticasServiceTest {
 
     @Test
+    void dashboardIncluyeCobroPreVentaEnMesYSemanaSinDuplicarlo() {
+        Fixture fixture = new Fixture();
+        Venta cobro = venta(30L, LocalDateTime.of(2026, 7, 15, 16, 0), "1800", "1800", EstadoVenta.COMPLETADA);
+        cobro.setOrigen("PRE_VENTA"); cobro.setIdPreVentaOrigen(9L); cobro.setTotalFinal(new BigDecimal("1800"));
+        fixture.stub(List.of(cobro), List.of());
+
+        var response = fixture.service.obtenerCatalogoInventarioVentas();
+
+        assertThat(response.getVentasPorMes()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
+                .containsExactly("2026-07:1800");
+        assertThat(response.getVentasPorSemana()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
+                .containsExactly("2026-S29:1800");
+        assertThat(response.getVentasPorMes().get(0).getCantidad()).isEqualTo(1);
+    }
+
+    @Test
     void dashboardAgrupaVentasSinSumarCostoDeEnvio() {
         VentaRepository ventaRepository = mock(VentaRepository.class);
         DiscoRepository discoRepository = mock(DiscoRepository.class);

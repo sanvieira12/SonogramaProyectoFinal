@@ -16,6 +16,10 @@ final class VentaTotals {
     static BigDecimal totalProductos(Venta venta) {
         if (venta == null) return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
+        if ("PRE_VENTA".equals(venta.getOrigen()) && venta.getTotalFinal() != null) {
+            return moneda(venta.getTotalFinal());
+        }
+
         if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
             BigDecimal subtotalDetalles = venta.getDetalles().stream()
                     .map(d -> nvl(d.getPrecioUnitario()).multiply(BigDecimal.valueOf(cantidad(d))))

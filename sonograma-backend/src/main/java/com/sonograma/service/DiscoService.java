@@ -28,6 +28,7 @@ public class DiscoService {
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
+    private final PreVentaCodeMatcher preVentaCodeMatcher;
 
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
@@ -172,7 +173,9 @@ public class DiscoService {
         Disco saved = discoRepository.save(disco);
         qrCopyService.synchronize(saved);
         recalcularEstado(saved);
-        return toDTO(discoRepository.save(saved));
+        saved = discoRepository.save(saved);
+        preVentaCodeMatcher.linkPendingPreSales(saved);
+        return toDTO(saved);
     }
 
     private void recalcularEstado(Disco disco) {

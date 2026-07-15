@@ -27,4 +27,15 @@ public class PreVentaController {
     public ResponseEntity<PreVentaResponseDTO> crear(@Valid @RequestBody PreVentaRequestDTO request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.crear(request));
     }
+
+    @PostMapping("/{id}/marcar-pagada")
+    public ResponseEntity<PreVentaResponseDTO> marcarPagada(@PathVariable Long id) {
+        return ResponseEntity.ok(service.marcarPagada(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> eliminar(@PathVariable Long id) {
+        service.eliminar(id);
+        return ResponseEntity.noContent().build();
+    }
 }

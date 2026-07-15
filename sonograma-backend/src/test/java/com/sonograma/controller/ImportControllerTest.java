@@ -129,6 +129,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
         MockMultipartFile file = new MockMultipartFile(
@@ -193,6 +194,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
 
@@ -270,6 +272,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
 

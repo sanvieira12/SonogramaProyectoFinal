@@ -113,4 +113,10 @@ public class Venta {
     @Column(name = "estado_pago")
     @Builder.Default
     private EstadoPago estadoPago = EstadoPago.PAGADO;
+
+    @Column(name = "origen", length = 30)
+    private String origen;
+
+    @Column(name = "id_pre_venta_origen", unique = true)
+    private Long idPreVentaOrigen;
 }

@@ -12,6 +12,7 @@ const ESTADO_PAGO_STYLES = {
 function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel }) {
   if (!venta) return null
   const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
+  const esPreVenta = venta.tipoMovimiento === 'PRE_VENTA'
   const detalles = venta.detalles?.length ? venta.detalles : [{
     idDisco: venta.idDisco,
     artista: venta.artista,
@@ -68,10 +69,11 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
           </p>
         )}
         <div className="flex gap-2">
-          {!esPagoDeuda && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
-          <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
+          {!esPagoDeuda && !esPreVenta && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
+          {!esPreVenta && <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
             {esPagoDeuda ? 'Eliminar pago' : 'Cancelar venta'}
-          </button>
+          </button>}
+          {esPreVenta && <p className="text-xs text-slate-400 dark:text-stone-500">Movimiento protegido; su origen se conserva en Pre-ventas.</p>}
         </div>
       </div>
     </aside>
@@ -403,6 +405,8 @@ export default function LibroVentas() {
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       v.tipoMovimiento === 'PAGO_DEUDA'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : v.tipoMovimiento === 'PRE_VENTA'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                         : 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-300'
                     }`}>
                       {v.descripcionMovimiento || 'Venta'}

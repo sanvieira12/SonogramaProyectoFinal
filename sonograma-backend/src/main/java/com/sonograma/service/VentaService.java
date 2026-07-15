@@ -292,6 +292,9 @@ public class VentaService {
     public void cancelarVenta(Long id) {
         Venta venta = ventaRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Venta", id));
+        if ("PRE_VENTA".equals(venta.getOrigen())) {
+            throw new NegocioException("El cobro de una pre-venta debe gestionarse desde Pre-ventas");
+        }
         if (venta.getEstado() == EstadoVenta.CANCELADA) return;
         restaurarStockVenta(venta);
         venta.setEstado(EstadoVenta.CANCELADA);
@@ -554,9 +557,11 @@ public class VentaService {
                 .subtotal(venta.getSubtotal())
                 .descuentoPorcentaje(venta.getDescuentoPorcentaje())
                 .detalles(detallesDTO)
-                .tipoMovimiento("VENTA")
-                .descripcionMovimiento("Venta")
+                .tipoMovimiento("PRE_VENTA".equals(venta.getOrigen()) ? "PRE_VENTA" : "VENTA")
+                .descripcionMovimiento("PRE_VENTA".equals(venta.getOrigen()) ? "Cobro de pre-venta" : "Venta")
                 .montoMovimiento(venta.getMontoPagado() != null ? venta.getMontoPagado() : VentaTotals.totalProductos(venta))
+                .origen(venta.getOrigen())
+                .idPreVentaOrigen(venta.getIdPreVentaOrigen())
                 .build();
     }
 

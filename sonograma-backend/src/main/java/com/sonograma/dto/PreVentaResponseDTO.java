@@ -17,6 +17,9 @@ public class PreVentaResponseDTO {
     private String artista;
     private String album;
     private String descripcion;
+    private String codigoDisco;
+    private Long idVentaPago;
+    private java.time.LocalDateTime fechaPago;
     private Integer cantidad;
     private BigDecimal precio;
     private LocalDate fecha;

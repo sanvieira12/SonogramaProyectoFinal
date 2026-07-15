@@ -28,6 +28,19 @@ public class PreVenta {
     @JoinColumn(name = "id_disco")
     private Disco disco;
 
+    @Column(name = "codigo_disco", length = 255)
+    private String codigoDisco;
+
+    @Column(name = "codigo_disco_normalizado", length = 255)
+    private String codigoDiscoNormalizado;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_venta_pago", unique = true)
+    private Venta ventaPago;
+
+    @Column(name = "fecha_pago")
+    private LocalDateTime fechaPago;
+
     @Column(name = "fecha", nullable = false)
     private LocalDate fecha;
 

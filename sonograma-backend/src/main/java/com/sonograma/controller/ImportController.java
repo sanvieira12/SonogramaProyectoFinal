@@ -19,6 +19,7 @@ import com.sonograma.repository.DiscoRepository;
 import com.sonograma.service.CsvExportService;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.CatalogPricingService;
+import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.PdfInvoiceParser;
 import com.sonograma.service.ShippingOrderService;
@@ -86,6 +87,7 @@ public class ImportController {
     private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
     private final VinylFutureImportBatchService importBatchService;
+    private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
     private final Map<String, VinylFutureJobState> vinylFutureJobs = new ConcurrentHashMap<>();
@@ -354,7 +356,9 @@ public class ImportController {
                 Disco savedDisco = disco;
                 pageData.ifPresent(page ->
                     audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
-                imported.add(discoRepository.save(disco));
+                disco = discoRepository.save(disco);
+                preVentaCodeMatcher.linkPendingPreSales(disco);
+                imported.add(disco);
                 if (existing.isPresent() && job != null) {
                     skippedDuplicates++;
                     job.addWarning("Stock actualizado sobre disco existente: " + itemReference(item)
