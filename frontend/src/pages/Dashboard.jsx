@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
+import { cantidadPagosLabel, cantidadVentasLabel } from '../utils/dashboardIncome'
 
 const ESTADO_COLORS = {
   DISPONIBLE: '#5B8C7D',
@@ -34,7 +35,7 @@ const ESTADO_PAGO_STYLE = {
   PENDIENTE: { bg: 'bg-red-50 dark:bg-red-900/20',         text: 'text-red-600 dark:text-red-400' },
 }
 
-function StatCard({ label, value, sublabel, color, icon }) {
+function StatCard({ label, value, sublabel, secondarySublabel, color, icon }) {
   return (
     <div className="card p-5 flex items-start gap-4">
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
@@ -44,6 +45,7 @@ function StatCard({ label, value, sublabel, color, icon }) {
         <div className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums">{value}</div>
         <div className="text-slate-600 dark:text-stone-400 text-sm font-medium mt-0.5">{label}</div>
         {sublabel && <div className="text-slate-400 dark:text-stone-600 text-xs mt-0.5">{sublabel}</div>}
+        {secondarySublabel && <div className="text-slate-400 dark:text-stone-600 text-xs mt-0.5">{secondarySublabel}</div>}
       </div>
     </div>
   )
@@ -145,9 +147,10 @@ export default function Dashboard() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
-          label="Ventas del mes"
+          label="Ingresos del mes"
           value={fmtMonto(ventaTotalMes)}
-          sublabel={ventaMes ? `${ventaMes.cantidad} ventas` : 'Sin ventas este mes'}
+          sublabel={cantidadVentasLabel(ventaMes?.cantidad)}
+          secondarySublabel={cantidadPagosLabel(ventaMes?.cantidadPagosDeuda)}
           color="bg-[#7E9FA8]/15"
           icon={
             <svg className="w-5 h-5 text-[#5C7D87] dark:text-[#7E9FA8]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -167,9 +170,10 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Ventas esta semana"
+          label="Ingresos de la semana"
           value={fmtMonto(ventaTotalSemana)}
-          sublabel={ventaSemana ? `${ventaSemana.cantidad} ventas` : 'Sin ventas esta semana'}
+          sublabel={cantidadVentasLabel(ventaSemana?.cantidad)}
+          secondarySublabel={cantidadPagosLabel(ventaSemana?.cantidadPagosDeuda)}
           color="bg-amber-50 dark:bg-amber-900/20"
           icon={
             <svg className="w-5 h-5 text-[#B8975E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

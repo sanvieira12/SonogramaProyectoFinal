@@ -40,7 +40,9 @@ public class EstadisticasService {
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
         List<Disco> discos = discoRepository.findAll();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
+                .filter(EstadisticasService::pagoVigente)
+                .toList();
         Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
                 .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
                 .collect(Collectors.groupingBy(
@@ -74,17 +76,19 @@ public class EstadisticasService {
             FechaAgrupacion agrupacion) {
         Map<String, Acumulador> acumulado = new LinkedHashMap<>();
         for (Venta venta : ventas) {
+            BigDecimal ingresoInicial = ingresoInicialVenta(
+                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO));
+            if (ingresoInicial.compareTo(BigDecimal.ZERO) <= 0) continue;
             String clave = clave(venta.getFechaVenta(), agrupacion);
             Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
             acc.cantidad++;
-            acc.totalMonto = acc.totalMonto.add(ingresoInicialVenta(
-                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO)));
+            acc.totalMonto = acc.totalMonto.add(ingresoInicial);
         }
         for (PagoDeuda pago : pagos) {
-            LocalDateTime fecha = pago.getCreatedAt() != null
-                    ? pago.getCreatedAt() : pago.getFechaPago().atStartOfDay();
+            LocalDateTime fecha = pago.getFechaPago().atStartOfDay();
             String clave = clave(fecha, agrupacion);
             Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
+            acc.cantidadPagosDeuda++;
             acc.totalMonto = acc.totalMonto.add(pago.getMonto());
         }
         return ordenar(acumulado, false);
@@ -102,6 +106,12 @@ public class EstadisticasService {
         BigDecimal acumulado = venta.getMontoPagado() != null ? venta.getMontoPagado() : totalVenta(venta);
         BigDecimal inicial = acumulado.subtract(pagosPosteriores);
         return inicial.max(BigDecimal.ZERO);
+    }
+
+    private static boolean pagoVigente(PagoDeuda pago) {
+        if (pago == null || pago.getMonto() == null || pago.getFechaPago() == null) return false;
+        Venta venta = pago.getDeuda() != null ? pago.getDeuda().getVenta() : null;
+        return venta == null || venta.getEstado() != EstadoVenta.CANCELADA;
     }
 
     private List<EstadisticaItemDTO> agruparVentas(
@@ -226,6 +236,7 @@ public class EstadisticasService {
         private final String clave;
         private final String etiqueta;
         private long cantidad = 0;
+        private long cantidadPagosDeuda = 0;
         private BigDecimal totalMonto = BigDecimal.ZERO;
         private BigDecimal gananciaEstimada = BigDecimal.ZERO;
 
@@ -239,6 +250,7 @@ public class EstadisticasService {
                     .clave(clave)
                     .etiqueta(etiqueta)
                     .cantidad(cantidad)
+                    .cantidadPagosDeuda(cantidadPagosDeuda)
                     .totalMonto(totalMonto)
                     .gananciaEstimada(gananciaEstimada)
                     .build();
