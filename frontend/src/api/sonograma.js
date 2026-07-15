@@ -237,6 +237,8 @@ export const api = {
     },
     registrarPago: (idDeuda, monto, notas) =>
       request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas }),
+    eliminarPago: (idDeuda, idPagoDeuda) =>
+      request('DELETE', `/deudas/${idDeuda}/pagos/${idPagoDeuda}`),
   },
 
   libro: {

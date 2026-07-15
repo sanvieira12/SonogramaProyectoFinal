@@ -4,6 +4,10 @@ import com.sonograma.entity.Deuda;
 import com.sonograma.enums.EstadoPago;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -20,6 +24,10 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
     List<Deuda> findByEstadoPagoNotAndActivaTrue(EstadoPago estadoPago);
 
     Optional<Deuda> findByVentaIdVentaAndActivaTrue(Long idVenta);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Deuda d WHERE d.idDeuda = :id")
+    Optional<Deuda> findByIdForUpdate(@Param("id") Long id);
 
     @Query("SELECT SUM(d.montoPendiente) FROM Deuda d WHERE d.estadoPago <> 'PAGADO' AND d.activa = true")
     BigDecimal sumMontoPendiente();

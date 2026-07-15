@@ -67,10 +67,12 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             Pago registrado sobre {venta.numeroFactura ? `la factura ${venta.numeroFactura}` : 'una deuda'}.
           </p>
         )}
-        {!esPagoDeuda && <div className="flex gap-2">
-          <button onClick={onEdit} className="btn-primary flex-1">Editar</button>
-          <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">Cancelar venta</button>
-        </div>}
+        <div className="flex gap-2">
+          {!esPagoDeuda && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
+          <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
+            {esPagoDeuda ? 'Eliminar pago' : 'Cancelar venta'}
+          </button>
+        </div>
       </div>
     </aside>
   )
@@ -205,6 +207,7 @@ export default function LibroVentas() {
   const [ventaCancelar, setVentaCancelar] = useState(null)
   const [cancelando, setCancelando] = useState(false)
   const [editando, setEditando] = useState(null)
+  const [success, setSuccess] = useState('')
 
   const cargar = useCallback(async (params) => {
     setLoading(true)
@@ -262,15 +265,23 @@ export default function LibroVentas() {
   }
 
   const totalFinal = ventas.reduce((s, v) => s + (v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
-  async function cancelarVenta() {
+  async function cancelarMovimiento() {
     if (!ventaCancelar) return
     setCancelando(true)
     setError(null)
     try {
-      await api.ventas.cancelar(ventaCancelar.idVenta)
-      setVentas(prev => prev.filter(v => v.idVenta !== ventaCancelar.idVenta))
-      setVentaPanel(prev => prev?.idVenta === ventaCancelar.idVenta ? null : prev)
+      const esPagoDeuda = ventaCancelar.tipoMovimiento === 'PAGO_DEUDA'
+      if (esPagoDeuda) {
+        await api.deudas.eliminarPago(ventaCancelar.idDeuda, ventaCancelar.idPagoDeuda)
+      } else {
+        await api.ventas.cancelar(ventaCancelar.idVenta)
+      }
+      await cargar(applied)
+      setVentaPanel(null)
       setVentaCancelar(null)
+      setSuccess(esPagoDeuda
+        ? 'Pago eliminado. El saldo de la deuda y los ingresos fueron actualizados.'
+        : 'Venta cancelada correctamente.')
     } catch (e) {
       setError(e.message || 'No se pudo cancelar la venta')
     } finally {
@@ -309,6 +320,7 @@ export default function LibroVentas() {
           Exportar Excel
         </button>
       </div>
+      {success && <p className="text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">{success}</p>}
 
       {/* Filtros */}
       <div className="card p-4">
@@ -454,9 +466,11 @@ export default function LibroVentas() {
       )}
       {ventaCancelar && (
         <ConfirmModal
-          titulo="Cancelar venta"
-          mensaje="¿Seguro que querés cancelar esta venta? Se restaurará el stock y se ocultará la deuda asociada si existe."
-          onConfirmar={cancelarVenta}
+          titulo={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA' ? 'Eliminar pago de deuda' : 'Cancelar venta'}
+          mensaje={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA'
+            ? '¿Seguro que querés eliminar este pago? El importe volverá al saldo pendiente de la deuda y se descontará de los ingresos.'
+            : '¿Seguro que querés cancelar esta venta? Se restaurará el stock y se ocultará la deuda asociada si existe.'}
+          onConfirmar={cancelarMovimiento}
           onCancelar={() => setVentaCancelar(null)}
           cargando={cancelando}
         />

@@ -4,9 +4,11 @@ import com.sonograma.dto.EstadisticaItemDTO;
 import com.sonograma.dto.EstadisticasResponseDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Venta;
+import com.sonograma.entity.PagoDeuda;
 import com.sonograma.enums.EstadoVenta;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.VentaRepository;
+import com.sonograma.repository.PagoDeudaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,12 +33,19 @@ public class EstadisticasService {
 
     private final VentaRepository ventaRepository;
     private final DiscoRepository discoRepository;
+    private final PagoDeudaRepository pagoDeudaRepository;
 
     public EstadisticasResponseDTO obtenerCatalogoInventarioVentas() {
         List<Venta> ventas = ventaRepository.findAll().stream()
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
         List<Disco> discos = discoRepository.findAll();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
+                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
+                .collect(Collectors.groupingBy(
+                        p -> p.getDeuda().getVenta().getIdVenta(),
+                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
 
         List<VentaDiscoItem> itemsVendidos = ventas.stream()
                 .flatMap(venta -> ventaItems(venta).stream())
@@ -47,9 +56,9 @@ public class EstadisticasService {
                 .generosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getGenero(), "Sin género"), i -> texto(i.disco().getGenero(), "Sin género"), true))
                 .artistasMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getArtista(), "Sin artista"), i -> texto(i.disco().getArtista(), "Sin artista"), true))
                 .sellosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), true))
-                .ventasPorMes(agruparVentas(ventas, v -> claveMes(v.getFechaVenta()), v -> claveMes(v.getFechaVenta()), false))
-                .ventasPorSemana(agruparVentas(ventas, v -> claveSemana(v.getFechaVenta()), v -> claveSemana(v.getFechaVenta()), false))
-                .ventasPorAnio(agruparVentas(ventas, v -> claveAnio(v.getFechaVenta()), v -> claveAnio(v.getFechaVenta()), false))
+                .ventasPorMes(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.MES))
+                .ventasPorSemana(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.SEMANA))
+                .ventasPorAnio(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.ANIO))
                 .gananciaPorSemana(agruparVentas(ventas, v -> claveSemana(v.getFechaVenta()), v -> claveSemana(v.getFechaVenta()), false))
                 .gananciaPorMes(agruparVentas(ventas, v -> claveMes(v.getFechaVenta()), v -> claveMes(v.getFechaVenta()), false))
                 .gananciaPorAnio(agruparVentas(ventas, v -> claveAnio(v.getFechaVenta()), v -> claveAnio(v.getFechaVenta()), false))
@@ -58,6 +67,41 @@ public class EstadisticasService {
                 .inventarioPorAnio(agruparDiscos(discos, d -> valor(d.getAnio()), d -> etiqueta(d.getAnio()), false))
                 .inventarioPorSello(agruparDiscos(discos, d -> texto(d.getSelloDiscografico(), "Sin sello"), d -> texto(d.getSelloDiscografico(), "Sin sello"), true))
                 .build();
+    }
+
+    private List<EstadisticaItemDTO> agruparIngresos(
+            List<Venta> ventas, List<PagoDeuda> pagos, Map<Long, BigDecimal> pagosPorVenta,
+            FechaAgrupacion agrupacion) {
+        Map<String, Acumulador> acumulado = new LinkedHashMap<>();
+        for (Venta venta : ventas) {
+            String clave = clave(venta.getFechaVenta(), agrupacion);
+            Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
+            acc.cantidad++;
+            acc.totalMonto = acc.totalMonto.add(ingresoInicialVenta(
+                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO)));
+        }
+        for (PagoDeuda pago : pagos) {
+            LocalDateTime fecha = pago.getCreatedAt() != null
+                    ? pago.getCreatedAt() : pago.getFechaPago().atStartOfDay();
+            String clave = clave(fecha, agrupacion);
+            Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
+            acc.totalMonto = acc.totalMonto.add(pago.getMonto());
+        }
+        return ordenar(acumulado, false);
+    }
+
+    private static String clave(LocalDateTime fecha, FechaAgrupacion agrupacion) {
+        return switch (agrupacion) {
+            case MES -> claveMes(fecha);
+            case SEMANA -> claveSemana(fecha);
+            case ANIO -> claveAnio(fecha);
+        };
+    }
+
+    private static BigDecimal ingresoInicialVenta(Venta venta, BigDecimal pagosPosteriores) {
+        BigDecimal acumulado = venta.getMontoPagado() != null ? venta.getMontoPagado() : totalVenta(venta);
+        BigDecimal inicial = acumulado.subtract(pagosPosteriores);
+        return inicial.max(BigDecimal.ZERO);
     }
 
     private List<EstadisticaItemDTO> agruparVentas(
@@ -202,4 +246,5 @@ public class EstadisticasService {
     }
 
     private record VentaDiscoItem(Disco disco, BigDecimal precio, BigDecimal gananciaEstimada) {}
+    private enum FechaAgrupacion { SEMANA, MES, ANIO }
 }

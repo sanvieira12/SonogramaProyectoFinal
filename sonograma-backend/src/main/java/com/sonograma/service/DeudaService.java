@@ -102,7 +102,7 @@ public class DeudaService {
     }
 
     public DeudaResponseDTO registrarPago(Long idDeuda, BigDecimal monto, String notas) {
-        Deuda deuda = deudaRepository.findById(idDeuda)
+        Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
 
@@ -143,6 +143,41 @@ public class DeudaService {
         }
 
         return toDTO(deudaRepository.save(deuda));
+    }
+
+    public void eliminarPago(Long idDeuda, Long idPagoDeuda) {
+        Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
+        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeuda(idPagoDeuda, idDeuda)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Pago de deuda", idPagoDeuda));
+
+        BigDecimal nuevoPagado = deuda.getMontoPagado().subtract(pago.getMonto());
+        if (nuevoPagado.compareTo(BigDecimal.ZERO) < 0) {
+            throw new NegocioException("El pago no puede eliminarse porque el saldo de la deuda es inconsistente");
+        }
+        BigDecimal nuevoPendiente = deuda.getMontoTotal().subtract(nuevoPagado);
+        EstadoPago nuevoEstado = nuevoPendiente.compareTo(BigDecimal.ZERO) == 0
+                ? EstadoPago.PAGADO
+                : nuevoPagado.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PENDIENTE : EstadoPago.PARCIAL;
+
+        pagoDeudaRepository.delete(pago);
+        pagoDeudaRepository.flush();
+        LocalDate fechaUltimoPago = pagoDeudaRepository
+                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda).stream()
+                .findFirst().map(PagoDeuda::getFechaPago).orElse(null);
+
+        deuda.setMontoPagado(nuevoPagado);
+        deuda.setMontoPendiente(nuevoPendiente);
+        deuda.setEstadoPago(nuevoEstado);
+        deuda.setFechaUltimoPago(fechaUltimoPago);
+        deuda.setUpdatedAt(LocalDateTime.now());
+        if (deuda.getVenta() != null) {
+            deuda.getVenta().setMontoPagado(nuevoPagado);
+            deuda.getVenta().setMontoDeuda(nuevoPendiente);
+            deuda.getVenta().setEstadoPago(nuevoEstado);
+        }
+        deudaRepository.save(deuda);
     }
 
     private void aplicarRequest(Deuda deuda, DeudaRequestDTO request, boolean creando) {

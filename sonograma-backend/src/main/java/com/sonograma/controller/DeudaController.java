@@ -89,6 +89,14 @@ public class DeudaController {
         return registrarPago(idDeuda, body);
     }
 
+    @DeleteMapping("/{idDeuda}/pagos/{idPagoDeuda}")
+    public ResponseEntity<Void> eliminarPago(
+            @PathVariable Long idDeuda,
+            @PathVariable Long idPagoDeuda) {
+        deudaService.eliminarPago(idDeuda, idPagoDeuda);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/importar-excel")
     @Transactional
     public ResponseEntity<Map<String, Object>> importarExcel(@RequestParam MultipartFile file) {

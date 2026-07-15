@@ -41,10 +41,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -324,14 +327,43 @@ public class VentaService {
 
     @Transactional(readOnly = true)
     public List<VentasPorMesDTO> obtenerEstadisticasPorMes() {
-        return ventaRepository.obtenerVentasAgrupadasPorMes().stream()
-                .map(row -> VentasPorMesDTO.builder()
-                        .mes((String) row[0])
-                        .etiqueta((String) row[1])
-                        .cantidad(((Number) row[2]).longValue())
-                        .totalMonto(new BigDecimal(row[3].toString()))
-                        .build())
-                .collect(Collectors.toList());
+        record MesIngreso(long cantidad, BigDecimal total) {
+            MesIngreso sumarVenta(BigDecimal monto) { return new MesIngreso(cantidad + 1, total.add(monto)); }
+            MesIngreso sumarPago(BigDecimal monto) { return new MesIngreso(cantidad, total.add(monto)); }
+        }
+        java.util.Map<String, MesIngreso> meses = new TreeMap<>();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        java.util.Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
+                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
+                .collect(Collectors.groupingBy(
+                        p -> p.getDeuda().getVenta().getIdVenta(),
+                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
+        ventaRepository.findAll().stream()
+                .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
+                .forEach(v -> {
+                    String mes = "%04d-%02d".formatted(v.getFechaVenta().getYear(), v.getFechaVenta().getMonthValue());
+                    BigDecimal acumulado = v.getMontoPagado() != null ? v.getMontoPagado() : VentaTotals.totalProductos(v);
+                    BigDecimal ingreso = acumulado
+                            .subtract(pagosPorVenta.getOrDefault(v.getIdVenta(), BigDecimal.ZERO))
+                            .max(BigDecimal.ZERO);
+                    meses.put(mes, meses.getOrDefault(mes, new MesIngreso(0, BigDecimal.ZERO)).sumarVenta(ingreso));
+                });
+        pagos.forEach(p -> {
+            LocalDate fecha = p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : p.getFechaPago();
+            String mes = "%04d-%02d".formatted(fecha.getYear(), fecha.getMonthValue());
+            meses.put(mes, meses.getOrDefault(mes, new MesIngreso(0, BigDecimal.ZERO)).sumarPago(p.getMonto()));
+        });
+        return meses.entrySet().stream()
+                .map(e -> VentasPorMesDTO.builder()
+                        .mes(e.getKey()).etiqueta(etiquetaMes(e.getKey()))
+                        .cantidad(e.getValue().cantidad()).totalMonto(e.getValue().total()).build())
+                .toList();
+    }
+
+    private String etiquetaMes(String mes) {
+        java.time.YearMonth value = java.time.YearMonth.parse(mes);
+        String nombre = value.getMonth().getDisplayName(TextStyle.SHORT, Locale.ENGLISH);
+        return nombre + " " + String.valueOf(value.getYear()).substring(2);
     }
 
     @Transactional(readOnly = true)
