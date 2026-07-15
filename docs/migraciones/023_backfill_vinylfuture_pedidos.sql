@@ -40,7 +40,7 @@ SELECT
     d.codigo_interno,
     d.artista,
     d.album,
-    COALESCE(d.formato, d.tipo_disco),
+    LEFT(COALESCE(d.formato, d.tipo_disco), 10),
     d.costo,
     COALESCE(d.cantidad_copias, 1),
     COALESCE(d.costo, 0) * COALESCE(d.cantidad_copias, 1),
