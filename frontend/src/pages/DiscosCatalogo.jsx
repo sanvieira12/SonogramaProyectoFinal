@@ -702,7 +702,7 @@ export default function DiscosCatalogo() {
   const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS' || busqueda.trim() !== ''
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+    <div className="max-w-[1500px] mx-auto px-4 sm:px-6 py-6 space-y-5">
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
@@ -715,7 +715,7 @@ export default function DiscosCatalogo() {
       </div>
 
       {/* Barra de búsqueda (ancho completo) + filtros de estado */}
-      <div className="flex flex-col lg:flex-row gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-start gap-3">
         <div className="relative w-full lg:max-w-md">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -747,7 +747,7 @@ export default function DiscosCatalogo() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap lg:ml-2 lg:pl-4 lg:border-l lg:border-slate-200 lg:dark:border-stone-800">
           {FILTROS_CONDICION.map(condicion => (
             <button
               key={condicion.value}
@@ -783,19 +783,28 @@ export default function DiscosCatalogo() {
         className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start"
         onMouseLeave={() => { if (!selectedDisco) setHoveredDisco(null) }}
       >
-      <div className="card overflow-hidden">
+      <div className="card min-w-0 overflow-hidden">
         {loading ? (
           <Spinner />
         ) : discosFiltrados.length === 0 ? (
           <EmptyState hayFiltro={hayFiltro} />
         ) : (
           <>
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1040px] table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[28%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[25%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-stone-800">
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Artista / Álbum</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Condición</th>
-                    <th className="text-left px-5 py-3">
+                    <th className="text-left pl-5 pr-3 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Artista / Álbum</th>
+                    <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Condición</th>
+                    <th className="text-left px-3 py-3">
                       <SortHeader
                         label="Precio"
                         sortKey="price"
@@ -804,7 +813,7 @@ export default function DiscosCatalogo() {
                         onSort={cambiarOrden}
                       />
                     </th>
-                    <th className="text-left px-5 py-3 hidden md:table-cell">
+                    <th className="text-left px-3 py-3 hidden md:table-cell">
                       <SortHeader
                         label="Fecha importación"
                         sortKey="importDate"
@@ -813,8 +822,8 @@ export default function DiscosCatalogo() {
                         onSort={cambiarOrden}
                       />
                     </th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
-                    <th className="min-w-[250px] px-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">Acciones</th>
+                    <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
+                    <th className="pl-3 pr-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
@@ -834,8 +843,8 @@ export default function DiscosCatalogo() {
                       }}
                       className={`hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer ${selectedDisco?.idDisco === d.idDisco ? 'bg-[#7E9FA8]/10' : ''}`}
                     >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
+                      <td className="pl-5 pr-3 py-3.5 align-middle">
+                        <div className="flex min-w-0 items-center gap-3">
                           {d.imagenUrl ? (
                             <img
                               src={resolveApiUrl(d.imagenUrl)}
@@ -845,27 +854,27 @@ export default function DiscosCatalogo() {
                           ) : (
                             <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
                           )}
-                          <div>
-                            <div className="font-semibold text-slate-900 dark:text-white">{d.artista}</div>
-                            <div className="text-slate-500 dark:text-stone-400 text-xs mt-0.5">
-                              {d.album}
-                              {d.anio ? <span className="ml-1.5 text-slate-400 dark:text-stone-600">· {d.anio}</span> : null}
+                          <div className="min-w-0">
+                            <div className="font-semibold leading-5 text-slate-900 dark:text-white break-words">{d.artista}</div>
+                            <div className="text-slate-500 dark:text-stone-400 text-xs leading-4 mt-0.5 break-words">
+                              <span>{d.album}</span>
+                              {d.anio ? <span className="ml-1.5 whitespace-nowrap text-slate-400 dark:text-stone-600">· {d.anio}</span> : null}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden sm:table-cell">
+                      <td className="px-3 py-3.5 align-middle text-slate-600 dark:text-stone-400 hidden sm:table-cell">
                         {d.condicion || <span className="text-slate-300 dark:text-stone-600">—</span>}
                       </td>
-                      <td className="px-5 py-4 font-semibold text-slate-900 dark:text-white tabular-nums">
+                      <td className="px-3 py-3.5 align-middle font-semibold text-slate-900 dark:text-white tabular-nums">
                         {d.precioVenta
                           ? `UYU $${Number(d.precioVenta).toLocaleString('es-UY')}`
                           : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
                       </td>
-                      <td className="px-5 py-4 text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
+                      <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatImportDate(d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
                       </td>
-                      <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
+                      <td className="px-3 py-3.5 align-middle" onClick={e => e.stopPropagation()}>
                         <select
                           value={d.estado}
                           onChange={async (e) => {
@@ -878,7 +887,7 @@ export default function DiscosCatalogo() {
                               alert('Error al cambiar estado: ' + err.message)
                             }
                           }}
-                          className="text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-slate-700 dark:text-stone-300 px-2 py-1 cursor-pointer"
+                          className="w-full min-w-[96px] text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-slate-700 dark:text-stone-300 px-2 py-1 cursor-pointer"
                         >
                           <option value="DISPONIBLE">Disponible</option>
                           <option value="RESERVADO">Reservado</option>
@@ -887,9 +896,9 @@ export default function DiscosCatalogo() {
                         </select>
                       </td>
                       {/* stopPropagation para que los botones no abran el slide-over */}
-                      <td className="min-w-[250px] pl-5 pr-6 py-4 text-right" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          <div className="flex flex-shrink-0 items-center gap-1 text-xs">
+                      <td className="pl-3 pr-5 py-3.5 align-middle text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                          <div className="inline-flex h-7 flex-shrink-0 items-center overflow-hidden rounded-lg border border-slate-200 dark:border-stone-700 text-xs">
                             <button
                               onClick={async () => {
                                 const nuevaCantidad = Math.max(0, (d.cantidadCopias ?? 1) - 1)
@@ -899,9 +908,9 @@ export default function DiscosCatalogo() {
                                   setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
                                 } catch (err) { alert(err.message) }
                               }}
-                              className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
+                              className="w-7 h-7 bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
                             >−</button>
-                            <span className="w-6 text-center font-mono text-slate-700 dark:text-stone-300">
+                            <span className="min-w-7 px-1 text-center font-mono tabular-nums text-slate-700 dark:text-stone-300">
                               {d.cantidadCopias ?? 1}
                             </span>
                             <button
@@ -913,7 +922,7 @@ export default function DiscosCatalogo() {
                                   setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
                                 } catch (err) { alert(err.message) }
                               }}
-                              className="w-6 h-6 rounded bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
+                              className="w-7 h-7 bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
                             >+</button>
                           </div>
                           <button
@@ -935,6 +944,7 @@ export default function DiscosCatalogo() {
                   ))}
                 </tbody>
               </table>
+            </div>
             {/* Paginación */}
             <div className="px-5 py-3 border-t border-slate-100 dark:border-stone-800">
               <Paginacion
