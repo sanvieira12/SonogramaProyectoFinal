@@ -81,6 +81,7 @@ function buildSelectedFromManual(manualForm) {
 
 export default function PreVentas() {
   const clientSearchRef = useRef(null)
+  const listSectionRef = useRef(null)
   const [preVentas, setPreVentas] = useState([])
   const [clientes, setClientes] = useState([])
   const [discos, setDiscos] = useState([])
@@ -100,6 +101,7 @@ export default function PreVentas() {
   const [showClienteResults, setShowClienteResults] = useState(false)
   const [showClienteModal, setShowClienteModal] = useState(false)
   const [sortOrder, setSortOrder] = useState('desc')
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
   useEffect(() => {
     api.preVentas.listar().then(setPreVentas).catch(() => setPreVentas([]))
@@ -213,8 +215,15 @@ export default function PreVentas() {
       setManualForm(emptyManualForm())
       setSelectedCliente(null)
       setClienteQuery('')
+      setShowManualForm(false)
+      setDiscoQuery('')
+      setShowCreateForm(false)
+      setTimeout(() => {
+        listSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 0)
     } catch (err) {
       setError(err.message || 'No se pudo registrar la pre-venta')
+      setShowCreateForm(true)
     } finally {
       setSaving(false)
     }
@@ -263,9 +272,32 @@ export default function PreVentas() {
         </div>
       )}
 
-      <form onSubmit={submit} className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_390px]">
-        <div className="space-y-5 min-w-0">
-          <section className="card p-5 space-y-4">
+      <section className="card overflow-hidden">
+        <button
+          type="button"
+          aria-expanded={showCreateForm}
+          aria-controls="nueva-preventa-panel"
+          onClick={() => setShowCreateForm(prev => !prev)}
+          className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-stone-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-stone-950"
+        >
+          <div>
+            <h2 className="font-semibold text-slate-900 dark:text-white">Nueva preventa</h2>
+            <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
+              Abrí este bloque para cargar una nueva reserva sin perder el listado de vista.
+            </p>
+          </div>
+          <ChevronDown className={`h-5 w-5 text-slate-400 dark:text-stone-500 transition-transform duration-200 ${showCreateForm ? 'rotate-180' : ''}`} />
+        </button>
+
+        <div
+          id="nueva-preventa-panel"
+          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${showCreateForm ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+        >
+          <div className="overflow-hidden">
+            <div className="border-t border-slate-100 dark:border-stone-800 p-5">
+              <form onSubmit={submit} className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_390px]">
+                <div className="space-y-5 min-w-0">
+                  <section className="card p-5 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Discos</h2>
@@ -471,9 +503,9 @@ export default function PreVentas() {
                 )}
               </div>
             </div>
-          </section>
+                  </section>
 
-          <section className="card p-5 space-y-4">
+                  <section className="card p-5 space-y-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Cliente</h2>
               <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
@@ -532,11 +564,11 @@ export default function PreVentas() {
                 </button>
               </div>
             )}
-          </section>
-        </div>
+                  </section>
+                </div>
 
-        <aside className="space-y-5">
-          <section className="card p-5 space-y-4">
+                <aside className="space-y-5">
+                  <section className="card p-5 space-y-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Datos de la pre-venta</h2>
               <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
@@ -580,11 +612,15 @@ export default function PreVentas() {
             <button className="btn-primary w-full" disabled={saving}>
               {saving ? 'Guardando…' : 'Registrar pre-venta'}
             </button>
-          </section>
-        </aside>
-      </form>
+                  </section>
+                </aside>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <section className="card overflow-hidden min-w-0">
+      <section ref={listSectionRef} className="card overflow-hidden min-w-0">
         <div className="px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-center justify-between gap-4">
           <div>
             <h2 className="font-semibold text-slate-900 dark:text-white">Listado</h2>
@@ -835,6 +871,14 @@ function SearchIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+    </svg>
+  )
+}
+
+function ChevronDown({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.508a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
     </svg>
   )
 }
