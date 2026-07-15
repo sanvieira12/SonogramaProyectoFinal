@@ -1,32 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from 'recharts'
 import { api } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
 import { cantidadPagosLabel, cantidadVentasLabel } from '../utils/dashboardIncome'
 
-const ESTADO_COLORS = {
-  DISPONIBLE: '#5B8C7D',
-  RESERVADO:  '#B8975E',
-  VENDIDO:    '#6B7280',
-  SIN_STOCK:  '#94a3b8',
-}
-
-const GRAFICAS = [
-  { key: 'inventarioPorEstado',      label: 'Inventario por estado',          unidad: 'discos' },
-  { key: 'inventarioPorGenero',      label: 'Inventario por género',           unidad: 'discos' },
-  { key: 'inventarioPorAnio',        label: 'Inventario por año',              unidad: 'discos' },
-  { key: 'inventarioPorSello',       label: 'Inventario por sello',            unidad: 'discos' },
-  { key: 'generosMasVendidos',       label: 'Géneros más vendidos',            unidad: 'ventas' },
-  { key: 'aniosMusicaMasVendidos',   label: 'Años de música más vendidos',     unidad: 'ventas' },
-  { key: 'artistasMasVendidos',      label: 'Top artistas vendidos',           unidad: 'ventas' },
-  { key: 'sellosMasVendidos',        label: 'Top sellos vendidos',             unidad: 'ventas' },
-  { key: 'ventasPorSemana',          label: 'Ventas por semana',               unidad: 'ventas' },
-  { key: 'ventasPorMes',             label: 'Ventas por mes',                  unidad: 'ventas' },
-  { key: 'ventasPorAnio',            label: 'Ventas por año',                  unidad: 'ventas' },
-  { key: 'gananciaPorMes',           label: 'Ganancia por mes',                unidad: 'UYU'   },
+const PERIODOS = [
+  { key: 'dia', label: 'Día' },
+  { key: 'semana', label: 'Semana' },
+  { key: 'mes', label: 'Mes' },
+  { key: 'trimestre', label: 'Trimestre' },
+  { key: 'semestre', label: 'Semestre' },
+  { key: 'anio', label: 'Año' },
 ]
 
 const ESTADO_PAGO_STYLE = {
@@ -56,10 +43,12 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [discos, setDiscos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [ventasPorMes, setVentasPorMes] = useState([])
   const [estadisticas, setEstadisticas] = useState(null)
   const [gastosMesActual, setGastosMesActual] = useState(0)
-  const [graficaSeleccionada, setGraficaSeleccionada] = useState('inventarioPorEstado')
+  const [periodoIngresos, setPeriodoIngresos] = useState('mes')
+  const [serieIngresos, setSerieIngresos] = useState(null)
+  const [loadingSerie, setLoadingSerie] = useState(true)
+  const [errorSerie, setErrorSerie] = useState('')
   const [ultimasVentas, setUltimasVentas] = useState([])
   const [paginaVentas, setPaginaVentas] = useState(1)
   const VENTAS_POR_PAGINA = 10
@@ -74,9 +63,6 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    api.ventas.estadisticasPorMes()
-      .then(setVentasPorMes)
-      .catch(() => setVentasPorMes([]))
     api.estadisticas.catalogo()
       .then(setEstadisticas)
       .catch(() => setEstadisticas(null))
@@ -87,6 +73,24 @@ export default function Dashboard() {
       .then(data => setGastosMesActual(Number(data?.totalMesActual || 0)))
       .catch(() => setGastosMesActual(0))
   }, [])
+
+  useEffect(() => {
+    let cancelado = false
+    api.estadisticas.ingresos(periodoIngresos)
+      .then(data => {
+        if (!cancelado) setSerieIngresos(data)
+      })
+      .catch(err => {
+        if (!cancelado) {
+          setSerieIngresos(null)
+          setErrorSerie(err.message || 'No se pudo cargar la serie de ingresos')
+        }
+      })
+      .finally(() => {
+        if (!cancelado) setLoadingSerie(false)
+      })
+    return () => { cancelado = true }
+  }, [periodoIngresos])
 
   const stats = {
     disponibles: discos
@@ -116,17 +120,14 @@ export default function Dashboard() {
   })()
   const ventaSemana = estadisticas?.ventasPorSemana?.find(v => v.clave === semanaActual)
   const ventaTotalSemana = Number(ventaSemana?.totalMonto || 0)
-  const graficaActual = GRAFICAS.find(g => g.key === graficaSeleccionada) || GRAFICAS[0]
-  const datosGrafica = (estadisticas?.[graficaActual.key] || []).slice(0, 12).map((item, i) => ({
+  const datosIngresos = (serieIngresos?.buckets || []).map(item => ({
     etiqueta: item.etiqueta,
-    cantidad: graficaActual.unidad === 'UYU'
-      ? Number(item.gananciaEstimada || 0)
-      : Number(item.cantidad || 0),
-    fill: ESTADO_COLORS[item.clave] || ['#7E9FA8', '#5B8C7D', '#B8975E', '#A66363', '#6B7280'][i % 5],
+    totalMonto: Number(item.totalMonto || 0),
   }))
 
   const axisColor = dark ? '#78716c' : '#94a3b8'
   const gridColor = dark ? '#1c1917' : '#f1f5f9'
+  const lineColor = dark ? '#7E9FA8' : '#5C7D87'
 
   const ventasPagina = ultimasVentas.slice((paginaVentas - 1) * VENTAS_POR_PAGINA, paginaVentas * VENTAS_POR_PAGINA)
   const totalPaginasVentas = Math.ceil(ultimasVentas.length / VENTAS_POR_PAGINA)
@@ -140,6 +141,31 @@ export default function Dashboard() {
     if (!monto && monto !== 0) return '—'
     return `UYU $${Number(monto).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
   }
+
+  function cambiarPeriodoIngresos(periodo) {
+    setPeriodoIngresos(periodo)
+    setLoadingSerie(true)
+    setErrorSerie('')
+  }
+
+  function fmtDeltaPorcentual(valor) {
+    if (valor == null || Number.isNaN(Number(valor))) return null
+    const numero = Number(valor)
+    const signo = numero > 0 ? '+' : ''
+    return `${signo}${numero.toLocaleString('es-UY', { maximumFractionDigits: 1 })}%`
+  }
+
+  function fmtDeltaMonto(valor) {
+    if (valor == null) return null
+    const numero = Number(valor)
+    const signo = numero > 0 ? '+' : numero < 0 ? '−' : ''
+    return `${signo}UYU $${Math.abs(numero).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
+  }
+
+  const totalIngresosSeleccionado = Number(serieIngresos?.totalMonto || 0)
+  const deltaMonto = fmtDeltaMonto(serieIngresos?.diferenciaMonto)
+  const deltaPorcentual = fmtDeltaPorcentual(serieIngresos?.diferenciaPorcentual)
+  const sinIngresos = !loadingSerie && !errorSerie && datosIngresos.every(item => item.totalMonto === 0)
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -194,82 +220,94 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-stone-300">{graficaActual.label}</h3>
-            <select
-              value={graficaSeleccionada}
-              onChange={e => setGraficaSeleccionada(e.target.value)}
-              className="input max-w-[230px] py-1.5 text-xs"
-            >
-              {GRAFICAS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
-            </select>
-          </div>
-          {datosGrafica.length === 0 ? (
-            <div className="h-[180px] flex items-center justify-center text-slate-400 dark:text-stone-600 text-sm">
-              Sin datos suficientes
+      <div className="card p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-slate-700 dark:text-stone-300">Ingresos</div>
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <div className="text-3xl font-bold text-slate-900 dark:text-white tabular-nums">
+                {fmtMonto(totalIngresosSeleccionado)}
+              </div>
+              <div className="pb-1 text-sm text-slate-400 dark:text-stone-500">
+                {serieIngresos?.etiquetaPeriodo || 'Mes'}
+              </div>
             </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={datosGrafica} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-                <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: dark ? '#0c0a09' : '#fff',
-                    border: `1px solid ${dark ? '#292524' : '#e2e8f0'}`,
-                    borderRadius: '0.5rem',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value) => graficaActual.unidad === 'UYU'
-                    ? [`$ ${Number(value).toLocaleString('es-UY')}`, 'Ganancia']
-                    : [`${value} ${graficaActual.unidad}`, 'Cantidad']
-                  }
-                />
-                <Bar dataKey="cantidad" radius={[4, 4, 0, 0]} maxBarSize={48}>
-                  {datosGrafica.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+            {(deltaMonto || deltaPorcentual) && (
+              <div className="text-xs text-slate-400 dark:text-stone-500">
+                {deltaPorcentual ? `${deltaPorcentual} vs. período anterior` : 'Vs. período anterior'}
+                {deltaMonto ? ` · ${deltaMonto}` : ''}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {PERIODOS.map(periodo => {
+              const activo = periodo.key === periodoIngresos
+              return (
+                <button
+                  key={periodo.key}
+                  type="button"
+                  onClick={() => cambiarPeriodoIngresos(periodo.key)}
+                  className={`flex-shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    activo
+                      ? 'border-[#7E9FA8] bg-[#7E9FA8]/15 text-slate-900 dark:text-white'
+                      : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400 dark:hover:bg-stone-800'
+                  }`}
+                >
+                  {periodo.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-stone-300">Ventas por mes</h3>
-            <span className="text-xs text-slate-400 dark:text-stone-600">
-              {ventasPorMes.length} {ventasPorMes.length === 1 ? 'mes' : 'meses'} con ventas
-            </span>
-          </div>
-          {ventasPorMes.length === 0 ? (
-            <div className="h-[180px] flex items-center justify-center text-slate-400 dark:text-stone-600 text-sm">
-              Sin ventas registradas
+        <div className="mt-5">
+          {loadingSerie ? (
+            <div className="h-[320px] flex items-center justify-center text-slate-400 dark:text-stone-600 text-sm">
+              Cargando ingresos…
+            </div>
+          ) : errorSerie ? (
+            <div className="h-[320px] flex items-center justify-center text-center text-red-500 dark:text-red-400 text-sm px-4">
+              {errorSerie}
+            </div>
+          ) : sinIngresos ? (
+            <div className="h-[320px] flex flex-col items-center justify-center text-center">
+              <div className="text-3xl font-bold text-slate-900 dark:text-white tabular-nums">{fmtMonto(0)}</div>
+              <div className="text-sm text-slate-400 dark:text-stone-500 mt-2">
+                No hubo ingresos registrados en este período.
+              </div>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={ventasPorMes} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-                <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={datosIngresos} margin={{ top: 10, right: 12, left: 0, bottom: 8 }}>
+                <CartesianGrid stroke={gridColor} vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="etiqueta" tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} minTickGap={14} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: axisColor }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={80}
+                  tickFormatter={(value) => `UYU $${Number(value).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`}
+                />
                 <Tooltip
                   contentStyle={{
                     background: dark ? '#0c0a09' : '#fff',
                     border: `1px solid ${dark ? '#292524' : '#e2e8f0'}`,
-                    borderRadius: '0.5rem',
+                    borderRadius: '0.75rem',
                     fontSize: '12px',
                   }}
-                  formatter={(value, name) => name === 'cantidad'
-                    ? [`${value} ventas`, 'Cantidad']
-                    : [`$ ${Number(value).toLocaleString('es-UY')}`, 'Monto']
-                  }
+                  formatter={(value) => [fmtMonto(value), 'Ingresos']}
+                  labelFormatter={(label) => `Período: ${label}`}
                 />
-                <Bar dataKey="cantidad" fill="#7E9FA8" radius={[4, 4, 0, 0]} maxBarSize={40} name="cantidad" />
-              </BarChart>
+                <Line
+                  type="monotone"
+                  dataKey="totalMonto"
+                  stroke={lineColor}
+                  strokeWidth={3}
+                  dot={{ r: 3, fill: lineColor, strokeWidth: 0 }}
+                  activeDot={{ r: 5, fill: lineColor, strokeWidth: 0 }}
+                />
+              </LineChart>
             </ResponsiveContainer>
           )}
         </div>

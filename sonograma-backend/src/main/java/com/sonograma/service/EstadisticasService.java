@@ -2,20 +2,30 @@ package com.sonograma.service;
 
 import com.sonograma.dto.EstadisticaItemDTO;
 import com.sonograma.dto.EstadisticasResponseDTO;
+import com.sonograma.dto.IngresoSerieBucketDTO;
+import com.sonograma.dto.IngresoSerieResponseDTO;
 import com.sonograma.entity.Disco;
-import com.sonograma.entity.Venta;
 import com.sonograma.entity.PagoDeuda;
+import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoVenta;
 import com.sonograma.repository.DiscoRepository;
-import com.sonograma.repository.VentaRepository;
 import com.sonograma.repository.PagoDeudaRepository;
+import com.sonograma.repository.VentaRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.Month;
 import java.time.temporal.WeekFields;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +81,32 @@ public class EstadisticasService {
                 .build();
     }
 
+    public IngresoSerieResponseDTO obtenerSerieIngresos(String periodo) {
+        SeriePeriodo seriePeriodo = SeriePeriodo.from(periodo);
+        List<IngresoMovimiento> movimientos = ingresosVigentes();
+        RangoPeriodo actual = seriePeriodo.rangoActual(LocalDate.now());
+        RangoPeriodo anterior = seriePeriodo.rangoAnterior(actual);
+
+        List<IngresoSerieBucketDTO> buckets = seriePeriodo.construirBuckets(actual, movimientos);
+        BigDecimal totalActual = totalEnRango(actual, movimientos);
+        BigDecimal totalAnterior = totalEnRango(anterior, movimientos);
+        BigDecimal diferenciaMonto = totalActual.subtract(totalAnterior);
+        BigDecimal diferenciaPorcentual = totalAnterior.compareTo(BigDecimal.ZERO) == 0
+                ? null
+                : diferenciaMonto.multiply(BigDecimal.valueOf(100))
+                .divide(totalAnterior, 2, RoundingMode.HALF_UP);
+
+        return IngresoSerieResponseDTO.builder()
+                .periodo(seriePeriodo.name().toLowerCase(Locale.ROOT))
+                .etiquetaPeriodo(seriePeriodo.etiqueta)
+                .totalMonto(totalActual)
+                .totalMontoPeriodoAnterior(totalAnterior)
+                .diferenciaMonto(diferenciaMonto)
+                .diferenciaPorcentual(diferenciaPorcentual)
+                .buckets(buckets)
+                .build();
+    }
+
     private List<EstadisticaItemDTO> agruparIngresos(
             List<Venta> ventas, List<PagoDeuda> pagos, Map<Long, BigDecimal> pagosPorVenta,
             FechaAgrupacion agrupacion) {
@@ -92,6 +128,41 @@ public class EstadisticasService {
             acc.totalMonto = acc.totalMonto.add(pago.getMonto());
         }
         return ordenar(acumulado, false);
+    }
+
+    private List<IngresoMovimiento> ingresosVigentes() {
+        List<Venta> ventas = ventaRepository.findAll().stream()
+                .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
+                .toList();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
+                .filter(EstadisticasService::pagoVigente)
+                .toList();
+        Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
+                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
+                .collect(Collectors.groupingBy(
+                        p -> p.getDeuda().getVenta().getIdVenta(),
+                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
+
+        List<IngresoMovimiento> movimientos = new ArrayList<>();
+        for (Venta venta : ventas) {
+            if (venta.getFechaVenta() == null) continue;
+            BigDecimal ingresoInicial = ingresoInicialVenta(
+                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO));
+            if (ingresoInicial.compareTo(BigDecimal.ZERO) <= 0) continue;
+            movimientos.add(new IngresoMovimiento(venta.getFechaVenta(), ingresoInicial));
+        }
+        for (PagoDeuda pago : pagos) {
+            movimientos.add(new IngresoMovimiento(pago.getFechaPago().atStartOfDay(), pago.getMonto()));
+        }
+        movimientos.sort(Comparator.comparing(IngresoMovimiento::fecha));
+        return movimientos;
+    }
+
+    private static BigDecimal totalEnRango(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+        return movimientos.stream()
+                .filter(movimiento -> rango.contiene(movimiento.fecha()))
+                .map(IngresoMovimiento::monto)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private static String clave(LocalDateTime fecha, FechaAgrupacion agrupacion) {
@@ -257,6 +328,251 @@ public class EstadisticasService {
         }
     }
 
+    private record IngresoMovimiento(LocalDateTime fecha, BigDecimal monto) {}
     private record VentaDiscoItem(Disco disco, BigDecimal precio, BigDecimal gananciaEstimada) {}
     private enum FechaAgrupacion { SEMANA, MES, ANIO }
+
+    private record RangoPeriodo(LocalDateTime inicio, LocalDateTime fin) {
+        private boolean contiene(LocalDateTime fecha) {
+            return fecha != null && !fecha.isBefore(inicio) && !fecha.isAfter(fin);
+        }
+    }
+
+    private enum SeriePeriodo {
+        DIA("Día") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                return new RangoPeriodo(hoy.atStartOfDay(), hoy.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate diaAnterior = actual.inicio().toLocalDate().minusDays(1);
+                return new RangoPeriodo(diaAnterior.atStartOfDay(), diaAnterior.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                List<IngresoSerieBucketDTO> buckets = new ArrayList<>();
+                LocalDate dia = rango.inicio().toLocalDate();
+                for (int hora = 0; hora < 24; hora++) {
+                    LocalDateTime inicio = dia.atTime(hora, 0);
+                    LocalDateTime fin = dia.atTime(hora, 59, 59);
+                    buckets.add(bucket(
+                            "%02d".formatted(hora),
+                            "%02d h".formatted(hora),
+                            totalEntre(movimientos, inicio, fin)
+                    ));
+                }
+                return buckets;
+            }
+        },
+        SEMANA("Semana") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                LocalDate inicio = hoy.with(DayOfWeek.MONDAY);
+                LocalDate fin = inicio.plusDays(6);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate inicio = actual.inicio().toLocalDate().minusWeeks(1);
+                LocalDate fin = inicio.plusDays(6);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                List<IngresoSerieBucketDTO> buckets = new ArrayList<>();
+                LocalDate cursor = rango.inicio().toLocalDate();
+                while (!cursor.isAfter(rango.fin().toLocalDate())) {
+                    buckets.add(bucket(
+                            cursor.toString(),
+                            diaSemana(cursor.getDayOfWeek()),
+                            totalEntre(movimientos, cursor.atStartOfDay(), cursor.atTime(LocalTime.MAX))
+                    ));
+                    cursor = cursor.plusDays(1);
+                }
+                return buckets;
+            }
+        },
+        MES("Mes") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                LocalDate inicio = hoy.withDayOfMonth(1);
+                LocalDate fin = hoy.withDayOfMonth(hoy.lengthOfMonth());
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate inicio = actual.inicio().toLocalDate().minusMonths(1).withDayOfMonth(1);
+                LocalDate fin = inicio.withDayOfMonth(inicio.lengthOfMonth());
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                List<IngresoSerieBucketDTO> buckets = new ArrayList<>();
+                LocalDate cursor = rango.inicio().toLocalDate();
+                while (!cursor.isAfter(rango.fin().toLocalDate())) {
+                    buckets.add(bucket(
+                            cursor.toString(),
+                            String.valueOf(cursor.getDayOfMonth()),
+                            totalEntre(movimientos, cursor.atStartOfDay(), cursor.atTime(LocalTime.MAX))
+                    ));
+                    cursor = cursor.plusDays(1);
+                }
+                return buckets;
+            }
+        },
+        TRIMESTRE("Trimestre") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                LocalDate inicio = inicioTrimestre(hoy);
+                LocalDate fin = inicio.plusMonths(3).minusDays(1);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate inicio = actual.inicio().toLocalDate().minusMonths(3);
+                LocalDate fin = actual.fin().toLocalDate().minusMonths(3);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                return bucketsSemanales(rango, movimientos);
+            }
+        },
+        SEMESTRE("Semestre") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                LocalDate inicio = hoy.getMonthValue() <= 6 ? LocalDate.of(hoy.getYear(), 1, 1) : LocalDate.of(hoy.getYear(), 7, 1);
+                LocalDate fin = inicio.plusMonths(6).minusDays(1);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate inicio = actual.inicio().toLocalDate().minusMonths(6);
+                LocalDate fin = actual.fin().toLocalDate().minusMonths(6);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                return bucketsMensuales(rango, movimientos);
+            }
+        },
+        ANIO("Año") {
+            @Override
+            RangoPeriodo rangoActual(LocalDate hoy) {
+                LocalDate inicio = LocalDate.of(hoy.getYear(), 1, 1);
+                LocalDate fin = LocalDate.of(hoy.getYear(), 12, 31);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            RangoPeriodo rangoAnterior(RangoPeriodo actual) {
+                LocalDate inicio = actual.inicio().toLocalDate().minusYears(1);
+                LocalDate fin = actual.fin().toLocalDate().minusYears(1);
+                return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
+            }
+
+            @Override
+            List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+                return bucketsMensuales(rango, movimientos);
+            }
+        };
+
+        private final String etiqueta;
+
+        SeriePeriodo(String etiqueta) {
+            this.etiqueta = etiqueta;
+        }
+
+        abstract RangoPeriodo rangoActual(LocalDate hoy);
+        abstract RangoPeriodo rangoAnterior(RangoPeriodo actual);
+        abstract List<IngresoSerieBucketDTO> construirBuckets(RangoPeriodo rango, List<IngresoMovimiento> movimientos);
+
+        private static SeriePeriodo from(String valor) {
+            if (valor == null || valor.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período inválido");
+            }
+            try {
+                return valueOf(valor.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período inválido");
+            }
+        }
+    }
+
+    private static List<IngresoSerieBucketDTO> bucketsMensuales(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+        List<IngresoSerieBucketDTO> buckets = new ArrayList<>();
+        LocalDate cursor = rango.inicio().toLocalDate().withDayOfMonth(1);
+        LocalDate fin = rango.fin().toLocalDate();
+        while (!cursor.isAfter(fin)) {
+            LocalDate inicioMes = cursor.withDayOfMonth(1);
+            LocalDate finMes = cursor.withDayOfMonth(cursor.lengthOfMonth());
+            buckets.add(bucket(
+                    "%04d-%02d".formatted(cursor.getYear(), cursor.getMonthValue()),
+                    nombreMes(cursor.getMonth()),
+                    totalEntre(movimientos, inicioMes.atStartOfDay(), finMes.atTime(LocalTime.MAX))
+            ));
+            cursor = cursor.plusMonths(1);
+        }
+        return buckets;
+    }
+
+    private static List<IngresoSerieBucketDTO> bucketsSemanales(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+        List<IngresoSerieBucketDTO> buckets = new ArrayList<>();
+        LocalDate cursor = rango.inicio().toLocalDate();
+        int index = 1;
+        while (!cursor.isAfter(rango.fin().toLocalDate())) {
+            LocalDate finSemana = min(cursor.plusDays(6), rango.fin().toLocalDate());
+            buckets.add(bucket(
+                    cursor.toString(),
+                    "Sem " + index,
+                    totalEntre(movimientos, cursor.atStartOfDay(), finSemana.atTime(LocalTime.MAX))
+            ));
+            cursor = finSemana.plusDays(1);
+            index++;
+        }
+        return buckets;
+    }
+
+    private static IngresoSerieBucketDTO bucket(String clave, String etiqueta, BigDecimal totalMonto) {
+        return IngresoSerieBucketDTO.builder()
+                .clave(clave)
+                .etiqueta(etiqueta)
+                .totalMonto(totalMonto)
+                .build();
+    }
+
+    private static BigDecimal totalEntre(List<IngresoMovimiento> movimientos, LocalDateTime inicio, LocalDateTime fin) {
+        return movimientos.stream()
+                .filter(movimiento -> !movimiento.fecha().isBefore(inicio) && !movimiento.fecha().isAfter(fin))
+                .map(IngresoMovimiento::monto)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private static LocalDate inicioTrimestre(LocalDate fecha) {
+        int mesInicio = ((fecha.getMonthValue() - 1) / 3) * 3 + 1;
+        return LocalDate.of(fecha.getYear(), mesInicio, 1);
+    }
+
+    private static LocalDate min(LocalDate a, LocalDate b) {
+        return a.isBefore(b) ? a : b;
+    }
+
+    private static String nombreMes(Month month) {
+        return month.getDisplayName(java.time.format.TextStyle.SHORT, new Locale("es", "UY"));
+    }
+
+    private static String diaSemana(DayOfWeek dayOfWeek) {
+        return dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, new Locale("es", "UY"));
+    }
 }

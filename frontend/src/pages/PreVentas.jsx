@@ -109,10 +109,6 @@ export default function PreVentas() {
     api.discos.todos().then(setDiscos).catch(() => setDiscos([]))
   }, [])
 
-  useEffect(() => {
-    if (!selectedCliente && clientes.length > 0) setShowClienteResults(false)
-  }, [clientes, selectedCliente])
-
   const discosById = useMemo(
     () => new Map(discos.map(d => [String(d.idDisco), d])),
     [discos],

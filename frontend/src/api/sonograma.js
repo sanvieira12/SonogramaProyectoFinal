@@ -213,6 +213,7 @@ export const api = {
 
   estadisticas: {
     catalogo: () => request('GET', '/estadisticas/catalogo'),
+    ingresos: (periodo) => request('GET', `/estadisticas/ingresos?periodo=${encodeURIComponent(periodo)}`),
   },
 
   deudas: {

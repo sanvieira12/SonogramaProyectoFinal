@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.EstadisticasResponseDTO;
+import com.sonograma.dto.IngresoSerieResponseDTO;
 import com.sonograma.entity.Venta;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.PagoDeuda;
@@ -16,6 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -149,6 +151,56 @@ class EstadisticasServiceTest {
 
         assertThat(response.getVentasPorMes()).isEmpty();
         assertThat(response.getVentasPorSemana()).isEmpty();
+    }
+
+    @Test
+    void serieMensualAgrupaVentasPagosYPreventasSinDuplicar() {
+        Fixture fixture = new Fixture();
+        LocalDate hoy = LocalDate.now();
+        Venta venta = venta(1L, hoy.withDayOfMonth(Math.min(5, hoy.lengthOfMonth())).atTime(10, 0), "3000", "3000", EstadoVenta.COMPLETADA);
+        Venta preVentaPagada = venta(2L, hoy.withDayOfMonth(Math.min(7, hoy.lengthOfMonth())).atTime(16, 0), "1800", "1800", EstadoVenta.COMPLETADA);
+        preVentaPagada.setOrigen("PRE_VENTA");
+        preVentaPagada.setIdPreVentaOrigen(99L);
+        Deuda deuda = Deuda.builder().idDeuda(4L).venta(venta).build();
+        PagoDeuda pago = pago(3L, deuda, "2000", hoy.withDayOfMonth(Math.min(12, hoy.lengthOfMonth())));
+        fixture.stub(List.of(venta, preVentaPagada), List.of(pago));
+
+        IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos("mes");
+
+        assertThat(response.getPeriodo()).isEqualTo("mes");
+        assertThat(response.getTotalMonto()).isEqualByComparingTo("4800");
+        assertThat(response.getBuckets()).isNotEmpty();
+        assertThat(response.getBuckets().stream()
+                .filter(bucket -> bucket.getTotalMonto().compareTo(BigDecimal.ZERO) > 0)
+                .map(bucket -> bucket.getTotalMonto().stripTrailingZeros().toPlainString()))
+                .containsExactlyInAnyOrder("1000", "1800", "2000");
+    }
+
+    @Test
+    void serieDiariaGenera24BucketsYAgrupaPorHora() {
+        Fixture fixture = new Fixture();
+        LocalDate hoy = LocalDate.now();
+        Venta manana = venta(1L, hoy.atTime(9, 15), "1200", "1200", EstadoVenta.COMPLETADA);
+        Venta tarde = venta(2L, hoy.atTime(16, 45), "800", "800", EstadoVenta.COMPLETADA);
+        fixture.stub(List.of(manana, tarde), List.of());
+
+        IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos("dia");
+
+        assertThat(response.getBuckets()).hasSize(24);
+        assertThat(response.getTotalMonto()).isEqualByComparingTo("2000");
+        assertThat(response.getBuckets().stream().filter(b -> "09 h".equals(b.getEtiqueta())).findFirst().orElseThrow().getTotalMonto())
+                .isEqualByComparingTo("1200");
+        assertThat(response.getBuckets().stream().filter(b -> "16 h".equals(b.getEtiqueta())).findFirst().orElseThrow().getTotalMonto())
+                .isEqualByComparingTo("800");
+    }
+
+    @Test
+    void serieRechazaPeriodosInvalidos() {
+        Fixture fixture = new Fixture();
+        fixture.stub(List.of(), List.of());
+
+        assertThatThrownBy(() -> fixture.service.obtenerSerieIngresos("quincena"))
+                .hasMessageContaining("400 BAD_REQUEST");
     }
 
     private static Venta venta(Long id, LocalDateTime fecha, String total, String pagado, EstadoVenta estado) {
