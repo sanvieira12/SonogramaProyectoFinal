@@ -814,7 +814,7 @@ export default function DiscosCatalogo() {
                       />
                     </th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Estado</th>
-                    <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
+                    <th className="min-w-[250px] px-5 py-3 text-right text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
@@ -887,9 +887,9 @@ export default function DiscosCatalogo() {
                         </select>
                       </td>
                       {/* stopPropagation para que los botones no abran el slide-over */}
-                      <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="flex items-center gap-1 text-xs">
+                      <td className="min-w-[250px] pl-5 pr-6 py-4 text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                          <div className="flex flex-shrink-0 items-center gap-1 text-xs">
                             <button
                               onClick={async () => {
                                 const nuevaCantidad = Math.max(0, (d.cantidadCopias ?? 1) - 1)
@@ -918,14 +918,14 @@ export default function DiscosCatalogo() {
                           </div>
                           <button
                             onClick={() => setDiscoForm(d)}
-                            className="text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                            className="flex-shrink-0 whitespace-nowrap text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
                           >
                             Editar
                           </button>
                           <button
                             type="button"
                             onClick={() => abrirQr(d)}
-                            className="text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                            className="flex-shrink-0 whitespace-nowrap text-xs bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 px-2.5 py-1.5 rounded-lg transition-colors font-medium"
                           >
                             Ver QR
                           </button>
