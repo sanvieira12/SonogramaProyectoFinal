@@ -1,0 +1,8 @@
+ALTER TABLE pedido ADD COLUMN IF NOT EXISTS origen_importacion VARCHAR(50);
+ALTER TABLE pedido ADD COLUMN IF NOT EXISTS destinatario VARCHAR(500);
+ALTER TABLE pedido ADD COLUMN IF NOT EXISTS iva_7 NUMERIC(10,2);
+ALTER TABLE pedido ADD COLUMN IF NOT EXISTS iva_19 NUMERIC(10,2);
+ALTER TABLE pedido ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_pedido_origen_factura
+    ON pedido(origen_importacion, numero_factura);

@@ -118,7 +118,7 @@ export default function Pedidos() {
   const [panel, setPanel] = useState({ disco: null, item: null, error: '' })
 
   useEffect(() => {
-    api.pedidos.listar()
+    api.pedidos.listar('vinylfuture')
       .then(setPedidos)
       .catch(e => setError(e.message || 'No se pudieron cargar los pedidos'))
       .finally(() => setLoading(false))

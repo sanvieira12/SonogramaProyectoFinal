@@ -29,6 +29,7 @@ import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.VinylFutureImportBatchService;
 import com.sonograma.service.ZipBundleService;
+import com.sonograma.service.PedidoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -87,6 +88,7 @@ public class ImportController {
     private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
     private final VinylFutureImportBatchService importBatchService;
+    private final PedidoService pedidoService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
@@ -267,6 +269,7 @@ public class ImportController {
         log.info("Recibido PDF '{}' ({} bytes). Iniciando importación al catálogo.",
             filename, bytes.length);
         ParsedInvoice invoice = pdfParser.parseInvoice(bytes);
+        pedidoService.persistirVinylFuture(bytes, filename, invoice);
         List<InvoiceItem> invoiceItems = invoice.items();
         if (job != null) {
             job.setInvoice(invoice);

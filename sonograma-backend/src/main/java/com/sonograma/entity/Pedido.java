@@ -32,6 +32,12 @@ public class Pedido {
     @Column(name = "proveedor")
     private String proveedor;
 
+    @Column(name = "origen_importacion")
+    private String origenImportacion;
+
+    @Column(name = "destinatario")
+    private String destinatario;
+
     @Column(name = "envio")
     private String envio;
 
@@ -90,6 +96,12 @@ public class Pedido {
     @Column(name = "iva", precision = 10, scale = 2)
     private BigDecimal iva;
 
+    @Column(name = "iva_7", precision = 10, scale = 2)
+    private BigDecimal iva7;
+
+    @Column(name = "iva_19", precision = 10, scale = 2)
+    private BigDecimal iva19;
+
     @Column(name = "cantidad_total_pdf")
     private Integer cantidadTotalPdf;
 
@@ -122,7 +134,22 @@ public class Pedido {
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @Column(name = "updated_at", nullable = false)
+    @Builder.Default
+    private LocalDateTime updatedAt = LocalDateTime.now();
+
     @OneToMany(mappedBy = "pedido", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<PedidoItem> items = new ArrayList<>();
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+        if (updatedAt == null) updatedAt = createdAt;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 }

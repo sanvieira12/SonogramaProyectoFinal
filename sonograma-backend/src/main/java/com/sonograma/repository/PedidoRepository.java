@@ -13,4 +13,8 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     List<Pedido> findAllOrderedByCreatedAt();
 
     List<Pedido> findByNumeroFacturaIn(Set<String> numerosFactura);
+
+    List<Pedido> findByOrigenImportacionOrderByCreatedAtDesc(String origenImportacion);
+
+    java.util.Optional<Pedido> findByOrigenImportacionAndNumeroFactura(String origenImportacion, String numeroFactura);
 }

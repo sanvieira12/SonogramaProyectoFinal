@@ -346,7 +346,7 @@ export const api = {
   },
 
   pedidos: {
-    listar: () => request('GET', '/pedidos'),
+    listar: (source) => request('GET', `/pedidos${source ? `?source=${encodeURIComponent(source)}` : ''}`),
     porId: (id) => request('GET', `/pedidos/${id}`),
     uploadControl: async (pdf, template) => {
       const fd = new FormData()

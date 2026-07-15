@@ -62,7 +62,11 @@ public class PedidoController {
     }
 
     @GetMapping
-    public ResponseEntity<List<PedidoResponseDTO>> listar() {
+    public ResponseEntity<List<PedidoResponseDTO>> listar(
+            @RequestParam(required = false) String source) {
+        if ("vinylfuture".equalsIgnoreCase(source)) {
+            return ResponseEntity.ok(pedidoService.listarVinylFuture());
+        }
         return ResponseEntity.ok(pedidoService.listar());
     }
 

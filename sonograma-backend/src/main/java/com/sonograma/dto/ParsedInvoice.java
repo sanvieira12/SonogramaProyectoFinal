@@ -26,5 +26,8 @@ public record ParsedInvoice(
     String codigoArancel,
     String eoriNo,
     BigDecimal iva,
-    String rawExtractText
+    String rawExtractText,
+    String destinatario,
+    BigDecimal iva7,
+    BigDecimal iva19
 ) {}

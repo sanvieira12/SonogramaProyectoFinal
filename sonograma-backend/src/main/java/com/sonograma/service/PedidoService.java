@@ -17,6 +17,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
@@ -83,6 +84,7 @@ public class PedidoService {
             .terminosVenta(invoice.terminosVenta())
             .codigoArancel(invoice.codigoArancel())
             .eoriNo(invoice.eoriNo())
+            .destinatario(invoice.destinatario())
             .nombreArchivo(file.getOriginalFilename())
             .pdfOriginalFilename(file.getOriginalFilename())
             .pdfContentType(file.getContentType() != null ? file.getContentType() : "application/pdf")
@@ -91,6 +93,8 @@ public class PedidoService {
             .tarifas(invoice.tarifas())
             .neto(invoice.neto())
             .iva(invoice.iva())
+            .iva7(invoice.iva7())
+            .iva19(invoice.iva19())
             .total(invoice.total())
             .cantidadTotalPdf(invoice.cantidadTotalPdf())
             .importStatus(ImportStatus.PARSED)
@@ -132,6 +136,66 @@ public class PedidoService {
         );
     }
 
+    /** Stores the invoice before optional VinylFuture enrichment and catalog work. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Pedido persistirVinylFuture(byte[] pdfBytes, String filename, ParsedInvoice invoice) {
+        String invoiceNumber = ImportMetadataNormalizer.blankToNull(invoice.numeroFactura());
+        if (invoiceNumber == null) {
+            throw new IllegalArgumentException("La factura VinylFuture no contiene número de factura");
+        }
+        if (pedidoRepository.findByOrigenImportacionAndNumeroFactura("vinylfuture", invoiceNumber).isPresent()) {
+            throw new IllegalArgumentException("La factura " + invoiceNumber
+                + " ya fue importada. Se bloqueó la importación para evitar duplicados.");
+        }
+
+        Pedido pedido = Pedido.builder()
+            .numeroFactura(invoiceNumber)
+            .fechaFactura(invoice.fechaFactura())
+            .proveedor("VinylFuture")
+            .origenImportacion("vinylfuture")
+            .envio(invoice.envio())
+            .pago(invoice.pago())
+            .unidadPeso(invoice.unidadPeso())
+            .moneda(invoice.moneda() != null ? invoice.moneda() : "EUR")
+            .pesoTotalKg(invoice.pesoTotalKg())
+            .terminosVenta(invoice.terminosVenta())
+            .codigoArancel(invoice.codigoArancel())
+            .eoriNo(invoice.eoriNo())
+            .nombreArchivo(filename)
+            .pdfOriginalFilename(filename)
+            .pdfContentType("application/pdf")
+            .textoExtraido(invoice.rawExtractText())
+            .franqueo(invoice.franqueo())
+            .tarifas(invoice.tarifas())
+            .neto(invoice.neto())
+            .iva(invoice.iva())
+            .cantidadTotalPdf(invoice.cantidadTotalPdf())
+            .importStatus(ImportStatus.PARSED)
+            .build();
+        pedido.setPdfStoragePath(guardarPdfOriginal(pdfBytes, filename));
+        pedido.setPdfUploadedAt(java.time.LocalDateTime.now());
+        pedido = pedidoRepository.save(pedido);
+
+        for (InvoiceItem inv : invoice.items()) {
+            PedidoItem item = PedidoItem.builder()
+                .pedido(pedido)
+                .codigo(inv.codigoCatalogo())
+                .artista(inv.artista())
+                .titulo(inv.album())
+                .formato(inv.formato())
+                .precioUnitarioEur(inv.precioUnitario())
+                .cantidad(inv.cantidad())
+                .totalLineaEur(calcLineTotal(inv))
+                .enrichStatus(EnrichStatus.PENDING)
+                .build();
+            calcularItem(item);
+            pedido.getItems().add(item);
+        }
+        pedidoRepository.save(pedido);
+        log.info("Pedido VinylFuture {} creado: {} líneas", pedido.getIdPedido(), pedido.getItems().size());
+        return pedido;
+    }
+
     private BigDecimal calcLineTotal(InvoiceItem inv) {
         if (inv.subtotal() != null) return inv.subtotal();
         if (inv.precioUnitario() != null && inv.cantidad() != null) {
@@ -145,6 +209,13 @@ public class PedidoService {
     @Transactional(readOnly = true)
     public List<PedidoResponseDTO> listar() {
         return pedidoRepository.findAllOrderedByCreatedAt().stream()
+            .map(p -> toDTO(p, false))
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<PedidoResponseDTO> listarVinylFuture() {
+        return pedidoRepository.findByOrigenImportacionOrderByCreatedAtDesc("vinylfuture").stream()
             .map(p -> toDTO(p, false))
             .toList();
     }
@@ -420,15 +491,17 @@ public class PedidoService {
     // ── Mapping ───────────────────────────────────────────────────────────────
 
     private PedidoResponseDTO toDTO(Pedido p, boolean includeItems) {
-        List<PedidoItem> items = includeItems ? p.getItems() : List.of();
-        List<PedidoItemResponseDTO> itemDTOs = items.stream().map(this::toItemDTO).toList();
+        List<PedidoItem> allItems = p.getItems();
+        List<PedidoItemResponseDTO> itemDTOs = includeItems
+            ? allItems.stream().map(this::toItemDTO).toList()
+            : List.of();
 
-        BigDecimal merchandiseTotal = items.stream()
+        BigDecimal merchandiseTotal = allItems.stream()
             .filter(i -> i.getTotalLineaEur() != null)
             .map(PedidoItem::getTotalLineaEur)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        int sumCantidad = items.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
+        int sumCantidad = allItems.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
         boolean advertencia = p.getCantidadTotalPdf() != null && p.getCantidadTotalPdf() != sumCantidad;
 
         PricingSettingsDTO settings = catalogPricingService.getSettingsDto();
@@ -437,6 +510,8 @@ public class PedidoService {
             p.getNumeroFactura(),
             p.getFechaFactura(),
             p.getProveedor(),
+            p.getOrigenImportacion(),
+            p.getDestinatario(),
             p.getEnvio(),
             p.getPago(),
             p.getUnidadPeso(),
@@ -455,6 +530,8 @@ public class PedidoService {
             p.getTarifas(),
             p.getNeto(),
             p.getIva(),
+            p.getIva7(),
+            p.getIva19(),
             p.getTotal(),
             p.getCantidadTotalPdf(),
             p.getImportStatus().name(),
@@ -464,9 +541,10 @@ public class PedidoService {
             settings.markupSingle(),
             settings.markupDouble(),
             p.getCreatedAt(),
+            p.getUpdatedAt(),
             itemDTOs,
             merchandiseTotal,
-            items.size(),
+            allItems.size(),
             sumCantidad,
             advertencia
         );
@@ -504,6 +582,19 @@ public class PedidoService {
             return destino.toString();
         } catch (Exception e) {
             throw new RuntimeException("No se pudo guardar el PDF original: " + e.getMessage());
+        }
+    }
+
+    private String guardarPdfOriginal(byte[] bytes, String filename) {
+        try {
+            Files.createDirectories(Path.of(pdfDirectory));
+            String original = filename != null ? filename : "pedido.pdf";
+            String safe = original.replaceAll("[^a-zA-Z0-9._-]", "_");
+            Path target = Path.of(pdfDirectory).resolve(UUID.randomUUID() + "-" + safe).normalize();
+            Files.write(target, bytes);
+            return target.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("No se pudo guardar el PDF original: " + e.getMessage(), e);
         }
     }
 

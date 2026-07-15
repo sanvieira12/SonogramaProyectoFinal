@@ -76,6 +76,9 @@ public class PdfInvoiceParser {
     private static final Pattern PAYMENT_METHOD = Pattern.compile(
         "(?i)payment[\\s\\w]*:[\\s]+(.+)"
     );
+    private static final Pattern RECIPIENT = Pattern.compile(
+        "(?im)^recipient\\s*:\\s*(.+)$"
+    );
     private static final Pattern SHIPPING_METHOD = Pattern.compile(
         "(?im)^(?:shipping|shipment)(?:\\s+method)?\\s*:\\s*(.+)$|^delivery\\s+method\\s*:\\s*(.+)$"
     );
@@ -180,7 +183,10 @@ public class PdfInvoiceParser {
                 header.codigoArancel(),
                 header.eoriNo(),
                 summary != null ? summary.iva() : null,
-                text
+                text,
+                header.destinatario(),
+                summary != null ? summary.iva7() : null,
+                summary != null ? summary.iva19() : null
             );
         }
     }
@@ -255,7 +261,7 @@ public class PdfInvoiceParser {
 
     private record SummaryData(Integer cantidadTotal, BigDecimal franqueo,
                                BigDecimal tarifas, BigDecimal neto, BigDecimal iva,
-                               BigDecimal total) {}
+                               BigDecimal iva7, BigDecimal iva19, BigDecimal total) {}
 
     /**
      * Finds a row with labels "Quantity … Postage … Fees … Net … Total"
@@ -276,15 +282,13 @@ public class PdfInvoiceParser {
                             BigDecimal franqueo = parseMoney(parts[1]);
                             BigDecimal tarifas  = parseMoney(parts[2]);
                             BigDecimal neto     = parseMoney(parts[3]);
-                            BigDecimal iva = BigDecimal.ZERO;
-                            for (int k = 4; k < parts.length - 1; k++) {
-                                BigDecimal value = parseMoney(parts[k]);
-                                if (value != null) iva = iva.add(value);
-                            }
+                            BigDecimal iva7 = parts.length >= 6 ? parseMoney(parts[4]) : null;
+                            BigDecimal iva19 = parts.length >= 7 ? parseMoney(parts[5]) : null;
+                            BigDecimal iva = nvl(iva7).add(nvl(iva19));
                             BigDecimal total    = parts.length >= 7
                                 ? parseMoney(parts[6])
                                 : parseMoney(parts[parts.length - 1]);
-                            return new SummaryData(qty, franqueo, tarifas, neto, iva, total);
+                            return new SummaryData(qty, franqueo, tarifas, neto, iva, iva7, iva19, total);
                         } catch (NumberFormatException e) {
                             log.debug("Línea de summary no parseable: {}", val);
                         }
@@ -315,7 +319,8 @@ public class PdfInvoiceParser {
     private record HeaderData(String numeroFactura, LocalDate fechaFactura,
                               String proveedor, String envio, String pago,
                               BigDecimal pesoTotal, String unidadPeso, String moneda,
-                              String terminosVenta, String codigoArancel, String eoriNo) {}
+                              String terminosVenta, String codigoArancel, String eoriNo,
+                              String destinatario) {}
 
     private HeaderData extractHeader(String text) {
         String numeroFactura = firstMatch(INVOICE_NO, text);
@@ -335,8 +340,9 @@ public class PdfInvoiceParser {
         String terminosVenta = firstMatchTrimmed(TERMS_OF_SALE, text);
         String codigoArancel = firstMatch(CUSTOMS_TARIFF, text);
         String eoriNo = firstMatch(EORI, text);
+        String destinatario = firstMatchTrimmed(RECIPIENT, text);
         return new HeaderData(numeroFactura, fechaFactura, proveedor, envio, pago,
-            pesoTotal, unidadPeso, moneda, terminosVenta, codigoArancel, eoriNo);
+            pesoTotal, unidadPeso, moneda, terminosVenta, codigoArancel, eoriNo, destinatario);
     }
 
     private String detectProveedor(String text) {
@@ -380,6 +386,10 @@ public class PdfInvoiceParser {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private BigDecimal nvl(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     // ── Fallback total extraction ─────────────────────────────────────────────

@@ -64,6 +64,7 @@ class ImportControllerTest {
     @Mock private DiscoQrCopyService qrCopyService;
     @Mock private CatalogPricingService pricingService;
     @Mock private VinylFutureImportBatchService importBatchService;
+    @Mock private com.sonograma.service.PedidoService pedidoService;
     @Mock private PlatformTransactionManager transactionManager;
 
     @Test
@@ -75,7 +76,7 @@ class ImportControllerTest {
         );
         ParsedInvoice invoice = new ParsedInvoice(
             List.of(item), List.of(), new BigDecimal("24.00"), 2,
-            null, null, null, "0031-188471", null, null, null, null, null, null, null, null, null, null, null, null
+            null, null, null, "0031-188471", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
         );
         VinylPageData page = new VinylPageData(
             "https://www.vinylfuture.com/release_Vinyl__123",
@@ -129,6 +130,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            pedidoService,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
@@ -194,6 +196,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            pedidoService,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
@@ -219,7 +222,7 @@ class ImportControllerTest {
         );
         ParsedInvoice invoice = new ParsedInvoice(
             List.of(item), List.of(), new BigDecimal("24.00"), 2,
-            null, null, null, "INV-77", null, null, null, null, null, null, null, null, null, null, null, null
+            null, null, null, "INV-77", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
         );
         VinylPageData page = new VinylPageData(
             "https://www.vinylfuture.com/release_Vinyl__123",
@@ -272,6 +275,7 @@ class ImportControllerTest {
             qrCopyService,
             pricingService,
             importBatchService,
+            pedidoService,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
