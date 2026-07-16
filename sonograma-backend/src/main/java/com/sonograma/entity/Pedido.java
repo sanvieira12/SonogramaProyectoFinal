@@ -139,6 +139,7 @@ public class Pedido {
     private LocalDateTime updatedAt = LocalDateTime.now();
 
     @OneToMany(mappedBy = "pedido", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("lineaFactura ASC, idPedidoItem ASC")
     @Builder.Default
     private List<PedidoItem> items = new ArrayList<>();
 

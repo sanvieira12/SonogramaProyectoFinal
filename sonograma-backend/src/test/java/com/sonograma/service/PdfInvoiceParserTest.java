@@ -63,6 +63,20 @@ class PdfInvoiceParserTest {
         assertEquals(new BigDecimal("20.58"), invoice.total());
     }
 
+    @Test
+    void keepsLineWhenPrintedTotalIsInconsistentAndUsesUnitPriceTimesQuantity() throws Exception {
+        byte[] pdf = buildPdf(
+            "DUP01 - Artist- Repeated Release     10,00   2   0,00\n" +
+            "DUP01 - Artist- Repeated Release     10,00   1   10,00"
+        );
+
+        ParsedInvoice invoice = parser.parseInvoice(pdf);
+
+        assertEquals(2, invoice.items().size());
+        assertEquals(new BigDecimal("20.00"), invoice.items().get(0).subtotal());
+        assertEquals(new BigDecimal("10.00"), invoice.items().get(1).subtotal());
+    }
+
     // ── Test 2: multi-page — all item lines preserved in order, summary row
 
     @Test

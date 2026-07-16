@@ -2,25 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/sonograma'
 
-// ── Status helpers ────────────────────────────────────────────────────────────
-
-const IMPORT_STATUS_LABEL = {
-  PARSING: 'Parseando', PARSED: 'Parseado', ENRICHING: 'Enriqueciendo…',
-  AWAITING_REVIEW: 'En revisión', IMPORTING_TO_CATALOG: 'Importando al catálogo',
-  COMPLETED: 'Completado', FAILED: 'Fallido', PARTIALLY_COMPLETED: 'Parcialmente completado',
-}
-const IMPORT_STATUS_COLOR = {
-  PARSED: 'bg-blue-500/10 text-blue-400 border-blue-800',
-  ENRICHING: 'bg-amber-500/10 text-amber-400 border-amber-800',
-  AWAITING_REVIEW: 'bg-violet-500/10 text-violet-400 border-violet-800',
-  COMPLETED: 'bg-emerald-500/10 text-emerald-400 border-emerald-800',
-  FAILED: 'bg-red-500/10 text-red-400 border-red-800',
-  PARTIALLY_COMPLETED: 'bg-orange-500/10 text-orange-400 border-orange-800',
-}
-const ENRICH_COLOR = {
-  PENDING: 'text-stone-500', ENRICHED: 'text-emerald-400',
-  FAILED: 'text-red-400', IMPORTED: 'text-violet-400',
-}
 // ── Small shared components ───────────────────────────────────────────────────
 
 function Field({ label, value }) {
@@ -122,7 +103,7 @@ function TabResumen({ pedido }) {
 
 // ── Tab: Ítems ────────────────────────────────────────────────────────────────
 
-function TabItems({ pedido, onRetry }) {
+function TabItems({ pedido }) {
   const items = pedido.items ?? []
 
   if (items.length === 0) {
@@ -135,8 +116,7 @@ function TabItems({ pedido, onRetry }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-stone-800 bg-stone-950">
-              {['Artista','Título','Formato','Código / SKU','Precio unitario EUR','Cantidad','Total EUR',
-                'Tipo','Costo extra EUR','Costo real unitario EUR','Costo real unitario UYU','Markup','Precio final unitario UYU'].map(h => (
+              {['Code', 'Date', 'Description', 'Unit Price', 'Quantity', 'Line Total'].map(h => (
                 <th key={h} className="text-left px-3 py-2.5 font-semibold text-stone-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -144,45 +124,18 @@ function TabItems({ pedido, onRetry }) {
           <tbody className="divide-y divide-stone-800/60">
             {items.map(item => (
               <tr key={item.idPedidoItem} className="hover:bg-stone-900/40 transition-colors">
-                <td className="px-3 py-2 text-stone-300 max-w-[120px] truncate" title={item.artista}>{item.artista}</td>
-                <td className="px-3 py-2 text-stone-200 max-w-[160px] truncate" title={item.titulo}>{item.titulo}</td>
-                <td className="px-3 py-2 text-stone-400 whitespace-nowrap">{item.formato || '—'}</td>
                 <td className="px-3 py-2 font-mono text-stone-400 whitespace-nowrap">{item.codigo || '—'}</td>
+                <td className="px-3 py-2 text-stone-500 whitespace-nowrap">{pedido.fechaFactura || '—'}</td>
+                <td className="px-3 py-2 text-stone-200 max-w-[420px]">{item.descripcionOriginal || [item.artista, item.titulo].filter(Boolean).join(' - ') || '—'}</td>
                 <td className="px-3 py-2 text-stone-300 tabular-nums">{item.precioUnitarioEur != null ? `€${Number(item.precioUnitarioEur).toFixed(2)}` : '—'}</td>
-                <td className="px-3 py-2 text-stone-300 tabular-nums text-center">{item.cantidad ?? '—'}</td>
+                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.cantidad ?? '—'}</td>
                 <td className="px-3 py-2 text-stone-300 tabular-nums">{item.totalLineaEur != null ? `€${Number(item.totalLineaEur).toFixed(2)}` : '—'}</td>
-                <td className="px-3 py-2 text-stone-400 whitespace-nowrap">{item.tipo}</td>
-                <td className="px-3 py-2 text-stone-400 tabular-nums">{item.extraCostoEur != null ? `€${Number(item.extraCostoEur).toFixed(2)}` : '—'}</td>
-                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealEur != null ? `€${Number(item.costoRealEur).toFixed(2)}` : '—'}</td>
-                <td className="px-3 py-2 text-stone-300 tabular-nums">{item.costoRealUyu != null ? `$${Number(item.costoRealUyu).toLocaleString('es-AR')}` : '—'}</td>
-                <td className="px-3 py-2 text-stone-400 tabular-nums">{item.markup != null ? `×${Number(item.markup).toFixed(2)}` : '—'}</td>
-                <td className="px-3 py-2 text-[#7E9FA8] font-semibold tabular-nums whitespace-nowrap">
-                  {item.precioFinalUyu != null ? `$${Number(item.precioFinalUyu).toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : '—'}
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="rounded-xl border border-stone-800 bg-stone-950 p-4">
-        <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider mb-3">Estado de catálogo</p>
-        <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
-          {items.map(item => (
-            <div key={item.idPedidoItem} className="flex items-center gap-2">
-              <span className="font-mono text-stone-400">{item.codigo || item.idPedidoItem}</span>
-              <span className={ENRICH_COLOR[item.enrichStatus] || 'text-stone-500'}>{item.enrichStatus || '—'}</span>
-              {item.idDisco && <span className="text-emerald-400">En catálogo</span>}
-              {item.enrichStatus === 'FAILED' && (
-                <button onClick={() => onRetry(item.idPedidoItem)}
-                  className="text-amber-400 hover:text-amber-300 underline">
-                  Reintentar
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -309,8 +262,6 @@ export default function PedidoDetalle() {
 
   if (!pedido) return null
 
-  const statusCls = IMPORT_STATUS_COLOR[pedido.importStatus] || 'bg-stone-800 text-stone-400 border-stone-700'
-
   return (
     <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
       {/* Header */}
@@ -328,9 +279,6 @@ export default function PedidoDetalle() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusCls}`}>
-            {IMPORT_STATUS_LABEL[pedido.importStatus] || pedido.importStatus}
-          </span>
           {pedido.pdfDisponible && (
             <button onClick={handlePdf}
               className="px-4 py-2 rounded-lg border border-stone-700 text-stone-300 hover:bg-stone-900 text-sm font-medium transition-colors">
@@ -382,7 +330,7 @@ export default function PedidoDetalle() {
           <TabResumen pedido={pedido} />
         )}
         {tab === 'items' && (
-          <TabItems pedido={pedido} onRetry={handleRetry} />
+          <TabItems pedido={pedido} />
         )}
         {tab === 'texto' && (
           <TabTexto pedido={pedido} />

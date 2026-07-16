@@ -7,6 +7,7 @@ public record PedidoItemResponseDTO(
     String codigo,
     String artista,
     String titulo,
+    String descripcionOriginal,
     String formato,
     BigDecimal precioUnitarioEur,
     Integer cantidad,

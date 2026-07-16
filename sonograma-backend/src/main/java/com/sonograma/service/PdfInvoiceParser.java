@@ -216,9 +216,8 @@ public class PdfInvoiceParser {
         }
         BigDecimal expected = unitPrice.multiply(BigDecimal.valueOf(quantity));
         if (expected.subtract(lineTotal).abs().compareTo(LINE_TOTAL_TOLERANCE) > 0) {
-            log.debug("Línea de producto omitida por total inconsistente: line='{}', expected={}, parsed={}",
+            log.warn("Línea de producto con total inconsistente; se conserva y se normaliza: line='{}', expected={}, parsed={}",
                 sourceLine, expected, lineTotal);
-            return null;
         }
         if (shouldIgnoreLine(matcher.group(1)) || shouldIgnoreLine(matcher.group(2))) {
             log.debug("Línea de producto omitida por prefijo reservado: {}", sourceLine);
@@ -234,7 +233,7 @@ public class PdfInvoiceParser {
             formato,
             unitPrice,
             quantity,
-            lineTotal
+            expected
         );
     }
 

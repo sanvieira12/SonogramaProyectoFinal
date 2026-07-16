@@ -4,35 +4,6 @@ import CompactPlayer from '../components/CompactPlayer'
 import { stopAllPreviews } from '../components/audioPreviewPlayback'
 import { api, resolveApiUrl } from '../api/sonograma'
 
-const STATUS_LABEL = {
-  PARSING: 'Parseando',
-  PARSED: 'Parseado',
-  ENRICHING: 'Enriqueciendo',
-  AWAITING_REVIEW: 'En revisión',
-  IMPORTING_TO_CATALOG: 'Importando',
-  COMPLETED: 'Completado',
-  FAILED: 'Fallido',
-  PARTIALLY_COMPLETED: 'Parcial',
-}
-
-const STATUS_COLOR = {
-  PARSED: 'bg-blue-500/10 text-blue-400',
-  ENRICHING: 'bg-amber-500/10 text-amber-400',
-  AWAITING_REVIEW: 'bg-violet-500/10 text-violet-400',
-  IMPORTING_TO_CATALOG: 'bg-cyan-500/10 text-cyan-400',
-  COMPLETED: 'bg-emerald-500/10 text-emerald-400',
-  FAILED: 'bg-red-500/10 text-red-400',
-  PARTIALLY_COMPLETED: 'bg-orange-500/10 text-orange-400',
-}
-
-function StatusBadge({ status }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[status] || 'bg-stone-800 text-stone-400'}`}>
-      {STATUS_LABEL[status] || status}
-    </span>
-  )
-}
-
 function eur(value) {
   if (value == null) return '—'
   return `€ ${Number(value).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -184,7 +155,7 @@ export default function Pedidos() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950">
-                {['Nº pedido', 'Fecha', 'Proveedor', 'Ítems', 'Cantidad', 'Total en euros', 'Estado', ''].map(h => (
+                {['Nº pedido', 'Fecha', 'Proveedor', 'Ítems', 'Cantidad', 'Total en euros', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -207,14 +178,13 @@ export default function Pedidos() {
                       <td className="px-4 py-3 text-slate-700 dark:text-stone-300 tabular-nums">{p.totalItemsCount}</td>
                       <td className="px-4 py-3 text-slate-700 dark:text-stone-300 tabular-nums">{p.sumCantidadItems}</td>
                       <td className="px-4 py-3 text-slate-900 dark:text-white tabular-nums font-medium">{eur(p.total)}</td>
-                      <td className="px-4 py-3"><StatusBadge status={p.importStatus} /></td>
                       <td className="px-4 py-3 text-right">
                         <span className="text-xs text-slate-400">{abierto ? 'Cerrar' : 'Abrir'}</span>
                       </td>
                     </tr>
                     {abierto && (
                       <tr key={`${p.idPedido}-detalle`}>
-                        <td colSpan={8} className="bg-white dark:bg-stone-950 px-4 py-4">
+                        <td colSpan={7} className="bg-white dark:bg-stone-950 px-4 py-4">
                           <div className="flex items-center justify-between mb-3">
                             <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Desglose del pedido</p>
                             <Link to={`/pedidos/${p.idPedido}`} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">Ver detalle completo</Link>
@@ -226,7 +196,7 @@ export default function Pedidos() {
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="border-b border-slate-100 dark:border-stone-800">
-                                    {['Nº pedido', 'Fecha', 'Descripción', 'Precio unitario', 'Cantidad', 'Suma'].map(h => (
+                                    {['Code', 'Date', 'Description', 'Unit Price', 'Quantity', 'Line Total'].map(h => (
                                       <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 dark:text-stone-500 uppercase tracking-wider">{h}</th>
                                     ))}
                                   </tr>
@@ -234,14 +204,13 @@ export default function Pedidos() {
                                 <tbody className="divide-y divide-slate-100 dark:divide-stone-800/70">
                                   {items.map(item => (
                                     <tr key={item.idPedidoItem} onClick={() => abrirItem(item)} className="hover:bg-slate-50 dark:hover:bg-stone-900/60 cursor-pointer">
-                                      <td className="px-3 py-2 font-mono text-slate-600 dark:text-stone-400">{p.numeroFactura || p.nombreArchivo || '—'}</td>
+                                      <td className="px-3 py-2 font-mono text-slate-600 dark:text-stone-400">{item.codigo || '—'}</td>
                                       <td className="px-3 py-2 text-slate-500 dark:text-stone-400">{p.fechaFactura || '—'}</td>
                                       <td className="px-3 py-2 text-slate-800 dark:text-stone-200">
-                                        <div className="font-medium">{[item.artista, item.titulo].filter(Boolean).join(' — ') || item.codigo || 'Sin descripción'}</div>
-                                        <div className="text-slate-400 dark:text-stone-500">{item.codigo || item.formato || '—'}</div>
+                                        <div className="font-medium">{item.descripcionOriginal || [item.artista, item.titulo].filter(Boolean).join(' - ') || '—'}</div>
                                       </td>
                                       <td className="px-3 py-2 text-slate-700 dark:text-stone-300 tabular-nums">{eur(item.precioUnitarioEur)}</td>
-                                      <td className="px-3 py-2 text-slate-700 dark:text-stone-300 tabular-nums">{item.cantidad || 1}</td>
+                                      <td className="px-3 py-2 text-slate-700 dark:text-stone-300 tabular-nums">{item.cantidad ?? '—'}</td>
                                       <td className="px-3 py-2 text-slate-900 dark:text-white tabular-nums font-semibold">{eur(item.totalLineaEur)}</td>
                                     </tr>
                                   ))}

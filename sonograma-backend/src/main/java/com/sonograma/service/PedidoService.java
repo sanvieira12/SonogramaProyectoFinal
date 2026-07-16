@@ -106,16 +106,19 @@ public class PedidoService {
         pedido = pedidoRepository.save(pedido);
 
         List<PedidoItem> items = new ArrayList<>();
-        for (InvoiceItem inv : invoice.items()) {
+        for (int index = 0; index < invoice.items().size(); index++) {
+            InvoiceItem inv = invoice.items().get(index);
             PedidoItem item = PedidoItem.builder()
                 .pedido(pedido)
                 .codigo(inv.codigoCatalogo())
                 .artista(inv.artista())
                 .titulo(inv.album())
+                .descripcionOriginal(descripcionOriginal(inv))
                 .formato(inv.formato())
                 .precioUnitarioEur(inv.precioUnitario())
                 .cantidad(inv.cantidad())
                 .totalLineaEur(calcLineTotal(inv))
+                .lineaFactura(index + 1)
                 .enrichStatus(EnrichStatus.PENDING)
                 .build();
             calcularItem(item);
@@ -169,6 +172,9 @@ public class PedidoService {
             .tarifas(invoice.tarifas())
             .neto(invoice.neto())
             .iva(invoice.iva())
+            .iva7(invoice.iva7())
+            .iva19(invoice.iva19())
+            .total(invoice.total())
             .cantidadTotalPdf(invoice.cantidadTotalPdf())
             .importStatus(ImportStatus.PARSED)
             .build();
@@ -176,16 +182,19 @@ public class PedidoService {
         pedido.setPdfUploadedAt(java.time.LocalDateTime.now());
         pedido = pedidoRepository.save(pedido);
 
-        for (InvoiceItem inv : invoice.items()) {
+        for (int index = 0; index < invoice.items().size(); index++) {
+            InvoiceItem inv = invoice.items().get(index);
             PedidoItem item = PedidoItem.builder()
                 .pedido(pedido)
                 .codigo(inv.codigoCatalogo())
                 .artista(inv.artista())
                 .titulo(inv.album())
+                .descripcionOriginal(descripcionOriginal(inv))
                 .formato(inv.formato())
                 .precioUnitarioEur(inv.precioUnitario())
                 .cantidad(inv.cantidad())
                 .totalLineaEur(calcLineTotal(inv))
+                .lineaFactura(index + 1)
                 .enrichStatus(EnrichStatus.PENDING)
                 .build();
             calcularItem(item);
@@ -197,11 +206,17 @@ public class PedidoService {
     }
 
     private BigDecimal calcLineTotal(InvoiceItem inv) {
-        if (inv.subtotal() != null) return inv.subtotal();
         if (inv.precioUnitario() != null && inv.cantidad() != null) {
             return inv.precioUnitario().multiply(BigDecimal.valueOf(inv.cantidad()));
         }
-        return null;
+        return inv.subtotal();
+    }
+
+    private String descripcionOriginal(InvoiceItem inv) {
+        String base = String.join(" - ", nonBlank(inv.artista(), inv.album()));
+        return inv.formato() == null || inv.formato().isBlank()
+            ? base
+            : (base.isBlank() ? inv.formato() : base + " " + inv.formato());
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
@@ -497,8 +512,8 @@ public class PedidoService {
             : List.of();
 
         BigDecimal merchandiseTotal = allItems.stream()
-            .filter(i -> i.getTotalLineaEur() != null)
-            .map(PedidoItem::getTotalLineaEur)
+            .map(this::lineTotal)
+            .filter(java.util.Objects::nonNull)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         int sumCantidad = allItems.stream().mapToInt(i -> i.getCantidad() != null ? i.getCantidad() : 0).sum();
@@ -556,10 +571,11 @@ public class PedidoService {
             i.getCodigo(),
             i.getArtista(),
             i.getTitulo(),
+            i.getDescripcionOriginal(),
             i.getFormato(),
             i.getPrecioUnitarioEur(),
             i.getCantidad(),
-            i.getTotalLineaEur(),
+            lineTotal(i),
             catalogPricingService.detectRecordType(i.getFormato()).name(),
             i.getExtraCostoEur(),
             i.getCostoRealEur(),
@@ -570,6 +586,13 @@ public class PedidoService {
             i.getDisco() != null ? i.getDisco().getIdDisco() : null,
             i.getEnrichStatus() != null ? i.getEnrichStatus().name() : null
         );
+    }
+
+    private BigDecimal lineTotal(PedidoItem item) {
+        if (item.getPrecioUnitarioEur() != null && item.getCantidad() != null) {
+            return item.getPrecioUnitarioEur().multiply(BigDecimal.valueOf(item.getCantidad()));
+        }
+        return item.getTotalLineaEur();
     }
 
     private String guardarPdfOriginal(MultipartFile file) {

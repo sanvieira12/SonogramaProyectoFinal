@@ -32,6 +32,13 @@ public class PedidoItem {
     @Column(name = "titulo")
     private String titulo;
 
+    @Column(name = "descripcion_original")
+    private String descripcionOriginal;
+
+    @Column(name = "linea_factura", nullable = false)
+    @Builder.Default
+    private Integer lineaFactura = 0;
+
     @Column(name = "formato")
     private String formato;
 
