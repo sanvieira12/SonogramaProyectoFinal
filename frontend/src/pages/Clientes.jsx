@@ -189,6 +189,45 @@ function formatFecha(iso) {
   return d.toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+function instagramUsername(value) {
+  const raw = value?.trim()
+  if (!raw) return ''
+
+  try {
+    const url = new URL(raw)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      const path = url.pathname.split('/').filter(Boolean)
+      if (path.length > 0) return path[path.length - 1].replace(/^@+/, '')
+    }
+  } catch {
+    // Stored values may be usernames rather than URLs.
+  }
+
+  return raw.replace(/^@+/, '')
+}
+
+function instagramLabel(value) {
+  const username = instagramUsername(value)
+  return username ? `@${username}` : '—'
+}
+
+function instagramHref(value) {
+  const raw = value?.trim()
+  if (!raw) return null
+
+  try {
+    const url = new URL(raw)
+    const isInstagram = (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === 'instagram.com' || url.hostname.endsWith('.instagram.com'))
+    if (isInstagram) return url.toString()
+  } catch {
+    // Treat non-URL values as Instagram usernames below.
+  }
+
+  const username = instagramUsername(raw)
+  return username ? `https://www.instagram.com/${encodeURIComponent(username)}/` : null
+}
+
 function money(valor) {
   const n = Number(valor || 0)
   return n > 0 ? `$${n.toLocaleString('es-AR', { maximumFractionDigits: 0 })}` : '—'
@@ -334,7 +373,6 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
               {[
                 ['CI', cliente.cedula],
                 ['Teléfono', cliente.telefono],
-                ['Instagram', cliente.instagramUsuario],
                 ['Alta', formatFecha(cliente.fechaAlta)],
                 ['Departamento', cliente.departamento || cliente.localidad],
                 ['DAC', cliente.sucursalDac],
@@ -344,6 +382,22 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
                   <p className="text-slate-700 dark:text-stone-300">{value || '—'}</p>
                 </div>
               ))}
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Instagram</p>
+              {cliente.instagramUsuario ? (
+                <a
+                  href={instagramHref(cliente.instagramUsuario)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[#5C7D87] dark:text-[#7E9FA8] hover:underline"
+                >
+                  {instagramLabel(cliente.instagramUsuario)}
+                </a>
+              ) : (
+                <p className="text-slate-700 dark:text-stone-300">—</p>
+              )}
             </div>
 
             {loadingDetalle ? (
@@ -647,15 +701,15 @@ export default function Clientes() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-stone-800">
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Nombre</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Email</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Cédula</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden lg:table-cell">Instagram</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Deuda</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Compras</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Total gastado</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Última compra</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Nombre</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell whitespace-nowrap">Teléfono</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Email</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Cédula</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Deuda</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Compras</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden sm:table-cell">Total gastado</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider hidden md:table-cell">Última compra</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-stone-800/60">
@@ -673,21 +727,16 @@ export default function Clientes() {
                         className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
                         onClick={() => abrirDetalle(c)}
                       >
-                        <td className="px-5 py-4">
+                        <td className="px-4 py-2.5">
                           <div className="font-semibold text-slate-900 dark:text-white">{c.nombre} {c.apellido}</div>
-                          <div className="text-slate-400 dark:text-stone-500 text-xs mt-0.5">{c.telefono || '—'}</div>
                         </td>
-                        <td className="px-5 py-4 text-slate-600 dark:text-stone-400 hidden md:table-cell">{c.email || '—'}</td>
-                        <td className="px-5 py-4 text-slate-600 dark:text-stone-400 font-mono text-xs hidden md:table-cell">{c.cedula || '—'}</td>
-                        <td className="px-5 py-4 hidden lg:table-cell">
-                          {c.instagramUsuario
-                            ? <span className="text-[#5C7D87] dark:text-[#7E9FA8] text-xs">{c.instagramUsuario}</span>
-                            : <span className="text-slate-300 dark:text-stone-600">—</span>}
-                        </td>
-                        <td className={`px-5 py-4 text-right font-semibold tabular-nums ${deudaActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        <td className="px-4 py-2.5 text-slate-600 dark:text-stone-400 hidden sm:table-cell whitespace-nowrap">{c.telefono || '—'}</td>
+                        <td className="px-4 py-2.5 text-slate-600 dark:text-stone-400 hidden md:table-cell">{c.email || '—'}</td>
+                        <td className="px-4 py-2.5 text-slate-600 dark:text-stone-400 font-mono text-xs hidden md:table-cell">{c.cedula || '—'}</td>
+                        <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${deudaActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                           {`$${deudaActual.toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-4 py-2.5 text-right">
                           <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
                             vs.length > 0
                               ? 'bg-[#7E9FA8]/15 text-[#5C7D87] dark:text-[#7E9FA8]'
@@ -696,15 +745,15 @@ export default function Clientes() {
                             {vs.length}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900 dark:text-white tabular-nums hidden sm:table-cell">
+                        <td className="px-4 py-2.5 text-right font-semibold text-slate-900 dark:text-white tabular-nums hidden sm:table-cell">
                           {totalGastado > 0
                             ? `$${totalGastado.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
                             : <span className="text-slate-300 dark:text-stone-600 font-normal">—</span>}
                         </td>
-                        <td className="px-5 py-4 text-right text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">
+                        <td className="px-4 py-2.5 text-right text-slate-500 dark:text-stone-400 text-xs hidden md:table-cell">
                           {formatFecha(ultimaCompra)}
                         </td>
-                        <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                        <td className="px-4 py-2.5 text-right" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-3">
                             <button onClick={() => abrirDetalle(c)} className="text-xs text-[#5C7D87] hover:underline font-medium">Ver</button>
                             <button onClick={() => handleEliminarCliente(c)} className="text-xs text-red-600 dark:text-red-400 hover:underline font-medium">Borrar</button>
