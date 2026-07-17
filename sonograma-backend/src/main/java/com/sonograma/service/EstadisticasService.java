@@ -88,8 +88,9 @@ public class EstadisticasService {
         RangoPeriodo anterior = seriePeriodo.rangoAnterior(actual);
 
         List<IngresoSerieBucketDTO> buckets = seriePeriodo.construirBuckets(actual, movimientos);
-        BigDecimal totalActual = totalEnRango(actual, movimientos);
-        BigDecimal totalAnterior = totalEnRango(anterior, movimientos);
+        ResumenIngresos resumenActual = resumenEnRango(actual, movimientos);
+        BigDecimal totalActual = resumenActual.totalMonto();
+        BigDecimal totalAnterior = resumenEnRango(anterior, movimientos).totalMonto();
         BigDecimal diferenciaMonto = totalActual.subtract(totalAnterior);
         BigDecimal diferenciaPorcentual = totalAnterior.compareTo(BigDecimal.ZERO) == 0
                 ? null
@@ -103,6 +104,8 @@ public class EstadisticasService {
                 .totalMontoPeriodoAnterior(totalAnterior)
                 .diferenciaMonto(diferenciaMonto)
                 .diferenciaPorcentual(diferenciaPorcentual)
+                .cantidadVentas(resumenActual.cantidadVentas())
+                .cantidadPagosDeuda(resumenActual.cantidadPagosDeuda())
                 .buckets(buckets)
                 .build();
     }
@@ -149,20 +152,29 @@ public class EstadisticasService {
             BigDecimal ingresoInicial = ingresoInicialVenta(
                     venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO));
             if (ingresoInicial.compareTo(BigDecimal.ZERO) <= 0) continue;
-            movimientos.add(new IngresoMovimiento(venta.getFechaVenta(), ingresoInicial));
+            movimientos.add(new IngresoMovimiento(venta.getFechaVenta(), ingresoInicial, TipoIngreso.VENTA));
         }
         for (PagoDeuda pago : pagos) {
-            movimientos.add(new IngresoMovimiento(pago.getFechaPago().atStartOfDay(), pago.getMonto()));
+            movimientos.add(new IngresoMovimiento(pago.getFechaPago().atStartOfDay(), pago.getMonto(), TipoIngreso.PAGO_DEUDA));
         }
         movimientos.sort(Comparator.comparing(IngresoMovimiento::fecha));
         return movimientos;
     }
 
-    private static BigDecimal totalEnRango(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
-        return movimientos.stream()
-                .filter(movimiento -> rango.contiene(movimiento.fecha()))
-                .map(IngresoMovimiento::monto)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    private static ResumenIngresos resumenEnRango(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {
+        BigDecimal totalMonto = BigDecimal.ZERO;
+        long cantidadVentas = 0;
+        long cantidadPagosDeuda = 0;
+        for (IngresoMovimiento movimiento : movimientos) {
+            if (!rango.contiene(movimiento.fecha())) continue;
+            totalMonto = totalMonto.add(movimiento.monto());
+            if (movimiento.tipo() == TipoIngreso.VENTA) {
+                cantidadVentas++;
+            } else {
+                cantidadPagosDeuda++;
+            }
+        }
+        return new ResumenIngresos(totalMonto, cantidadVentas, cantidadPagosDeuda);
     }
 
     private static String clave(LocalDateTime fecha, FechaAgrupacion agrupacion) {
@@ -328,8 +340,10 @@ public class EstadisticasService {
         }
     }
 
-    private record IngresoMovimiento(LocalDateTime fecha, BigDecimal monto) {}
+    private record IngresoMovimiento(LocalDateTime fecha, BigDecimal monto, TipoIngreso tipo) {}
+    private record ResumenIngresos(BigDecimal totalMonto, long cantidadVentas, long cantidadPagosDeuda) {}
     private record VentaDiscoItem(Disco disco, BigDecimal precio, BigDecimal gananciaEstimada) {}
+    private enum TipoIngreso { VENTA, PAGO_DEUDA }
     private enum FechaAgrupacion { SEMANA, MES, ANIO }
 
     private record RangoPeriodo(LocalDateTime inicio, LocalDateTime fin) {

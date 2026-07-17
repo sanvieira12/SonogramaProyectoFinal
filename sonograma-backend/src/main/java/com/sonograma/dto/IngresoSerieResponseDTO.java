@@ -19,5 +19,7 @@ public class IngresoSerieResponseDTO {
     private BigDecimal totalMontoPeriodoAnterior;
     private BigDecimal diferenciaMonto;
     private BigDecimal diferenciaPorcentual;
+    private Long cantidadVentas;
+    private Long cantidadPagosDeuda;
     private List<IngresoSerieBucketDTO> buckets;
 }

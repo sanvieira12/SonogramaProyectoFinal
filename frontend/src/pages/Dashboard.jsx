@@ -5,11 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
-import { cantidadPagosLabel, cantidadVentasLabel } from '../utils/dashboardIncome'
-
-function fechaInputLocal(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
+import { cantidadPagosLabel, cantidadVentasLabel, ingresosPeriodoLabel } from '../utils/dashboardIncome'
 
 const PERIODOS = [
   { key: 'dia', label: 'Día' },
@@ -102,27 +98,6 @@ export default function Dashboard() {
     .filter(d => d.estado === 'DISPONIBLE' && d.precioVenta)
     .reduce((sum, d) => sum + Number(d.precioVenta) * Number(d.cantidadCopias ?? 1), 0)
 
-  const hoy = new Date()
-  const fechaHoy = fechaInputLocal(hoy)
-  const inicioMes = `${fechaHoy.slice(0, 8)}01`
-  const inicioSemanaDate = new Date(hoy)
-  const diaSemana = inicioSemanaDate.getDay() || 7
-  inicioSemanaDate.setDate(inicioSemanaDate.getDate() - diaSemana + 1)
-  const inicioSemana = fechaInputLocal(inicioSemanaDate)
-  const movimientosEnRango = (desde, hasta) => ultimasVentas.filter(v => {
-    const fecha = v.fechaVenta?.slice(0, 10)
-    return fecha && fecha >= desde && fecha <= hasta
-  })
-  const totalMovimientos = movimientos => movimientos.reduce((sum, v) => sum + Number(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
-  const resumenMovimientos = movimientos => ({
-    cantidad: movimientos.filter(v => v.tipoMovimiento !== 'PAGO_DEUDA').length,
-    cantidadPagosDeuda: movimientos.filter(v => v.tipoMovimiento === 'PAGO_DEUDA').length,
-    totalMonto: totalMovimientos(movimientos),
-  })
-  const ventaMes = resumenMovimientos(movimientosEnRango(inicioMes, fechaHoy))
-  const ventaSemana = resumenMovimientos(movimientosEnRango(inicioSemana, fechaHoy))
-  const ventaTotalMes = ventaMes.totalMonto
-  const ventaTotalSemana = ventaSemana.totalMonto
   const datosIngresos = (serieIngresos?.buckets || []).map(item => ({
     etiqueta: item.etiqueta,
     totalMonto: Number(item.totalMonto || 0),
@@ -166,6 +141,9 @@ export default function Dashboard() {
   }
 
   const totalIngresosSeleccionado = Number(serieIngresos?.totalMonto || 0)
+  const cantidadVentasSeleccionada = Number(serieIngresos?.cantidadVentas || 0)
+  const cantidadPagosDeudaSeleccionada = Number(serieIngresos?.cantidadPagosDeuda || 0)
+  const labelIngresosSeleccionado = ingresosPeriodoLabel(serieIngresos?.periodo || periodoIngresos)
   const deltaMonto = fmtDeltaMonto(serieIngresos?.diferenciaMonto)
   const deltaPorcentual = fmtDeltaPorcentual(serieIngresos?.diferenciaPorcentual)
   const sinIngresos = !loadingSerie && !errorSerie && datosIngresos.every(item => item.totalMonto === 0)
@@ -176,10 +154,10 @@ export default function Dashboard() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
-          label="Ingresos del mes"
-          value={fmtMonto(ventaTotalMes)}
-          sublabel={cantidadVentasLabel(ventaMes?.cantidad)}
-          secondarySublabel={cantidadPagosLabel(ventaMes?.cantidadPagosDeuda)}
+          label={labelIngresosSeleccionado}
+          value={fmtMonto(totalIngresosSeleccionado)}
+          sublabel={cantidadVentasLabel(cantidadVentasSeleccionada)}
+          secondarySublabel={cantidadPagosLabel(cantidadPagosDeudaSeleccionada)}
           color="bg-[#7E9FA8]/15"
           icon={
             <svg className="w-5 h-5 text-[#5C7D87] dark:text-[#7E9FA8]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -199,10 +177,10 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Ingresos de la semana"
-          value={fmtMonto(ventaTotalSemana)}
-          sublabel={cantidadVentasLabel(ventaSemana?.cantidad)}
-          secondarySublabel={cantidadPagosLabel(ventaSemana?.cantidadPagosDeuda)}
+          label={`Resumen de ${serieIngresos?.etiquetaPeriodo?.toLowerCase() || 'ingresos'}`}
+          value={fmtMonto(totalIngresosSeleccionado)}
+          sublabel={cantidadVentasLabel(cantidadVentasSeleccionada)}
+          secondarySublabel={cantidadPagosLabel(cantidadPagosDeudaSeleccionada)}
           color="bg-amber-50 dark:bg-amber-900/20"
           icon={
             <svg className="w-5 h-5 text-[#B8975E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -195,6 +195,28 @@ class EstadisticasServiceTest {
     }
 
     @Test
+    void serieUsaElMismoResumenParaTodosLosPeriodosYParaSusBuckets() {
+        Fixture fixture = new Fixture();
+        LocalDate hoy = LocalDate.now();
+        Venta venta = venta(1L, hoy.atTime(10, 0), "1000", "1000", EstadoVenta.COMPLETADA);
+        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta).build();
+        PagoDeuda pago = pago(3L, deuda, "200", hoy);
+        fixture.stub(List.of(venta), List.of(pago));
+
+        for (String periodo : List.of("dia", "semana", "mes", "trimestre", "semestre", "anio")) {
+            IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos(periodo);
+            BigDecimal totalBuckets = response.getBuckets().stream()
+                    .map(bucket -> bucket.getTotalMonto())
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            assertThat(response.getTotalMonto()).as(periodo).isEqualByComparingTo(totalBuckets);
+            assertThat(response.getTotalMonto()).as(periodo).isEqualByComparingTo("1000");
+            assertThat(response.getCantidadVentas()).as(periodo).isEqualTo(1);
+            assertThat(response.getCantidadPagosDeuda()).as(periodo).isEqualTo(1);
+        }
+    }
+
+    @Test
     void serieRechazaPeriodosInvalidos() {
         Fixture fixture = new Fixture();
         fixture.stub(List.of(), List.of());

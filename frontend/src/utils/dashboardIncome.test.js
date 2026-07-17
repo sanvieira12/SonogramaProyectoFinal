@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cantidadPagosLabel, cantidadVentasLabel } from './dashboardIncome'
+import { cantidadPagosLabel, cantidadVentasLabel, ingresosPeriodoLabel } from './dashboardIncome'
 
 describe('etiquetas de ingresos del dashboard', () => {
   it.each([
@@ -16,5 +16,16 @@ describe('etiquetas de ingresos del dashboard', () => {
     [2, '2 pagos de deudas'],
   ])('pluraliza pagos para %s', (cantidad, etiqueta) => {
     expect(cantidadPagosLabel(cantidad)).toBe(etiqueta)
+  })
+
+  it.each([
+    ['dia', 'Ingresos del día'],
+    ['semana', 'Ingresos de la semana'],
+    ['mes', 'Ingresos del mes'],
+    ['trimestre', 'Ingresos del trimestre'],
+    ['semestre', 'Ingresos del semestre'],
+    ['anio', 'Ingresos del año'],
+  ])('etiqueta el período %s', (periodo, etiqueta) => {
+    expect(ingresosPeriodoLabel(periodo)).toBe(etiqueta)
   })
 })
