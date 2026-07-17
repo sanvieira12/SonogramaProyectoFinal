@@ -41,6 +41,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -67,6 +68,7 @@ public class VentaService {
     private final CostosVentaService costosVentaService;
     private final DiscoQrCopyService discoQrCopyService;
     private final DiscoEstadoService discoEstadoService;
+    private final IngresoLibroCalculator ingresoLibroCalculator;
 
     private static final BigDecimal CIEN = new BigDecimal("100");
 
@@ -444,9 +446,7 @@ public class VentaService {
         String numeroFactura = deuda != null && deuda.getNumeroFactura() != null
                 ? deuda.getNumeroFactura()
                 : (venta != null ? venta.getNumeroFactura() : null);
-        LocalDateTime fecha = pago.getCreatedAt() != null
-                ? pago.getCreatedAt()
-                : pago.getFechaPago().atStartOfDay();
+        LocalDateTime fecha = ingresoLibroCalculator.fechaPago(pago);
         return VentaResponseDTO.builder()
                 .idVenta(venta != null ? venta.getIdVenta() : null)
                 .idPagoDeuda(pago.getIdPagoDeuda())
@@ -471,9 +471,7 @@ public class VentaService {
     }
 
     private boolean pagoDentroDeRango(PagoDeuda pago, LocalDateTime desde, LocalDateTime hasta) {
-        LocalDateTime fecha = pago.getCreatedAt() != null
-                ? pago.getCreatedAt()
-                : pago.getFechaPago().atStartOfDay();
+        LocalDateTime fecha = ingresoLibroCalculator.fechaPago(pago);
         return (desde == null || !fecha.isBefore(desde))
                 && (hasta == null || !fecha.isAfter(hasta));
     }
@@ -564,7 +562,7 @@ public class VentaService {
                 .detalles(detallesDTO)
                 .tipoMovimiento("PRE_VENTA".equals(venta.getOrigen()) ? "PRE_VENTA" : "VENTA")
                 .descripcionMovimiento("PRE_VENTA".equals(venta.getOrigen()) ? "Cobro de pre-venta" : "Venta")
-                .montoMovimiento(venta.getMontoPagado() != null ? venta.getMontoPagado() : VentaTotals.totalProductos(venta))
+                .montoMovimiento(ingresoLibroCalculator.montoVenta(venta))
                 .origen(venta.getOrigen())
                 .idPreVentaOrigen(venta.getIdPreVentaOrigen())
                 .build();
@@ -818,7 +816,7 @@ public class VentaService {
 
     private LocalDateTime parseHasta(String hasta) {
         return hasta != null && !hasta.isBlank()
-                ? LocalDateTime.parse(hasta + "T23:59:59") : null;
+                ? LocalDate.parse(hasta).atTime(LocalTime.MAX) : null;
     }
 
     private int cantidadDetalle(DetalleVenta detalle) {

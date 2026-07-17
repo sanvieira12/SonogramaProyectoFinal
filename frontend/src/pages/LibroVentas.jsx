@@ -200,7 +200,7 @@ function EditSaleModal({ venta, onClose, onSaved }) {
 
 function fmt(n) {
   if (n == null) return '—'
-  return `$${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `UYU $${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function fmtDate(s) {

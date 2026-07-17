@@ -24,6 +24,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.Month;
+import java.time.ZoneId;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -40,24 +41,19 @@ import java.util.stream.Collectors;
 public class EstadisticasService {
 
     private static final WeekFields ISO = WeekFields.ISO;
+    private static final ZoneId ZONA_URUGUAY = ZoneId.of("America/Montevideo");
 
     private final VentaRepository ventaRepository;
     private final DiscoRepository discoRepository;
     private final PagoDeudaRepository pagoDeudaRepository;
+    private final IngresoLibroCalculator ingresoLibroCalculator;
 
     public EstadisticasResponseDTO obtenerCatalogoInventarioVentas() {
         List<Venta> ventas = ventaRepository.findAll().stream()
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
         List<Disco> discos = discoRepository.findAll();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
-                .filter(EstadisticasService::pagoVigente)
-                .toList();
-        Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
-                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
-                .collect(Collectors.groupingBy(
-                        p -> p.getDeuda().getVenta().getIdVenta(),
-                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
 
         List<VentaDiscoItem> itemsVendidos = ventas.stream()
                 .flatMap(venta -> ventaItems(venta).stream())
@@ -68,9 +64,9 @@ public class EstadisticasService {
                 .generosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getGenero(), "Sin género"), i -> texto(i.disco().getGenero(), "Sin género"), true))
                 .artistasMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getArtista(), "Sin artista"), i -> texto(i.disco().getArtista(), "Sin artista"), true))
                 .sellosMasVendidos(agruparItemsVendidos(itemsVendidos, i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), i -> texto(i.disco().getSelloDiscografico(), "Sin sello"), true))
-                .ventasPorMes(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.MES))
-                .ventasPorSemana(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.SEMANA))
-                .ventasPorAnio(agruparIngresos(ventas, pagos, pagosPorVenta, FechaAgrupacion.ANIO))
+                .ventasPorMes(agruparIngresos(ventas, pagos, FechaAgrupacion.MES))
+                .ventasPorSemana(agruparIngresos(ventas, pagos, FechaAgrupacion.SEMANA))
+                .ventasPorAnio(agruparIngresos(ventas, pagos, FechaAgrupacion.ANIO))
                 .gananciaPorSemana(agruparVentas(ventas, v -> claveSemana(v.getFechaVenta()), v -> claveSemana(v.getFechaVenta()), false))
                 .gananciaPorMes(agruparVentas(ventas, v -> claveMes(v.getFechaVenta()), v -> claveMes(v.getFechaVenta()), false))
                 .gananciaPorAnio(agruparVentas(ventas, v -> claveAnio(v.getFechaVenta()), v -> claveAnio(v.getFechaVenta()), false))
@@ -84,7 +80,7 @@ public class EstadisticasService {
     public IngresoSerieResponseDTO obtenerSerieIngresos(String periodo) {
         SeriePeriodo seriePeriodo = SeriePeriodo.from(periodo);
         List<IngresoMovimiento> movimientos = ingresosVigentes();
-        RangoPeriodo actual = seriePeriodo.rangoActual(LocalDate.now());
+        RangoPeriodo actual = seriePeriodo.rangoActual(LocalDate.now(ZONA_URUGUAY));
         RangoPeriodo anterior = seriePeriodo.rangoAnterior(actual);
 
         List<IngresoSerieBucketDTO> buckets = seriePeriodo.construirBuckets(actual, movimientos);
@@ -111,20 +107,19 @@ public class EstadisticasService {
     }
 
     private List<EstadisticaItemDTO> agruparIngresos(
-            List<Venta> ventas, List<PagoDeuda> pagos, Map<Long, BigDecimal> pagosPorVenta,
+            List<Venta> ventas, List<PagoDeuda> pagos,
             FechaAgrupacion agrupacion) {
         Map<String, Acumulador> acumulado = new LinkedHashMap<>();
         for (Venta venta : ventas) {
-            BigDecimal ingresoInicial = ingresoInicialVenta(
-                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO));
-            if (ingresoInicial.compareTo(BigDecimal.ZERO) <= 0) continue;
+            BigDecimal ingreso = ingresoLibroCalculator.montoVenta(venta);
+            if (ingreso.compareTo(BigDecimal.ZERO) <= 0) continue;
             String clave = clave(venta.getFechaVenta(), agrupacion);
             Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
             acc.cantidad++;
-            acc.totalMonto = acc.totalMonto.add(ingresoInicial);
+            acc.totalMonto = acc.totalMonto.add(ingreso);
         }
         for (PagoDeuda pago : pagos) {
-            LocalDateTime fecha = pago.getFechaPago().atStartOfDay();
+            LocalDateTime fecha = ingresoLibroCalculator.fechaPago(pago);
             String clave = clave(fecha, agrupacion);
             Acumulador acc = acumulado.computeIfAbsent(clave, k -> new Acumulador(k, k));
             acc.cantidadPagosDeuda++;
@@ -137,25 +132,17 @@ public class EstadisticasService {
         List<Venta> ventas = ventaRepository.findAll().stream()
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
-                .filter(EstadisticasService::pagoVigente)
-                .toList();
-        Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
-                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
-                .collect(Collectors.groupingBy(
-                        p -> p.getDeuda().getVenta().getIdVenta(),
-                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
 
         List<IngresoMovimiento> movimientos = new ArrayList<>();
         for (Venta venta : ventas) {
             if (venta.getFechaVenta() == null) continue;
-            BigDecimal ingresoInicial = ingresoInicialVenta(
-                    venta, pagosPorVenta.getOrDefault(venta.getIdVenta(), BigDecimal.ZERO));
-            if (ingresoInicial.compareTo(BigDecimal.ZERO) <= 0) continue;
-            movimientos.add(new IngresoMovimiento(venta.getFechaVenta(), ingresoInicial, TipoIngreso.VENTA));
+            BigDecimal ingreso = ingresoLibroCalculator.montoVenta(venta);
+            if (ingreso.compareTo(BigDecimal.ZERO) <= 0) continue;
+            movimientos.add(new IngresoMovimiento(venta.getFechaVenta(), ingreso, TipoIngreso.VENTA));
         }
         for (PagoDeuda pago : pagos) {
-            movimientos.add(new IngresoMovimiento(pago.getFechaPago().atStartOfDay(), pago.getMonto(), TipoIngreso.PAGO_DEUDA));
+            movimientos.add(new IngresoMovimiento(ingresoLibroCalculator.fechaPago(pago), pago.getMonto(), TipoIngreso.PAGO_DEUDA));
         }
         movimientos.sort(Comparator.comparing(IngresoMovimiento::fecha));
         return movimientos;
@@ -183,18 +170,6 @@ public class EstadisticasService {
             case SEMANA -> claveSemana(fecha);
             case ANIO -> claveAnio(fecha);
         };
-    }
-
-    private static BigDecimal ingresoInicialVenta(Venta venta, BigDecimal pagosPosteriores) {
-        BigDecimal acumulado = venta.getMontoPagado() != null ? venta.getMontoPagado() : totalVenta(venta);
-        BigDecimal inicial = acumulado.subtract(pagosPosteriores);
-        return inicial.max(BigDecimal.ZERO);
-    }
-
-    private static boolean pagoVigente(PagoDeuda pago) {
-        if (pago == null || pago.getMonto() == null || pago.getFechaPago() == null) return false;
-        Venta venta = pago.getDeuda() != null ? pago.getDeuda().getVenta() : null;
-        return venta == null || venta.getEstado() != EstadoVenta.CANCELADA;
     }
 
     private List<EstadisticaItemDTO> agruparVentas(
@@ -415,7 +390,7 @@ public class EstadisticasService {
             @Override
             RangoPeriodo rangoActual(LocalDate hoy) {
                 LocalDate inicio = hoy.withDayOfMonth(1);
-                LocalDate fin = hoy.withDayOfMonth(hoy.lengthOfMonth());
+                LocalDate fin = hoy;
                 return new RangoPeriodo(inicio.atStartOfDay(), fin.atTime(LocalTime.MAX));
             }
 

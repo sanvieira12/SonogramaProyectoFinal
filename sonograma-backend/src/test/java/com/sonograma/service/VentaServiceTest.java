@@ -73,7 +73,8 @@ class VentaServiceTest {
                 clienteService,
                 new CostosVentaService(),
                 discoQrCopyService,
-                discoEstadoService
+                discoEstadoService,
+                new IngresoLibroCalculator()
         );
         lenient().doAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);

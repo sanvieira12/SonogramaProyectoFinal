@@ -117,7 +117,7 @@ export default function Dashboard() {
 
   function fmtMonto(monto) {
     if (!monto && monto !== 0) return '—'
-    return `UYU $${Number(monto).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
+    return `UYU $${Number(monto).toLocaleString('es-UY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
   }
 
   function cambiarPeriodoIngresos(periodo) {
@@ -137,7 +137,7 @@ export default function Dashboard() {
     if (valor == null) return null
     const numero = Number(valor)
     const signo = numero > 0 ? '+' : numero < 0 ? '−' : ''
-    return `${signo}UYU $${Math.abs(numero).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`
+    return `${signo}UYU $${Math.abs(numero).toLocaleString('es-UY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
   }
 
   const totalIngresosSeleccionado = Number(serieIngresos?.totalMonto || 0)
@@ -268,7 +268,7 @@ export default function Dashboard() {
                   axisLine={false}
                   tickLine={false}
                   width={80}
-                  tickFormatter={(value) => `UYU $${Number(value).toLocaleString('es-UY', { maximumFractionDigits: 0 })}`}
+                  tickFormatter={(value) => `UYU $${Number(value).toLocaleString('es-UY', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`}
                 />
                 <Tooltip
                   contentStyle={{
