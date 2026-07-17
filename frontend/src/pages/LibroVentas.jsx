@@ -208,6 +208,52 @@ function fmtDate(s) {
   return new Date(s).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+function nombreClienteMovimiento(v) {
+  return v.clienteNombreSnapshot || `${v.nombreCliente || ''} ${v.apellidoCliente || ''}`.trim() || '—'
+}
+
+function detallePrincipal(v) {
+  return v.detalles?.length === 1 ? v.detalles[0] : null
+}
+
+function textoDetalle(detalle) {
+  if (!detalle) return ''
+  if (detalle.manualItem) return detalle.descripcion || [detalle.artista, detalle.album].filter(Boolean).join(' ')
+  return [detalle.artista, detalle.album].filter(Boolean).join(' ')
+}
+
+function discoMovimiento(v) {
+  if (v.tipoMovimiento === 'PAGO_DEUDA') {
+    const primary = v.descripcionMovimiento || 'Pago de deuda'
+    const secondary = v.numeroFactura || ''
+    return { primary, secondary, title: [primary, secondary].filter(Boolean).join(' · ') }
+  }
+
+  if (v.detalles?.length > 1) {
+    const resumen = v.detalles.map(textoDetalle).filter(Boolean).join(', ')
+    return {
+      primary: `Varios (${v.detalles.length} ítems)`,
+      secondary: resumen,
+      title: resumen ? `Varios (${v.detalles.length} ítems): ${resumen}` : `Varios (${v.detalles.length} ítems)`,
+    }
+  }
+
+  const detalle = detallePrincipal(v)
+  const esManual = Boolean(detalle?.manualItem)
+  const primary = esManual
+    ? (detalle?.descripcion || v.artista || '—')
+    : (detalle?.artista || v.artista || '—')
+  const secondary = esManual
+    ? (detalle?.album || v.album || '')
+    : (detalle?.album || v.album || '')
+
+  return { primary, secondary, title: [primary, secondary].filter(Boolean).join(' · ') }
+}
+
+function numeroBoletaMovimiento(v) {
+  return v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'
+}
+
 export default function LibroVentas() {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(false)
@@ -391,21 +437,21 @@ export default function LibroVentas() {
       {/* Tabla */}
       <div className="card overflow-hidden">
         <div>
-          <table className="w-full table-fixed text-[13px]">
+          <table className="w-full table-fixed text-[13px] sm:text-[13.5px]">
             <colgroup>
-              <col className="w-[10%]" />
-              <col className="w-[10%]" />
+              <col className="w-[9%]" />
+              <col className="w-[14%]" />
+              <col className="w-[13%]" />
+              <col className="w-[24%]" />
               <col className="w-[12%]" />
-              <col className="w-[29%]" />
-              <col className="w-[10%]" />
               <col className="w-[11%]" />
-              <col className="w-[8%]" />
+              <col className="w-[7%]" />
               <col className="w-[10%]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
                 {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
-                  <th key={h} className="text-left px-2.5 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wide whitespace-nowrap">
+                  <th key={h} className="text-left px-2 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-[0.02em] whitespace-nowrap">
                     {h}
                   </th>
                 ))}
@@ -418,52 +464,57 @@ export default function LibroVentas() {
                 <tr><td colSpan={8} className="px-2.5 py-12 text-center text-red-500">{error}</td></tr>
               ) : ventas.length === 0 ? (
                 <tr><td colSpan={8} className="px-2.5 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
-              ) : ventas.map(v => (
-                <tr key={`${v.tipoMovimiento || 'VENTA'}-${v.idPagoDeuda || v.idVenta}`} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
-                  <td className="px-2.5 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
-                    {fmtDate(v.fechaVenta)}
-                  </td>
-                  <td className="px-2.5 py-3 whitespace-nowrap overflow-hidden">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      v.tipoMovimiento === 'PAGO_DEUDA'
-                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                        : v.tipoMovimiento === 'PRE_VENTA'
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                        : 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-300'
-                    }`}>
-                      {v.descripcionMovimiento || 'Venta'}
-                    </span>
-                  </td>
-                  <td className="px-2.5 py-3 text-slate-700 dark:text-stone-300 truncate" title={v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}>
-                    {v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}
-                  </td>
-                  <td className="px-2.5 py-3 truncate text-slate-800 dark:text-stone-200" title={v.tipoMovimiento === 'PAGO_DEUDA' ? (v.numeroFactura || 'Pago de deuda') : v.detalles && v.detalles.length > 1 ? `Varios (${v.detalles.length} ítems): ${v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}` : [v.artista, v.album].filter(Boolean).join(' — ')}>
-                    {v.tipoMovimiento === 'PAGO_DEUDA' ? (
-                      <span className="font-medium">{v.numeroFactura || 'Pago de deuda'}</span>
-                    ) : v.detalles && v.detalles.length > 1 ? (
-                      <span className="font-medium">Varios ({v.detalles.length} ítems): {v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}</span>
-                    ) : (
-                      <span className="font-medium">{[v.artista, v.album].filter(Boolean).join(' — ') || '—'}</span>
-                    )}
-                  </td>
-                  <td className="px-2.5 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap truncate" title={v.medioPago || '—'}>
-                    {v.medioPago || '—'}
-                  </td>
-                  <td className="px-2.5 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
-                    {fmt(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal)}
-                  </td>
-                  <td className="px-2.5 py-3 font-mono tabular-nums text-slate-700 dark:text-stone-300 whitespace-nowrap truncate" title={v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'}>
-                    {v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'}
-                  </td>
-                  <td className="px-2.5 py-3 whitespace-nowrap overflow-hidden">
-                    {v.estadoPago ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_PAGO_STYLES[v.estadoPago] || ''}`}>
-                        {v.estadoPago}
+              ) : ventas.map(v => {
+                const cliente = nombreClienteMovimiento(v)
+                const disco = discoMovimiento(v)
+                const boleta = numeroBoletaMovimiento(v)
+
+                return (
+                  <tr key={`${v.tipoMovimiento || 'VENTA'}-${v.idPagoDeuda || v.idVenta}`} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
+                    <td className="px-2 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
+                      {fmtDate(v.fechaVenta)}
+                    </td>
+                    <td className="px-2 py-3 whitespace-nowrap overflow-hidden">
+                      <span className={`inline-flex max-w-full items-center px-1.5 py-0.5 rounded-full text-[11px] sm:text-xs font-medium whitespace-nowrap ${
+                        v.tipoMovimiento === 'PAGO_DEUDA'
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                          : v.tipoMovimiento === 'PRE_VENTA'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-300'
+                      }`}>
+                        {v.descripcionMovimiento || 'Venta'}
                       </span>
-                    ) : '—'}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-2 py-3 text-slate-700 dark:text-stone-300">
+                      <div className="truncate" title={cliente}>{cliente}</div>
+                    </td>
+                    <td className="px-2 py-3 text-slate-800 dark:text-stone-200" title={disco.title}>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate leading-5">{disco.primary}</p>
+                        {disco.secondary && (
+                          <p className="text-[12px] leading-4 text-slate-500 dark:text-stone-500 truncate">{disco.secondary}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-2 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">
+                      <div className="truncate" title={v.medioPago || '—'}>{v.medioPago || '—'}</div>
+                    </td>
+                    <td className="px-2 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
+                      {fmt(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal)}
+                    </td>
+                    <td className="px-2 py-3 font-mono tabular-nums text-slate-700 dark:text-stone-300 whitespace-nowrap">
+                      <div className="truncate" title={boleta}>{boleta}</div>
+                    </td>
+                    <td className="px-2 py-3 whitespace-nowrap overflow-hidden">
+                      {v.estadoPago ? (
+                        <span className={`inline-flex max-w-full items-center px-1.5 py-0.5 rounded-full text-[11px] sm:text-xs font-medium ${ESTADO_PAGO_STYLES[v.estadoPago] || ''}`}>
+                          {v.estadoPago}
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
