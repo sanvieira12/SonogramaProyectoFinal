@@ -390,12 +390,22 @@ export default function LibroVentas() {
 
       {/* Tabla */}
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div>
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col className="w-[10%]" />
+              <col className="w-[10%]" />
+              <col className="w-[12%]" />
+              <col className="w-[29%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[8%]" />
+              <col className="w-[10%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'Estado Pago'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider whitespace-nowrap">
+                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
+                  <th key={h} className="text-left px-2.5 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wide whitespace-nowrap">
                     {h}
                   </th>
                 ))}
@@ -403,17 +413,17 @@ export default function LibroVentas() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">Cargando…</td></tr>
+                <tr><td colSpan={8} className="px-2.5 py-12 text-center text-slate-400">Cargando…</td></tr>
               ) : error ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-red-500">{error}</td></tr>
+                <tr><td colSpan={8} className="px-2.5 py-12 text-center text-red-500">{error}</td></tr>
               ) : ventas.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
+                <tr><td colSpan={8} className="px-2.5 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
               ) : ventas.map(v => (
                 <tr key={`${v.tipoMovimiento || 'VENTA'}-${v.idPagoDeuda || v.idVenta}`} onClick={() => { setVentaPanel(v); setSelectedDisk(null) }} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors cursor-pointer">
-                  <td className="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
+                  <td className="px-2.5 py-3 whitespace-nowrap text-slate-700 dark:text-stone-300">
                     {fmtDate(v.fechaVenta)}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  <td className="px-2.5 py-3 whitespace-nowrap overflow-hidden">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       v.tipoMovimiento === 'PAGO_DEUDA'
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
@@ -424,31 +434,28 @@ export default function LibroVentas() {
                       {v.descripcionMovimiento || 'Venta'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-stone-300">
+                  <td className="px-2.5 py-3 text-slate-700 dark:text-stone-300 truncate" title={v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}>
                     {v.clienteNombreSnapshot || `${v.nombreCliente} ${v.apellidoCliente || ''}`.trim()}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2.5 py-3 truncate text-slate-800 dark:text-stone-200" title={v.tipoMovimiento === 'PAGO_DEUDA' ? (v.numeroFactura || 'Pago de deuda') : v.detalles && v.detalles.length > 1 ? `Varios (${v.detalles.length} ítems): ${v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}` : [v.artista, v.album].filter(Boolean).join(' — ')}>
                     {v.tipoMovimiento === 'PAGO_DEUDA' ? (
-                      <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">{v.numeroFactura || 'Pago de deuda'}</div>
+                      <span className="font-medium">{v.numeroFactura || 'Pago de deuda'}</span>
                     ) : v.detalles && v.detalles.length > 1 ? (
-                      <div>
-                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">Varios ({v.detalles.length} ítems)</div>
-                        <div className="text-slate-400 dark:text-stone-500 text-xs truncate max-w-[160px]">{v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}</div>
-                      </div>
+                      <span className="font-medium">Varios ({v.detalles.length} ítems): {v.detalles.map(d => d.artista || d.descripcion).filter(Boolean).join(', ')}</span>
                     ) : (
-                      <>
-                        <div className="font-medium text-slate-800 dark:text-stone-200 text-xs">{v.artista}</div>
-                        <div className="text-slate-500 dark:text-stone-500 text-xs">{v.album}</div>
-                      </>
+                      <span className="font-medium">{[v.artista, v.album].filter(Boolean).join(' — ') || '—'}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">
+                  <td className="px-2.5 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap truncate" title={v.medioPago || '—'}>
                     {v.medioPago || '—'}
                   </td>
-                  <td className="px-4 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
+                  <td className="px-2.5 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
                     {fmt(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal)}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2.5 py-3 font-mono tabular-nums text-slate-700 dark:text-stone-300 whitespace-nowrap truncate" title={v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'}>
+                    {v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'}
+                  </td>
+                  <td className="px-2.5 py-3 whitespace-nowrap overflow-hidden">
                     {v.estadoPago ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_PAGO_STYLES[v.estadoPago] || ''}`}>
                         {v.estadoPago}
