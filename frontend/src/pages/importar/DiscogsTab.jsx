@@ -250,18 +250,20 @@ function ExcelLinks() {
 
   const processing = job && ['pending', 'processing'].includes(job.status)
   const readyCount = job?.readyToImport || 0
-  const rows = job?.rows || []
-  const filteredRows = useMemo(() => rows.filter(row => {
-    if (filter === 'all') return true
-    if (filter === 'available') return row.sourceStatus === 'DISPONIBLE' && !['sold', 'reserved'].includes(row.status)
-    if (filter === 'sold') return row.status === 'sold'
-    if (filter === 'reserved') return row.status === 'reserved'
-    if (filter === 'invalid') return ['ignored', 'needs_manual_match'].includes(row.status)
-    if (filter === 'pending') return ['pending', 'parsed', 'fetching_discogs', 'pending_retry'].includes(row.status) && !row.resolvedReleaseId
-    if (filter === 'failed') return ['failed', 'pending_retry', 'rate_limited'].includes(row.status)
-    if (filter === 'imported') return row.status === 'imported'
-    return true
-  }), [rows, filter])
+  const filteredRows = useMemo(() => {
+    const rows = job?.rows || []
+    return rows.filter(row => {
+      if (filter === 'all') return true
+      if (filter === 'available') return row.sourceStatus === 'DISPONIBLE' && !['sold', 'reserved'].includes(row.status)
+      if (filter === 'sold') return row.status === 'sold'
+      if (filter === 'reserved') return row.status === 'reserved'
+      if (filter === 'invalid') return ['ignored', 'needs_manual_match'].includes(row.status)
+      if (filter === 'pending') return ['pending', 'parsed', 'fetching_discogs', 'pending_retry'].includes(row.status) && !row.resolvedReleaseId
+      if (filter === 'failed') return ['failed', 'pending_retry', 'rate_limited'].includes(row.status)
+      if (filter === 'imported') return row.status === 'imported'
+      return true
+    })
+  }, [filter, job?.rows])
 
   const progressTotal = Math.max(job?.realRowsRead || job?.totalRowsRead || 0, 1)
   const progressDone = Math.min(progressTotal, (job?.metadataFetched || 0) + (job?.invalidRows || 0) + (job?.soldRows || 0) + (job?.reservedRows || 0))

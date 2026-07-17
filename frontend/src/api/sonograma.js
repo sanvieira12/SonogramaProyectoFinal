@@ -62,10 +62,6 @@ async function request(method, path, body) {
   return data
 }
 
-function isDevelopment() {
-  return import.meta.env.DEV
-}
-
 async function readResponseMessage(res, fallback) {
   const text = await res.text()
   if (!text) return fallback
@@ -77,17 +73,9 @@ async function readResponseMessage(res, fallback) {
   }
 }
 
-async function readZipResponse(res, { fallbackFilename, fallbackError, endpoint }) {
+async function readZipResponse(res, { fallbackFilename, fallbackError }) {
   const contentType = res.headers.get('Content-Type') || ''
   const disposition = res.headers.get('Content-Disposition') || ''
-
-  if (isDevelopment()) {
-    console.info('[sonograma.zip]', {
-      endpoint,
-      status: res.status,
-      contentType,
-    })
-  }
 
   if (!res.ok) {
     throw new Error(await readResponseMessage(res, fallbackError))
@@ -98,13 +86,6 @@ async function readZipResponse(res, { fallbackFilename, fallbackError, endpoint 
   }
 
   const blob = await res.blob()
-  if (isDevelopment()) {
-    console.info('[sonograma.zip]', {
-      endpoint,
-      blobSize: blob.size,
-      filename: filenameFromContentDisposition(disposition) || fallbackFilename,
-    })
-  }
   if (!blob || blob.size === 0) {
     throw new Error('El ZIP se generó vacío o no se pudo preparar.')
   }
@@ -318,27 +299,23 @@ export const api = {
     vinylfutureCsv: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
-      const endpoint = '/importar/vinylfuture-csv'
-      const res = await fetch(`${BASE}${endpoint}`, {
+      const res = await fetch(`${BASE}/importar/vinylfuture-csv`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         body: fd,
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       return readZipResponse(res, {
-        endpoint,
         fallbackFilename: 'vinylfuture-import.zip',
         fallbackError: 'Error procesando PDF',
       })
     },
     vinylfutureZip: async (importId) => {
-      const endpoint = `/importar/vinylfuture/${encodeURIComponent(importId)}/zip`
-      const res = await fetch(`${BASE}${endpoint}`, {
+      const res = await fetch(`${BASE}/importar/vinylfuture/${encodeURIComponent(importId)}/zip`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       return readZipResponse(res, {
-        endpoint,
         fallbackFilename: `vinylfuture-${importId}.zip`,
         fallbackError: 'Error exportando ZIP',
       })
@@ -389,7 +366,6 @@ export const api = {
     configurar: (id, cfg) => request('PATCH', `/pedidos/${id}/configuracion`, cfg),
     enriquecer: (id) => request('POST', `/pedidos/${id}/enriquecer`),
     importarCatalogo: (id) => request('POST', `/pedidos/${id}/importar-catalogo`),
-    retryItem: (pedidoId, itemId) => request('POST', `/pedidos/${pedidoId}/items/${itemId}/retry-enrich`),
     pdfUrl: (id) => `${BASE}/pedidos/${id}/pdf`,
     descargarPdf: async (id) => {
       const res = await fetch(`${BASE}/pedidos/${id}/pdf`, {
@@ -478,13 +454,11 @@ export const api = {
       request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),
 
     discogsCoversZip: async (jobId) => {
-      const endpoint = `/importaciones/discogs/jobs/${jobId}/covers.zip`
-      const res = await fetch(`${BASE}${endpoint}`, {
+      const res = await fetch(`${BASE}/importaciones/discogs/jobs/${jobId}/covers.zip`, {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
       return readZipResponse(res, {
-        endpoint,
         fallbackFilename: `discogs-covers-${jobId}.zip`,
         fallbackError: 'No se pudo generar el ZIP de portadas Discogs',
       })

@@ -1,0 +1,97 @@
+.qr-scanner-shell {
+  background: #050505;
+  isolation: isolate;
+  height: 100svh;
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+}
+
+.qr-scanner-video {
+  background: #050505;
+  filter: saturate(0.92) contrast(1.04);
+  user-select: none;
+}
+
+.qr-scanner-frame {
+  width: min(74vw, 340px);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 28px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.48), 0 0 36px rgba(126, 159, 168, 0.14);
+}
+
+.qr-scanner-frame::before,
+.qr-scanner-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.qr-scanner-frame::before {
+  border: 4px solid transparent;
+  border-top-color: #b8d9df;
+  border-left-color: #b8d9df;
+  clip-path: polygon(0 0, 28% 0, 28% 4px, 4px 4px, 4px 28%, 0 28%);
+}
+
+.qr-scanner-frame::after {
+  border: 4px solid transparent;
+  border-right-color: #b8d9df;
+  border-bottom-color: #b8d9df;
+  clip-path: polygon(72% 96%, 96% 96%, 96% 72%, 100% 72%, 100% 100%, 72% 100%);
+}
+
+.qr-scanner-line {
+  position: absolute;
+  inset-inline: 12%;
+  top: 12%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #cbeef2 25%, #cbeef2 75%, transparent);
+  box-shadow: 0 0 16px rgba(203, 238, 242, 0.9);
+  animation: qr-scanner-sweep 2.4s ease-in-out infinite;
+}
+
+.qr-scanner-feedback {
+  animation: qr-scanner-feedback 420ms ease-out both;
+}
+
+.qr-scanner-feedback-error {
+  animation: qr-scanner-feedback-error 420ms ease-out both;
+}
+
+.qr-scanner-shell button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes qr-scanner-sweep {
+  0%, 100% { transform: translateY(0); opacity: 0.35; }
+  50% { transform: translateY(600%); opacity: 1; }
+}
+
+@keyframes qr-scanner-feedback {
+  0% { transform: scale(0.78); opacity: 0; }
+  65% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes qr-scanner-feedback-error {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-8px); }
+  75% { transform: translateX(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-scanner-line,
+  .qr-scanner-feedback,
+  .qr-scanner-feedback-error {
+    animation: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .qr-scanner-frame {
+    width: min(42vh, 300px);
+  }
+}

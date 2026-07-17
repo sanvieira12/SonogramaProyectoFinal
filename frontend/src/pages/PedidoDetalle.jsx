@@ -221,16 +221,6 @@ export default function PedidoDetalle() {
     }
   }
 
-  async function handleRetry(itemId) {
-    try {
-      await api.pedidos.retryItem(id, itemId)
-      setActionMsg(`Reintentando ítem ${itemId}…`)
-      setTimeout(load, 1500)
-    } catch (e) {
-      setActionMsg('Error: ' + e.message)
-    }
-  }
-
   async function handlePdf() {
     setActionMsg('')
     try {

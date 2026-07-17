@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, resolveApiUrl } from '../api/sonograma'
+import QRScanner from '../components/QRScanner'
+import { parseQrPayload } from '../utils/qrPayload'
 
 const DEPARTAMENTOS_FALLBACK = [
   'Artigas','Canelones','Cerro Largo','Colonia','Durazno','Flores','Florida',
@@ -43,7 +45,7 @@ function ResumenLinea({ label, value, strong, muted }) {
   )
 }
 
-function DiscoDetallePanel({ disco, onClose, onAgregar }) {
+const DiscoDetallePanel = memo(function DiscoDetallePanel({ disco, onClose, onAgregar }) {
   if (!disco) return null
   const previews = disco.audioPreviews || []
   return (
@@ -89,12 +91,16 @@ function DiscoDetallePanel({ disco, onClose, onAgregar }) {
       </div>
     </aside>
   )
-}
+})
 
 export default function NuevaVenta() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const debounceRef = useRef(null)
+  const scannerSessionRef = useRef(0)
+  const carritoRef = useRef([])
+  const discoCacheRef = useRef(new Map())
+  const discoRequestCacheRef = useRef(new Map())
 
   const idDiscoParam = searchParams.get('idDisco')
   const qrParam = searchParams.get('qr')
@@ -140,6 +146,31 @@ export default function NuevaVenta() {
   const [enviando, setEnviando] = useState(false)
   const [mostrarModalCliente, setMostrarModalCliente] = useState(false)
   const [discoDetalle, setDiscoDetalle] = useState(null)
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [ultimoRegistroEscaneado, setUltimoRegistroEscaneado] = useState(null)
+
+  const obtenerDiscoPorId = useCallback(async (idDisco) => {
+    const key = String(idDisco)
+    const cached = discoCacheRef.current.get(key)
+    if (cached) return cached
+    const pending = discoRequestCacheRef.current.get(key)
+    if (pending) return pending
+
+    const request = api.discos.porId(idDisco)
+      .then(disco => {
+        discoCacheRef.current.set(key, disco)
+        return disco
+      })
+      .finally(() => {
+        discoRequestCacheRef.current.delete(key)
+      })
+    discoRequestCacheRef.current.set(key, request)
+    return request
+  }, [])
+
+  useEffect(() => {
+    carritoRef.current = carrito
+  }, [carrito])
 
   useEffect(() => {
     api.envios.departamentosDac()
@@ -150,14 +181,18 @@ export default function NuevaVenta() {
 
   useEffect(() => {
     if (idDiscoParam) {
-      api.discos.porId(idDiscoParam)
+      obtenerDiscoPorId(idDiscoParam)
         .then(d => {
+          const qrMatchesCatalogRecord = qrParam && (
+            d.qrCopies?.some(copy => copy.codigoQr === qrParam)
+            || d.codigoQr === qrParam
+          )
           setCarrito([{
             uid: `disco-${d.idDisco}`,
             disco: d,
             precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
             cantidad: '1',
-            codigoQr: qrParam && d.qrCopies?.some(copy => copy.codigoQr === qrParam) ? qrParam : null,
+            codigoQr: qrMatchesCatalogRecord ? qrParam : null,
             manualItem: false,
           }])
         })
@@ -167,7 +202,7 @@ export default function NuevaVenta() {
         .then(ds => setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0)))
         .catch(() => setDiscosDisponibles([]))
     }
-  }, [idDiscoParam, qrParam])
+  }, [idDiscoParam, obtenerDiscoPorId, qrParam])
 
   useEffect(() => {
     if (tipoEntrega !== 'ENVIO' || !departamento) return
@@ -193,18 +228,68 @@ export default function NuevaVenta() {
     setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0))
   }
 
-  function agregarAlCarrito(d) {
-    if (carrito.some(item => item.disco?.idDisco === d.idDisco)) return
-    setCarrito(prev => [...prev, {
-      uid: `disco-${d.idDisco}`,
+  const agregarAlCarrito = useCallback((d, codigoQr = null) => {
+    const yaAgregado = codigoQr
+      ? carritoRef.current.some(item => item.codigoQr === codigoQr)
+      : carritoRef.current.some(item => item.disco?.idDisco === d.idDisco)
+    if (yaAgregado) return false
+    const nuevoItem = {
+      uid: codigoQr ? `qr-${codigoQr}` : `disco-${d.idDisco}`,
       disco: d,
       precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
       cantidad: '1',
-      codigoQr: null,
+      codigoQr,
       manualItem: false,
-    }])
+    }
+    carritoRef.current = [...carritoRef.current, nuevoItem]
+    setCarrito(prev => [...prev, nuevoItem])
     setDiscoDetalle(null)
-  }
+    return true
+  }, [])
+
+  const abrirScanner = useCallback(() => {
+    scannerSessionRef.current += 1
+    setErrores(prev => ({ ...prev, disco: undefined }))
+    setScannerOpen(true)
+  }, [])
+
+  const cerrarScanner = useCallback(() => {
+    scannerSessionRef.current += 1
+    setScannerOpen(false)
+  }, [])
+
+  const procesarCodigoQr = useCallback(async (valor) => {
+    const payload = parseQrPayload(valor)
+    if (!payload) throw new Error('El QR no tiene un formato de venta válido.')
+
+    const session = scannerSessionRef.current
+    const disco = await obtenerDiscoPorId(payload.idDisco)
+    if (session !== scannerSessionRef.current) return
+
+    const copies = Array.isArray(disco.qrCopies) ? disco.qrCopies : []
+    const copy = copies.find(item => item.codigoQr === payload.codigoQr)
+    const legacyCopyMatches = !copy && disco.codigoQr === payload.codigoQr
+    if (!copy && !legacyCopyMatches) throw new Error('El QR no pertenece al disco indicado.')
+    if (copy && copy.estado !== 'DISPONIBLE') throw new Error('La copia escaneada ya no está disponible.')
+    if (!['DISPONIBLE', 'RESERVADO'].includes(disco.estado)) {
+      throw new Error(`"${disco.artista}" está ${ESTADO_LABELS[disco.estado]?.toLowerCase() || disco.estado}.`)
+    }
+    if (!agregarAlCarrito(disco, payload.codigoQr)) throw new Error('Esta copia ya está en la venta.')
+    setErrores(prev => ({ ...prev, disco: undefined }))
+
+    setUltimoRegistroEscaneado({
+      idDisco: disco.idDisco,
+      artista: disco.artista,
+      album: disco.album,
+      codigoInterno: disco.codigoInterno,
+    })
+  }, [agregarAlCarrito, obtenerDiscoPorId])
+
+  const manejarErrorQr = useCallback((error) => {
+    setErrores(prev => ({ ...prev, disco: error?.message || 'No se pudo agregar el QR a la venta.' }))
+  }, [])
+
+  const cerrarDetalle = useCallback(() => setDiscoDetalle(null), [])
 
   function agregarManual() {
     const cantidad = Math.max(1, Number(manualForm.cantidad || 1))
@@ -394,6 +479,33 @@ export default function NuevaVenta() {
         <div className="card p-5 space-y-3">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Discos</h2>
 
+          {!idDiscoParam && (
+            <div className="flex flex-col gap-2 rounded-xl border border-[#7E9FA8]/25 bg-[#7E9FA8]/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-800 dark:text-stone-200">Carga rápida por QR</p>
+                <p className="text-xs text-slate-500 dark:text-stone-400">Escaneá varias copias y agregalas a esta venta.</p>
+              </div>
+              <button type="button" onClick={abrirScanner} className="btn-primary w-full text-sm sm:w-auto">
+                Escanear códigos QR
+              </button>
+            </div>
+          )}
+
+          {ultimoRegistroEscaneado && !scannerOpen && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/25">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Último escaneado</p>
+              <p className="mt-0.5 truncate text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                {ultimoRegistroEscaneado.artista || 'Disco'}{ultimoRegistroEscaneado.album ? ` — ${ultimoRegistroEscaneado.album}` : ''}
+              </p>
+            </div>
+          )}
+
+          {carrito.length > 0 && (
+            <p className="text-xs font-medium text-slate-500 dark:text-stone-400">
+              {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} en la venta
+            </p>
+          )}
+
           {carrito.length > 0 && (
             <div className="space-y-2">
               {carrito.map(item => (
@@ -420,8 +532,10 @@ export default function NuevaVenta() {
                     step="1"
                     value={item.cantidad}
                     onChange={e => setCantidadCarrito(item.uid, e.target.value)}
+                    disabled={Boolean(item.codigoQr)}
                     className="input w-20 text-right tabular-nums"
                     placeholder="Cant."
+                    aria-label={item.codigoQr ? 'Cantidad fija para copia escaneada' : 'Cantidad'}
                   />
                   <input
                     type="number"
@@ -735,9 +849,18 @@ export default function NuevaVenta() {
       )}
       <DiscoDetallePanel
         disco={discoDetalle}
-        onClose={() => setDiscoDetalle(null)}
+        onClose={cerrarDetalle}
         onAgregar={agregarAlCarrito}
       />
+      {scannerOpen && (
+        <QRScanner
+          open={scannerOpen}
+          onScan={procesarCodigoQr}
+          onScanError={manejarErrorQr}
+          onClose={cerrarScanner}
+          lastScannedRecord={ultimoRegistroEscaneado}
+        />
+      )}
     </div>
   )
 }
