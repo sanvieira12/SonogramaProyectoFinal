@@ -9,7 +9,7 @@ cd sonograma-backend && mvn spring-boot:run &
 BACKEND_PID=$!
 
 echo "Iniciando frontend..."
-cd ../frontend && npm run dev &
+cd frontend && npm run dev &
 FRONTEND_PID=$!
 
 echo ""
