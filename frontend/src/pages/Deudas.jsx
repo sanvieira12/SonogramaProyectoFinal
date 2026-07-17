@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api/sonograma'
+import { api, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
 
 const ESTADO_STYLES = {
@@ -14,7 +14,6 @@ const EMPTY_DEUDA = {
   mailManual: '',
   instagramManual: '',
   ciManual: '',
-  numeroFactura: '',
   descripcion: '',
   montoTotal: '',
   montoPagado: '0',
@@ -41,7 +40,6 @@ function buildForm(deuda) {
     mailManual: deuda.mailManual || '',
     instagramManual: deuda.instagramManual || '',
     ciManual: deuda.ciManual || '',
-    numeroFactura: deuda.numeroFactura || '',
     descripcion: deuda.descripcion || '',
     montoTotal: deuda.montoTotal ?? '',
     montoPagado: deuda.montoPagado ?? '0',
@@ -80,7 +78,6 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
       mailManual: form.mailManual || null,
       instagramManual: form.instagramManual || null,
       ciManual: form.ciManual || null,
-      numeroFactura: form.numeroFactura || null,
       descripcion: form.descripcion || null,
       montoTotal: form.montoTotal ? Number(form.montoTotal) : null,
       montoPagado: form.montoPagado ? Number(form.montoPagado) : 0,
@@ -139,7 +136,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
       <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur border-b border-slate-100 dark:border-stone-800 px-5 py-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white">{deuda?.idDeuda ? current.nombreCliente : 'Nueva deuda'}</h2>
-          <p className="text-sm text-slate-400 dark:text-stone-500">{current.numeroRecibo ? `Recibo ${current.numeroRecibo}` : current.numeroFactura ? `Factura ${current.numeroFactura}` : 'Deuda manual editable'}</p>
+          <p className="text-sm text-slate-400 dark:text-stone-500">{current.numeroRecibo ? `Recibo ${current.numeroRecibo}` : 'Deuda manual editable'}</p>
         </div>
         <div className="flex items-center gap-2">
           {deuda?.idDeuda && <button onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')} className="btn-secondary text-sm">{mode === 'edit' ? 'Ver' : 'Editar'}</button>}
@@ -182,10 +179,6 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
             )}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Factura</label>
-                <input className="input w-full" value={form.numeroFactura} onChange={e => set('numeroFactura', e.target.value)} />
-              </div>
-              <div>
                 <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Fecha deuda</label>
                 <input type="date" className="input w-full" value={form.fechaDeuda} onChange={e => set('fechaDeuda', e.target.value)} />
               </div>
@@ -222,7 +215,6 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
                 ['Número de recibo', current.numeroRecibo],
-                ['Factura', current.numeroFactura],
                 ['Fecha', fmtDate(current.fechaDeuda || current.fechaVenta)],
                 ['Mail', current.mailManual],
                 ['Instagram', current.instagramManual],
@@ -246,9 +238,18 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
                 <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</h3>
                 <div className="space-y-2">
                   {current.detalles.map((detalle, index) => (
-                    <div key={detalle.idDetalle || detalle.idDisco || index} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2">
-                      <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p>
-                      <p className="text-xs text-slate-400 dark:text-stone-500">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p>
+                    <div key={detalle.idDetalle || detalle.idDisco || index} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center gap-3">
+                      {detalle.imagenUrl && (
+                        <img
+                          src={resolveApiUrl(detalle.imagenUrl)}
+                          alt={detalle.album || 'Portada del disco'}
+                          className="w-14 h-14 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p>
+                        <p className="text-xs text-slate-400 dark:text-stone-500">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -390,7 +391,7 @@ export default function Deudas() {
 
       <div className="relative max-w-md flex gap-2">
         <input
-          placeholder="Buscar cliente, deudor o factura…"
+          placeholder="Buscar cliente, deudor o recibo…"
           className="input w-full"
           value={q}
           onChange={e => setQ(e.target.value)}
