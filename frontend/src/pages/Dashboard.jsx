@@ -7,6 +7,10 @@ import { api } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
 import { cantidadPagosLabel, cantidadVentasLabel } from '../utils/dashboardIncome'
 
+function fechaInputLocal(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 const PERIODOS = [
   { key: 'dia', label: 'Día' },
   { key: 'semana', label: 'Semana' },
@@ -43,7 +47,6 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [discos, setDiscos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [estadisticas, setEstadisticas] = useState(null)
   const [gastosMesActual, setGastosMesActual] = useState(0)
   const [periodoIngresos, setPeriodoIngresos] = useState('mes')
   const [serieIngresos, setSerieIngresos] = useState(null)
@@ -63,9 +66,6 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    api.estadisticas.catalogo()
-      .then(setEstadisticas)
-      .catch(() => setEstadisticas(null))
     api.libro.listar({})
       .then(data => setUltimasVentas(Array.isArray(data) ? data : []))
       .catch(() => setUltimasVentas([]))
@@ -102,24 +102,27 @@ export default function Dashboard() {
     .filter(d => d.estado === 'DISPONIBLE' && d.precioVenta)
     .reduce((sum, d) => sum + Number(d.precioVenta) * Number(d.cantidadCopias ?? 1), 0)
 
-  // Venta total del mes actual usando la clave "YYYY-MM" de estadisticas.ventasPorMes
-  const mesActual = (() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  })()
-  const ventaMes = estadisticas?.ventasPorMes?.find(v => v.clave === mesActual)
-  const ventaTotalMes = ventaMes ? Number(ventaMes.totalMonto || 0) : 0
-  const semanaActual = (() => {
-    const date = new Date()
-    const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-    const day = utc.getUTCDay() || 7
-    utc.setUTCDate(utc.getUTCDate() + 4 - day)
-    const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1))
-    const week = Math.ceil((((utc - yearStart) / 86400000) + 1) / 7)
-    return `${utc.getUTCFullYear()}-S${String(week).padStart(2, '0')}`
-  })()
-  const ventaSemana = estadisticas?.ventasPorSemana?.find(v => v.clave === semanaActual)
-  const ventaTotalSemana = Number(ventaSemana?.totalMonto || 0)
+  const hoy = new Date()
+  const fechaHoy = fechaInputLocal(hoy)
+  const inicioMes = `${fechaHoy.slice(0, 8)}01`
+  const inicioSemanaDate = new Date(hoy)
+  const diaSemana = inicioSemanaDate.getDay() || 7
+  inicioSemanaDate.setDate(inicioSemanaDate.getDate() - diaSemana + 1)
+  const inicioSemana = fechaInputLocal(inicioSemanaDate)
+  const movimientosEnRango = (desde, hasta) => ultimasVentas.filter(v => {
+    const fecha = v.fechaVenta?.slice(0, 10)
+    return fecha && fecha >= desde && fecha <= hasta
+  })
+  const totalMovimientos = movimientos => movimientos.reduce((sum, v) => sum + Number(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
+  const resumenMovimientos = movimientos => ({
+    cantidad: movimientos.filter(v => v.tipoMovimiento !== 'PAGO_DEUDA').length,
+    cantidadPagosDeuda: movimientos.filter(v => v.tipoMovimiento === 'PAGO_DEUDA').length,
+    totalMonto: totalMovimientos(movimientos),
+  })
+  const ventaMes = resumenMovimientos(movimientosEnRango(inicioMes, fechaHoy))
+  const ventaSemana = resumenMovimientos(movimientosEnRango(inicioSemana, fechaHoy))
+  const ventaTotalMes = ventaMes.totalMonto
+  const ventaTotalSemana = ventaSemana.totalMonto
   const datosIngresos = (serieIngresos?.buckets || []).map(item => ({
     etiqueta: item.etiqueta,
     totalMonto: Number(item.totalMonto || 0),

@@ -139,7 +139,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
       <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur border-b border-slate-100 dark:border-stone-800 px-5 py-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white">{deuda?.idDeuda ? current.nombreCliente : 'Nueva deuda'}</h2>
-          <p className="text-sm text-slate-400 dark:text-stone-500">{current.numeroFactura ? `Factura ${current.numeroFactura}` : 'Deuda manual editable'}</p>
+          <p className="text-sm text-slate-400 dark:text-stone-500">{current.numeroRecibo ? `Recibo ${current.numeroRecibo}` : current.numeroFactura ? `Factura ${current.numeroFactura}` : 'Deuda manual editable'}</p>
         </div>
         <div className="flex items-center gap-2">
           {deuda?.idDeuda && <button onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')} className="btn-secondary text-sm">{mode === 'edit' ? 'Ver' : 'Editar'}</button>}
@@ -221,6 +221,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
+                ['Número de recibo', current.numeroRecibo],
                 ['Factura', current.numeroFactura],
                 ['Fecha', fmtDate(current.fechaDeuda || current.fechaVenta)],
                 ['Mail', current.mailManual],
@@ -238,6 +239,19 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
               <div className="space-y-3">
                 {current.descripcion && <p className="text-sm text-slate-600 dark:text-stone-400 whitespace-pre-wrap">{current.descripcion}</p>}
                 {current.notas && <p className="text-sm text-slate-500 dark:text-stone-500 whitespace-pre-wrap">{current.notas}</p>}
+              </div>
+            )}
+            {current.detalles?.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</h3>
+                <div className="space-y-2">
+                  {current.detalles.map((detalle, index) => (
+                    <div key={detalle.idDetalle || detalle.idDisco || index} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2">
+                      <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p>
+                      <p className="text-xs text-slate-400 dark:text-stone-500">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             {current.estadoPago !== 'PAGADO' && (

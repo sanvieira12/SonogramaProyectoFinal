@@ -141,6 +141,7 @@ public class VentaService {
                 .estado(EstadoVenta.COMPLETADA)
                 .observaciones(dto.getObservaciones())
                 .numeroFactura(numeroFactura)
+                .numeroRecibo(textoNulo(dto.getNumeroRecibo()))
                 .clienteNombreSnapshot(clienteSnapshot)
                 .medioPago(medioPago)
                 .montoPagado(montoPagado)
@@ -268,6 +269,7 @@ public class VentaService {
         venta.setTipoEntrega(entrega);
         venta.setEstado(EstadoVenta.COMPLETADA);
         venta.setObservaciones(dto.getObservaciones());
+        venta.setNumeroRecibo(textoNulo(dto.getNumeroRecibo()));
         venta.setClienteNombreSnapshot(clienteSnapshot);
         venta.setMedioPago(medioPago);
         venta.setMontoPagado(montoPagado);
@@ -453,6 +455,7 @@ public class VentaService {
                 .nombreCliente(nombre)
                 .fechaVenta(fecha)
                 .numeroFactura(numeroFactura)
+                .numeroRecibo(venta != null ? venta.getNumeroRecibo() : null)
                 .clienteNombreSnapshot(nombre)
                 .total(pago.getMonto())
                 .totalFinal(pago.getMonto())
@@ -550,6 +553,7 @@ public class VentaService {
                 .observaciones(venta.getObservaciones())
                 .envio(envioDTO)
                 .numeroFactura(venta.getNumeroFactura())
+                .numeroRecibo(venta.getNumeroRecibo())
                 .clienteNombreSnapshot(venta.getClienteNombreSnapshot())
                 .medioPago(venta.getMedioPago() != null ? venta.getMedioPago().name() : null)
                 .montoPagado(venta.getMontoPagado())

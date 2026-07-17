@@ -132,6 +132,7 @@ export default function NuevaVenta() {
   const [costoEnvio, setCostoEnvio] = useState('')
   const [descuentoPct, setDescuentoPct] = useState(0)
   const [medioPago, setMedioPago] = useState('')
+  const [numeroRecibo, setNumeroRecibo] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [montoPagado, setMontoPagado] = useState('')
 
@@ -357,6 +358,7 @@ export default function NuevaVenta() {
         costoEnvio: Number(totales.envio.toFixed(2)),
         tipoEntrega,
         medioPago: medioPago || null,
+        numeroRecibo: numeroRecibo.trim() || null,
         observaciones: observaciones || null,
         montoPagado: montoP,
         ...(tipoEntrega === 'ENVIO' && {
@@ -680,6 +682,10 @@ export default function NuevaVenta() {
                 <option value="TARJETA">Tarjeta</option>
                 <option value="OTRO">Otro</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Número de recibo</label>
+              <input value={numeroRecibo} onChange={e => setNumeroRecibo(e.target.value)} className="input" placeholder="Ingresá el número" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Monto pagado</label>

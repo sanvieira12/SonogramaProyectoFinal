@@ -36,6 +36,7 @@ public class VentaResponseDTO {
     private String observaciones;
     private EnvioDTO envio;
     private String numeroFactura;
+    private String numeroRecibo;
     private String clienteNombreSnapshot;
     private String medioPago;
     private BigDecimal montoPagado;

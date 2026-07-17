@@ -2,6 +2,7 @@ package com.sonograma.service;
 
 import com.sonograma.dto.DeudaRequestDTO;
 import com.sonograma.dto.DeudaResponseDTO;
+import com.sonograma.dto.DetalleVentaResponseDTO;
 import com.sonograma.dto.PagoDeudaDTO;
 import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
@@ -258,6 +259,7 @@ public class DeudaService {
                 .idDeuda(d.getIdDeuda())
                 .idVenta(d.getVenta() != null ? d.getVenta().getIdVenta() : null)
                 .numeroFactura(!isBlank(d.getNumeroFactura()) ? d.getNumeroFactura() : (d.getVenta() != null ? d.getVenta().getNumeroFactura() : null))
+                .numeroRecibo(d.getVenta() != null ? d.getVenta().getNumeroRecibo() : null)
                 .idCliente(d.getCliente() != null ? d.getCliente().getIdCliente() : null)
                 .nombreCliente(nombreDeudor(d))
                 .nombreDeudorManual(d.getNombreDeudorManual())
@@ -276,6 +278,20 @@ public class DeudaService {
                 .estadoPago(d.getEstadoPago().name())
                 .notas(d.getNotas())
                 .pagos(pagos)
+                .detalles(d.getVenta() != null && d.getVenta().getDetalles() != null
+                        ? d.getVenta().getDetalles().stream().map(detalle -> DetalleVentaResponseDTO.builder()
+                                .idDetalle(detalle.getIdDetalle())
+                                .idDisco(detalle.getDisco() != null ? detalle.getDisco().getIdDisco() : null)
+                                .artista(detalle.getArtistaSnap() != null ? detalle.getArtistaSnap() : (detalle.getDisco() != null ? detalle.getDisco().getArtista() : null))
+                                .album(detalle.getAlbumSnap() != null ? detalle.getAlbumSnap() : (detalle.getDisco() != null ? detalle.getDisco().getAlbum() : null))
+                                .descripcion(detalle.getDescripcionSnap())
+                                .codigoInterno(detalle.getCodigoSnap() != null ? detalle.getCodigoSnap() : (detalle.getDisco() != null ? detalle.getDisco().getCodigoInterno() : null))
+                                .imagenUrl(detalle.getDisco() != null ? detalle.getDisco().getImagenUrl() : null)
+                                .cantidad(detalle.getCantidad())
+                                .precioUnitario(detalle.getPrecioUnitario())
+                                .manualItem(Boolean.TRUE.equals(detalle.getManualItem()) || detalle.getDisco() == null)
+                                .build()).toList()
+                        : List.of())
                 .build();
     }
 

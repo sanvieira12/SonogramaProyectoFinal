@@ -50,6 +50,7 @@ public class VentaRequestDTO {
 
     private String observaciones;
     private String medioPago;
+    private String numeroRecibo;
 
     @DecimalMin(value = "0.0", message = "El monto pagado no puede ser negativo")
     private BigDecimal montoPagado;

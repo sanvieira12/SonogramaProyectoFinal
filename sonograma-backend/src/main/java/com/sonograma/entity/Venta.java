@@ -96,6 +96,9 @@ public class Venta {
     @Column(name = "numero_factura", unique = true)
     private String numeroFactura;
 
+    @Column(name = "numero_recibo")
+    private String numeroRecibo;
+
     @Column(name = "cliente_nombre_snapshot")
     private String clienteNombreSnapshot;
 

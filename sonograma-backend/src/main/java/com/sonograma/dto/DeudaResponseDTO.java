@@ -15,6 +15,7 @@ public class DeudaResponseDTO {
     private Long idDeuda;
     private Long idVenta;
     private String numeroFactura;
+    private String numeroRecibo;
     private Long idCliente;
     private String nombreCliente;
     private String nombreDeudorManual;
@@ -33,4 +34,5 @@ public class DeudaResponseDTO {
     private String estadoPago;
     private String notas;
     private List<PagoDeudaDTO> pagos;
+    private List<DetalleVentaResponseDTO> detalles;
 }

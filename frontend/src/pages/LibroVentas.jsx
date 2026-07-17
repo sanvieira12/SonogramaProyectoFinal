@@ -9,6 +9,10 @@ const ESTADO_PAGO_STYLES = {
   PENDIENTE:'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
 }
 
+function fechaInputLocal(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel }) {
   if (!venta) return null
   const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
@@ -38,6 +42,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
             ['Total venta', fmt(venta.totalFinal)],
             ['Método de pago', venta.medioPago],
+            ['Número de recibo', venta.numeroRecibo],
             ['Estado pago', venta.estadoPago],
             ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
             ['Monto pagado', fmt(venta.montoPagado)],
@@ -90,6 +95,7 @@ function EditSaleModal({ venta, onClose, onSaved }) {
   const [form, setForm] = useState({
     descuentoPorcentaje: venta.descuentoPorcentaje ?? 0,
     medioPago: venta.medioPago || '',
+    numeroRecibo: venta.numeroRecibo || '',
     montoPagado: venta.montoPagado ?? '',
     observaciones: venta.observaciones || '',
     detalles: detallesIniciales.map(d => ({ ...d, precioUnitario: d.precioUnitario ?? 0 })),
@@ -120,6 +126,7 @@ function EditSaleModal({ venta, onClose, onSaved }) {
         tipoEntrega: venta.tipoEntrega || 'RETIRO',
         descuentoPorcentaje: Number(form.descuentoPorcentaje || 0),
         medioPago: form.medioPago || null,
+        numeroRecibo: form.numeroRecibo || null,
         montoPagado: form.montoPagado === '' ? undefined : Number(form.montoPagado),
         observaciones: form.observaciones || null,
         detalles: form.detalles.map(d => ({
@@ -149,6 +156,9 @@ function EditSaleModal({ venta, onClose, onSaved }) {
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
         </div>
         {error && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
+        <label className="block text-xs text-slate-500 dark:text-stone-400">Número de recibo
+          <input className="input w-full mt-1" value={form.numeroRecibo} onChange={e => setForm(prev => ({ ...prev, numeroRecibo: e.target.value }))} />
+        </label>
         <div className="space-y-2">
           {form.detalles.map((d, index) => (
             <div key={d.idDetalle || d.idDisco || index} className="grid grid-cols-[1fr_120px] gap-3 items-center">
@@ -202,8 +212,10 @@ export default function LibroVentas() {
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [filters, setFilters] = useState({ desde: '', hasta: '', q: '' })
-  const [applied, setApplied] = useState({})
+  const hoy = fechaInputLocal()
+  const primerDiaMes = `${hoy.slice(0, 8)}01`
+  const [filters, setFilters] = useState({ desde: primerDiaMes, hasta: hoy, q: '' })
+  const [applied, setApplied] = useState({ desde: primerDiaMes, hasta: hoy })
   const [ventaPanel, setVentaPanel] = useState(null)
   const [selectedDisk, setSelectedDisk] = useState(null)
   const [ventaCancelar, setVentaCancelar] = useState(null)
@@ -225,7 +237,7 @@ export default function LibroVentas() {
   }, [])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { cargar({}) }, [cargar])
+  useEffect(() => { cargar({ desde: primerDiaMes, hasta: hoy }) }, [cargar, primerDiaMes, hoy])
 
   function aplicar() {
     const params = {}
