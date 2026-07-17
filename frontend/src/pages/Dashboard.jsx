@@ -276,7 +276,10 @@ export default function Dashboard() {
                     border: `1px solid ${dark ? '#292524' : '#e2e8f0'}`,
                     borderRadius: '0.75rem',
                     fontSize: '12px',
+                    color: '#FFFFFF',
                   }}
+                  labelStyle={{ color: '#FFFFFF' }}
+                  itemStyle={{ color: '#FFFFFF' }}
                   formatter={(value) => [fmtMonto(value), 'Ingresos']}
                   labelFormatter={(label) => `Período: ${label}`}
                 />
