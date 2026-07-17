@@ -66,6 +66,7 @@ public class VentaService {
     private final ClienteService clienteService;
     private final CostosVentaService costosVentaService;
     private final DiscoQrCopyService discoQrCopyService;
+    private final DiscoEstadoService discoEstadoService;
 
     private static final BigDecimal CIEN = new BigDecimal("100");
 
@@ -659,7 +660,7 @@ public class VentaService {
         );
         long restantes = discoQrCopyService.countAvailableCopies(preparado.disco().getIdDisco());
         preparado.disco().setCantidadCopias((int) restantes);
-        preparado.disco().setEstado(restantes > 0 ? EstadoDisco.DISPONIBLE : EstadoDisco.SIN_STOCK);
+        discoEstadoService.aplicar(preparado.disco());
         discoRepository.save(preparado.disco());
         return reserved.stream().map(copy -> String.valueOf(copy.getId())).collect(Collectors.joining(","));
     }
@@ -688,9 +689,7 @@ public class VentaService {
             return;
         }
         discoQrCopyService.restoreCopies(detalle.getCopyIdsSnapshot());
-        long disponibles = discoQrCopyService.countAvailableCopies(detalle.getDisco().getIdDisco());
-        detalle.getDisco().setCantidadCopias((int) disponibles);
-        detalle.getDisco().setEstado(disponibles > 0 ? EstadoDisco.DISPONIBLE : EstadoDisco.SIN_STOCK);
+        discoEstadoService.aplicar(detalle.getDisco());
         discoRepository.save(detalle.getDisco());
     }
 

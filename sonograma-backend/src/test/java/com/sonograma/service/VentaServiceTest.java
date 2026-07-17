@@ -39,6 +39,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class VentaServiceTest {
@@ -53,6 +55,7 @@ class VentaServiceTest {
     @Mock private PagoDeudaRepository pagoDeudaRepository;
     @Mock private ClienteService clienteService;
     @Mock private DiscoQrCopyService discoQrCopyService;
+    @Mock private DiscoEstadoService discoEstadoService;
 
     private VentaService ventaService;
 
@@ -69,8 +72,15 @@ class VentaServiceTest {
                 pagoDeudaRepository,
                 clienteService,
                 new CostosVentaService(),
-                discoQrCopyService
+                discoQrCopyService,
+                discoEstadoService
         );
+        lenient().doAnswer(invocation -> {
+            Disco disco = invocation.getArgument(0);
+            disco.setEstado(disco.getCantidadCopias() != null && disco.getCantidadCopias() > 0
+                    ? EstadoDisco.DISPONIBLE : EstadoDisco.VENDIDO);
+            return null;
+        }).when(discoEstadoService).aplicar(any(Disco.class));
     }
 
     @Test
@@ -109,7 +119,7 @@ class VentaServiceTest {
         assertThat(response.getMontoDeuda()).isEqualByComparingTo("1000.00");
         assertThat(response.getEstadoPago()).isEqualTo("PARCIAL");
         assertThat(disco.getCantidadCopias()).isZero();
-        assertThat(disco.getEstado()).isEqualTo(EstadoDisco.SIN_STOCK);
+        assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
 
         ArgumentCaptor<Deuda> deudaCaptor = ArgumentCaptor.forClass(Deuda.class);
         verify(deudaRepository).save(deudaCaptor.capture());

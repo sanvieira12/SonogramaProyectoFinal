@@ -27,6 +27,7 @@ public class DiscoService {
     private final DiscoRepository discoRepository;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
+    private final DiscoEstadoService discoEstadoService;
     private final CatalogPricingService catalogPricingService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
 
@@ -101,7 +102,10 @@ public class DiscoService {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         disco.setEstado(nuevoEstado);
-        if (nuevoEstado == EstadoDisco.SIN_STOCK || nuevoEstado == EstadoDisco.VENDIDO) {
+        if (nuevoEstado == EstadoDisco.VENDIDO) {
+            qrCopyService.marcarDisponiblesVendidas(disco);
+            disco.setCantidadCopias(0);
+        } else if (nuevoEstado == EstadoDisco.SIN_STOCK) {
             disco.setCantidadCopias(0);
             qrCopyService.synchronizeAvailableCopies(disco, 0);
         }
@@ -116,7 +120,7 @@ public class DiscoService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         qrCopyService.synchronizeAvailableCopies(disco, cantidad);
         disco.setCantidadCopias(cantidad);
-        recalcularEstado(disco);
+        discoEstadoService.aplicar(disco);
         return saveWithQr(disco);
     }
 
@@ -125,7 +129,7 @@ public class DiscoService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", idDisco));
         qrCopyService.changeCopyStatus(disco, idCopia, nuevoEstado);
         disco.setCantidadCopias((int) qrCopyService.countAvailableCopies(idDisco));
-        recalcularEstado(disco);
+        discoEstadoService.aplicar(disco);
         return saveWithQr(disco);
     }
 
@@ -172,21 +176,10 @@ public class DiscoService {
     private DiscoResponseDTO saveWithQr(Disco disco) {
         Disco saved = discoRepository.save(disco);
         qrCopyService.synchronize(saved);
-        recalcularEstado(saved);
+        discoEstadoService.aplicar(saved);
         saved = discoRepository.save(saved);
         preVentaCodeMatcher.linkPendingPreSales(saved);
         return toDTO(saved);
-    }
-
-    private void recalcularEstado(Disco disco) {
-        int disponibles = copiasDisponibles(disco);
-        if (disco.getEstado() == EstadoDisco.RESERVADO) {
-            if (disponibles == 0) {
-                disco.setEstado(EstadoDisco.SIN_STOCK);
-            }
-            return;
-        }
-        disco.setEstado(disponibles > 0 ? EstadoDisco.DISPONIBLE : EstadoDisco.SIN_STOCK);
     }
 
     private int copiasDisponibles(Disco disco) {

@@ -141,6 +141,13 @@ public class DiscoQrCopyService {
         return repository.saveAll(reserved);
     }
 
+    public void marcarDisponiblesVendidas(Disco disco) {
+        List<DiscoQrCopy> disponibles = repository.findByIdDiscoAndEstadoOrderByCopyNumber(
+            disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE);
+        disponibles.forEach(copy -> copy.setEstado(EstadoCopiaDisco.VENDIDO));
+        repository.saveAll(disponibles);
+    }
+
     public void restoreCopies(String copyIdsSnapshot) {
         if (copyIdsSnapshot == null || copyIdsSnapshot.isBlank()) {
             return;
