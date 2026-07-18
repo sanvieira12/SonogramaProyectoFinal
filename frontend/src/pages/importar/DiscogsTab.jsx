@@ -491,6 +491,7 @@ function ExcelLinks() {
                       <div>{row.manualCondition || '—'} · {row.manualPriceUyu ? `$${row.manualPriceUyu}` : 'sin precio'}</div>
                       <div>{row.manualGenre || '—'} · {row.sourceStatus || '—'}</div>
                       {row.internalCode && <div className="font-mono">{row.internalCode}</div>}
+                      {row.observation && <div className="text-amber-700 dark:text-amber-300">Obs: {row.observation}</div>}
                     </td>
                     <td className="px-3 py-2">{statusLabel(row)}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500 max-w-[240px]">{row.errorMessage || '—'}</td>

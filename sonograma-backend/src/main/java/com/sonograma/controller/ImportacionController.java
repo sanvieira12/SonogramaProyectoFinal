@@ -3,6 +3,7 @@ package com.sonograma.controller;
 import com.sonograma.dto.DiscoImportPreviewDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscogsImportJobDTO;
+import com.sonograma.exception.NegocioException;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
 import com.sonograma.service.importacion.DiscogsCoverService;
@@ -98,6 +99,9 @@ public class ImportacionController {
     @PostMapping({"/discogs/jobs", "/discogs/desde-excel"})
     public ResponseEntity<DiscogsImportJobDTO> discogsDesdeExcel(
             @RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new NegocioException("El archivo Excel está vacío");
+        }
         return ResponseEntity.ok(discogsImportJobService.createJob(file));
     }
 

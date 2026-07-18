@@ -3,11 +3,14 @@ package com.sonograma.service.importacion;
 import com.sonograma.enums.DiscogsImportRowStatus;
 import org.apache.poi.common.usermodel.HyperlinkType;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -123,6 +126,79 @@ class DiscogsExcelParserTest {
             assertThat(rows.get(1).status()).isEqualTo(DiscogsImportRowStatus.IGNORED);
             assertThat(rows.get(1).errorMessage()).contains("duplicado");
         }
+    }
+
+    @Test
+    void ignoresSupplierOnlyRowsCapturesUnmappedObservationsAndParsesThousandsPrice() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("LINK DE DISCOGS");
+            header.createCell(1).setCellValue("CONDICION");
+            header.createCell(2).setCellValue("PRECIO");
+            header.createCell(3).setCellValue("GENERO");
+            header.createCell(5).setCellValue("CODIGO");
+
+            var data = sheet.createRow(1);
+            var linkCell = data.createCell(0);
+            linkCell.setCellValue("Abrir ficha");
+            var link = workbook.getCreationHelper().createHyperlink(HyperlinkType.URL);
+            link.setAddress("https://www.discogs.com/es/release/123-title");
+            linkCell.setHyperlink(link);
+            data.createCell(1).setCellValue("VG+");
+            data.createCell(2).setCellValue("$1.400");
+            data.createCell(3).setCellValue("Techno");
+            data.createCell(5).setCellValue("FP");
+            data.createCell(7).setCellValue("rayado");
+
+            sheet.createRow(2).createCell(5).setCellValue("FP");
+            workbook.write(output);
+
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "supplier-code.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).hasSize(1);
+            assertThat(parsed.ignoredBlankRows()).isEqualTo(1);
+            assertThat(parsed.rows().get(0).manualPriceUyu()).isEqualByComparingTo(new BigDecimal("1400"));
+            assertThat(parsed.rows().get(0).observation()).isEqualTo("H2: rayado");
+            assertThat(parsed.rows().get(0).urlSource()).isEqualTo("hyperlink");
+        }
+    }
+
+    @Test
+    void parsesTheRealFedePintosWorkbookEndToEndAtParserBoundary() throws Exception {
+        Path workbookPath = Path.of(System.getProperty(
+                "discogs.workbook",
+                "/Users/admin/Downloads/DISCOS FEDE PINTOS.xlsx"
+        ));
+        Assumptions.assumeTrue(Files.isRegularFile(workbookPath),
+                "Real workbook not available: " + workbookPath);
+
+        DiscogsExcelParser.ParsedSheet parsed = parser.parse(new MockMultipartFile(
+                "file",
+                workbookPath.getFileName().toString(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                Files.readAllBytes(workbookPath)
+        ));
+
+        assertThat(parsed.physicalExcelLastRow()).isEqualTo(1000);
+        assertThat(parsed.ignoredBlankRows()).isEqualTo(955);
+        assertThat(parsed.rows()).hasSize(44);
+        assertThat(parsed.rows()).filteredOn(row -> "release".equals(row.discogsType())).hasSize(24);
+        assertThat(parsed.rows()).filteredOn(row -> "master".equals(row.discogsType())).hasSize(20);
+        assertThat(parsed.rows()).filteredOn(row -> "hyperlink".equals(row.urlSource())).hasSize(44);
+        assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.PARSED).hasSize(40);
+        assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.SOLD).hasSize(3);
+        assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.IGNORED).hasSize(1);
+        assertThat(parsed.rows()).noneMatch(row -> row.manualGenre() != null
+                && row.manualGenre().contains("DUMMYFUNCTION"));
+        assertThat(parsed.rows()).anyMatch(row -> new BigDecimal("1400").equals(row.manualPriceUyu()));
+        assertThat(parsed.rows()).anyMatch(row -> "H4: rayado".equals(row.observation()));
+        assertThat(parsed.rows()).anyMatch(row -> "G10: ROTO".equals(row.observation()));
+        assertThat(parsed.rows()).noneMatch(row -> "FP".equals(row.internalCode())
+                && row.discogsId() == null);
     }
 
     private MockMultipartFile workbookFixture() throws Exception {

@@ -71,6 +71,9 @@ public class DiscogsImportRow {
     @Column(name = "manual_genre", length = 255)
     private String manualGenre;
 
+    @Column(name = "observation", columnDefinition = "TEXT")
+    private String observation;
+
     @Column(name = "source_status", length = 50)
     private String sourceStatus;
 

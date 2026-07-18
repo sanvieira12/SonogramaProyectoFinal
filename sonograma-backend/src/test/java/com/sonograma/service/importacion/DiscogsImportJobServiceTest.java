@@ -10,7 +10,9 @@ import com.sonograma.enums.DiscogsImportRowStatus;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
+import com.sonograma.service.AudioPreviewService;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,14 +22,18 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +55,9 @@ class DiscogsImportJobServiceTest {
 
     @MockBean
     private DiscogsApiClient apiClient;
+
+    @MockBean
+    private AudioPreviewService audioPreviewService;
 
     @BeforeEach
     void clean() {
@@ -143,6 +152,132 @@ class DiscogsImportJobServiceTest {
             assertThat(disco.getCodigoInterno()).isEqualTo("CAT-1");
             assertThat(disco.getProcedencia()).isEqualTo("Discogs");
         });
+
+        service.importParsedRows(job.getIdDiscogsImportJob());
+        assertThat(discoRepository.count()).isEqualTo(1);
+        assertThat(discoRepository.findAll()).singleElement()
+                .extracting(disco -> disco.getCantidadCopias())
+                .isEqualTo(2);
+    }
+
+    @Test
+    void repeatedSupplierOriginCodeDoesNotMergeDifferentDiscogsRows() {
+        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("supplier-code.xlsx")
+                .nombreHoja("Links")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+
+        DiscogsImportRow first = parsedRow(job, 2, 2001L);
+        first.setInternalCode("FP");
+        first.setArtist("First Artist");
+        first.setTitle("First Album");
+        first.setNormalizedDiscogsUrl("https://discogs.com/release/2001");
+
+        DiscogsImportRow second = parsedRow(job, 3, 2002L);
+        second.setInternalCode("FP");
+        second.setArtist("Second Artist");
+        second.setTitle("Second Album");
+        second.setNormalizedDiscogsUrl("https://discogs.com/release/2002");
+
+        rowRepository.saveAll(List.of(first, second));
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(2);
+        assertThat(discoRepository.count()).isEqualTo(2);
+        assertThat(discoRepository.findAll())
+                .extracting(disco -> disco.getCodigoInterno())
+                .containsOnly("FP");
+    }
+
+    @Test
+    void importsTheRealFedePintosWorkbookIntoCatalogStockWithoutPartialRows() throws Exception {
+        Path workbookPath = Path.of(System.getProperty(
+                "discogs.workbook",
+                "/Users/admin/Downloads/DISCOS FEDE PINTOS.xlsx"
+        ));
+        Assumptions.assumeTrue(Files.isRegularFile(workbookPath),
+                "Real workbook not available: " + workbookPath);
+
+        when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
+        when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
+                .thenAnswer(invocation -> successResult(invocation.getArgument(2)));
+
+        DiscogsImportJobDTO created = service.createJob(new MockMultipartFile(
+                "file",
+                workbookPath.getFileName().toString(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                Files.readAllBytes(workbookPath)
+        ));
+
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            DiscogsImportJobDTO current = service.getJob(created.getId());
+            assertThat(current.getStatus()).isEqualTo("completed");
+            assertThat(current.getTotalRowsRead()).isEqualTo(44);
+            assertThat(current.getMetadataFetched()).isEqualTo(40);
+            assertThat(current.getReadyToImport()).isEqualTo(40);
+        });
+
+        DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
+
+        assertThat(imported.getImported()).isEqualTo(40);
+        assertThat(imported.getRows()).filteredOn(row -> "imported".equals(row.getStatus())).hasSize(40);
+        assertThat(imported.getRows()).filteredOn(row -> "sold".equals(row.getStatus())).hasSize(3);
+        assertThat(imported.getRows()).filteredOn(row -> "ignored".equals(row.getStatus())).hasSize(1);
+        assertThat(imported.getRows()).filteredOn(row -> row.getImportedCatalogProductId() != null).hasSize(40);
+        assertThat(discoRepository.findAll()).allSatisfy(disco -> {
+            assertThat(disco.getCantidadCopias()).isPositive();
+            assertThat(disco.getDiscogsUrl()).isNotBlank();
+            assertThat(disco.getArtista()).isNotBlank();
+            assertThat(disco.getAlbum()).isNotBlank();
+        });
+
+        int totalCopies = discoRepository.findAll().stream()
+                .mapToInt(disco -> disco.getCantidadCopias() == null ? 0 : disco.getCantidadCopias())
+                .sum();
+        assertThat(totalCopies).isEqualTo(40);
+
+        service.importParsedRows(created.getId());
+        int copiesAfterRepeat = discoRepository.findAll().stream()
+                .mapToInt(disco -> disco.getCantidadCopias() == null ? 0 : disco.getCantidadCopias())
+                .sum();
+        assertThat(copiesAfterRepeat).isEqualTo(totalCopies);
+    }
+
+    @Test
+    void rollsBackAllCatalogRowsWhenOneRowFails() {
+        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("rollback.xlsx")
+                .nombreHoja("Links")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        rowRepository.saveAll(List.of(
+                parsedRow(job, 2, 3001L),
+                parsedRow(job, 3, 3002L)
+        ));
+
+        int[] calls = {0};
+        doAnswer(invocation -> {
+            if (++calls[0] == 2) {
+                throw new IllegalStateException("fallo de prueba al guardar audio");
+            }
+            return null;
+        }).when(audioPreviewService).guardarDesdeTracks(anyLong(), any());
+
+        assertThatThrownBy(() -> service.importParsedRows(job.getIdDiscogsImportJob()))
+                .isInstanceOf(com.sonograma.exception.NegocioException.class)
+                .hasMessageContaining("Fila Excel 3")
+                .hasMessageContaining("LINK DE DISCOGS")
+                .hasMessageContaining("fallo de prueba");
+
+        assertThat(discoRepository.count()).isZero();
+        assertThat(rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(
+                job.getIdDiscogsImportJob()))
+                .allSatisfy(row -> {
+                    assertThat(row.getStatus()).isEqualTo(DiscogsImportRowStatus.PARSED);
+                    assertThat(row.getImportedCatalogProduct()).isNull();
+                });
     }
 
     private MockMultipartFile fixture() throws Exception {
@@ -168,6 +303,10 @@ class DiscogsImportJobServiceTest {
     }
 
     private DiscogsApiClient.FetchResult successResult() {
+        return successResult(999L);
+    }
+
+    private DiscogsApiClient.FetchResult successResult(long releaseId) {
         return new DiscogsApiClient.FetchResult(
                 true,
                 false,
@@ -175,9 +314,9 @@ class DiscogsImportJobServiceTest {
                 0,
                 null,
                 null,
-                999L,
-                "Artist",
-                "Album",
+                releaseId,
+                "Artist " + releaseId,
+                "Album " + releaseId,
                 2001,
                 "Electronic",
                 "Label",

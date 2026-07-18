@@ -3,6 +3,7 @@ package com.sonograma.service.importacion;
 import com.sonograma.enums.DiscogsImportRowStatus;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.ss.util.CellReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -75,6 +76,7 @@ public class DiscogsExcelParser {
                     row.rawPrice(),
                     row.manualPriceUyu(),
                     row.manualGenre(),
+                    row.observation(),
                     row.sourceStatus(),
                     row.internalCode(),
                     DiscogsImportRowStatus.IGNORED,
@@ -89,16 +91,17 @@ public class DiscogsExcelParser {
             int excelRowNumber,
             Map<String, Integer> columns,
             FormulaEvaluator evaluator
-    ) {
+    ) throws IOException {
         String artist = value(row, columns.get("artist"), evaluator);
         String title = value(row, columns.get("title"), evaluator);
         String rawCondition = value(row, columns.get("condition"), evaluator);
         String manualCondition = blank(rawCondition) ? null : rawCondition.trim();
         String rawPrice = value(row, columns.get("price"), evaluator);
-        PriceParse price = parsePrice(rawPrice);
+        PriceParse price = parsePrice(rawPrice, excelRowNumber, columns.get("price"));
         String manualGenre = value(row, columns.get("genre"), evaluator);
         String sourceStatus = normalizeStatus(value(row, columns.get("status"), evaluator));
         String internalCode = value(row, columns.get("code"), evaluator);
+        String observation = observation(row, columns, evaluator);
         String hyperlinkUrl = null;
         String visibleCellValue = null;
         String urlSource = null;
@@ -153,6 +156,7 @@ public class DiscogsExcelParser {
                     rawPrice,
                     price.value(),
                     manualGenre,
+                    observation,
                     sourceStatus,
                     internalCode,
                     rowStatusForSourceStatus(sourceStatus),
@@ -176,6 +180,7 @@ public class DiscogsExcelParser {
                     rawPrice,
                     price.value(),
                     manualGenre,
+                    observation,
                     sourceStatus,
                     internalCode,
                     DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
@@ -198,6 +203,7 @@ public class DiscogsExcelParser {
                 rawPrice,
                 price.value(),
                 manualGenre,
+                observation,
                 sourceStatus,
                 internalCode,
                 DiscogsImportRowStatus.IGNORED,
@@ -225,6 +231,8 @@ public class DiscogsExcelParser {
                     columns.putIfAbsent("price", cell.getColumnIndex());
                 } else if (containsAny(header, "genero", "genre")) {
                     columns.putIfAbsent("genre", cell.getColumnIndex());
+                } else if (containsAny(header, "observacion", "nota", "notes", "comment", "comentario")) {
+                    columns.putIfAbsent("observation", cell.getColumnIndex());
                 } else if (containsAny(header, "estado", "status")) {
                     columns.putIfAbsent("status", cell.getColumnIndex());
                 } else if (containsAny(header, "codigo", "code")) {
@@ -238,33 +246,54 @@ public class DiscogsExcelParser {
         throw new IOException("No se pudo detectar la fila de encabezados del Excel");
     }
 
-    private boolean rowHasMeaningfulData(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator) {
+    private boolean rowHasMeaningfulData(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator)
+            throws IOException {
         if (row == null) return false;
-        for (Integer column : columns.values()) {
-            Cell cell = row.getCell(column);
-            if (cell != null && (cell.getHyperlink() != null || !cellValue(cell, evaluator).isBlank())) {
-                return true;
-            }
-        }
         for (Cell cell : row) {
-            if (cell.getHyperlink() != null) {
-                return true;
-            }
+            if (cell.getHyperlink() != null) return true;
         }
-        return false;
+        if (!blank(value(row, columns.get("url"), evaluator))) return true;
+        return !blank(value(row, columns.get("artist"), evaluator))
+                || !blank(value(row, columns.get("title"), evaluator));
     }
 
-    private String value(Row row, Integer column, FormulaEvaluator evaluator) {
+    private String value(Row row, Integer column, FormulaEvaluator evaluator) throws IOException {
         if (row == null || column == null) return null;
         String value = cellValue(row.getCell(column), evaluator).trim();
         return value.isBlank() ? null : value;
     }
 
-    private String cellValue(Cell cell, FormulaEvaluator evaluator) {
+    private String cellValue(Cell cell, FormulaEvaluator evaluator) throws IOException {
         if (cell == null) return "";
-        CellType type = cell.getCellType() == CellType.FORMULA
-                ? evaluator.evaluateFormulaCell(cell)
-                : cell.getCellType();
+        if (cell.getCellType() == CellType.FORMULA) {
+            CellType cachedType = cell.getCachedFormulaResultType();
+            if (cachedType != CellType.BLANK && cachedType != CellType.ERROR) {
+                return typedCellValue(cell, cachedType);
+            }
+            try {
+                CellValue evaluated = evaluator.evaluate(cell);
+                if (evaluated == null || evaluated.getCellType() == CellType.ERROR) {
+                    throw new ExcelImportException(
+                            cell.getRowIndex() + 1,
+                            columnName(cell),
+                            "[fórmula sin valor en caché]",
+                            "La fórmula no pudo evaluarse y no tiene un resultado utilizable.");
+                }
+                return typedFormulaValue(evaluated);
+            } catch (ExcelImportException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                throw new ExcelImportException(
+                        cell.getRowIndex() + 1,
+                        columnName(cell),
+                        "[fórmula sin valor en caché]",
+                        "La fórmula de Excel no es compatible con el importador y no tiene un valor calculado disponible.");
+            }
+        }
+        return typedCellValue(cell, cell.getCellType());
+    }
+
+    private String typedCellValue(Cell cell, CellType type) {
         return switch (type) {
             case STRING -> cell.getStringCellValue().trim();
             case NUMERIC -> BigDecimal.valueOf(cell.getNumericCellValue())
@@ -272,6 +301,37 @@ public class DiscogsExcelParser {
             case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
             default -> "";
         };
+    }
+
+    private String typedFormulaValue(CellValue value) {
+        return switch (value.getCellType()) {
+            case STRING -> value.getStringValue() == null ? "" : value.getStringValue().trim();
+            case NUMERIC -> BigDecimal.valueOf(value.getNumberValue())
+                    .stripTrailingZeros().toPlainString();
+            case BOOLEAN -> String.valueOf(value.getBooleanValue());
+            default -> "";
+        };
+    }
+
+    private String observation(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator)
+            throws IOException {
+        List<String> values = new ArrayList<>();
+        String explicit = value(row, columns.get("observation"), evaluator);
+        if (!blank(explicit)) values.add(explicit);
+
+        Set<Integer> mappedColumns = new HashSet<>(columns.values());
+        for (Cell cell : row) {
+            if (mappedColumns.contains(cell.getColumnIndex())) continue;
+            String extra = cellValue(cell, evaluator).trim();
+            if (!extra.isBlank()) {
+                values.add(columnName(cell) + (cell.getRowIndex() + 1) + ": " + extra);
+            }
+        }
+        return values.isEmpty() ? null : String.join("; ", values);
+    }
+
+    private String columnName(Cell cell) {
+        return CellReference.convertNumToColString(cell.getColumnIndex());
     }
 
     private String normalize(String value) {
@@ -312,26 +372,57 @@ public class DiscogsExcelParser {
         return new ArtistTitle(blankToNull(parts[0]), blankToNull(parts[1]));
     }
 
-    private PriceParse parsePrice(String rawPrice) {
+    private PriceParse parsePrice(String rawPrice, int excelRowNumber, Integer columnIndex) {
         if (blank(rawPrice)) return new PriceParse(null, null);
         String normalized = rawPrice.trim().toUpperCase(Locale.ROOT);
         if (normalized.contains("SIN PRECIO") || normalized.equals("S/P")) {
-            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
+            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+                    "El precio no contiene un valor numérico."));
         }
         String numeric = rawPrice.replaceAll("[^0-9,.-]", "").trim();
         if (numeric.isBlank()) {
-            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
-        }
-        if (numeric.contains(",") && !numeric.contains(".")) {
-            numeric = numeric.replace(",", ".");
-        } else {
-            numeric = numeric.replace(",", "");
+            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+                    "El precio no contiene un valor numérico."));
         }
         try {
-            return new PriceParse(new BigDecimal(numeric), null);
+            return new PriceParse(new BigDecimal(normalizePriceNumber(numeric)), null);
         } catch (NumberFormatException ex) {
-            return new PriceParse(null, "Precio sin valor numérico: " + rawPrice);
+            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+                    "El precio no pudo convertirse a un número."));
         }
+    }
+
+    private String normalizePriceNumber(String numeric) {
+        int comma = numeric.lastIndexOf(',');
+        int dot = numeric.lastIndexOf('.');
+        if (comma >= 0 && dot >= 0) {
+            if (comma > dot) {
+                return numeric.replace(".", "").replace(',', '.');
+            }
+            return numeric.replace(",", "");
+        }
+        if (comma >= 0) {
+            return separatorValue(numeric, ',');
+        }
+        if (dot >= 0) {
+            return separatorValue(numeric, '.');
+        }
+        return numeric;
+    }
+
+    private String separatorValue(String numeric, char separator) {
+        int separatorIndex = numeric.lastIndexOf(separator);
+        int decimals = numeric.length() - separatorIndex - 1;
+        if (decimals == 3 && separatorIndex > 0) {
+            return numeric.replace(String.valueOf(separator), "");
+        }
+        return separator == ',' ? numeric.replace(',', '.') : numeric;
+    }
+
+    private String cellIssue(int row, Integer columnIndex, String value, String explanation) {
+        String column = columnIndex == null ? "?" : CellReference.convertNumToColString(columnIndex);
+        return "Fila Excel " + row + ", columna " + column + ", valor \"" + value
+                + "\": " + explanation;
     }
 
     private String normalizeStatus(String value) {
@@ -383,6 +474,7 @@ public class DiscogsExcelParser {
             String rawPrice,
             BigDecimal manualPriceUyu,
             String manualGenre,
+            String observation,
             String sourceStatus,
             String internalCode,
             DiscogsImportRowStatus status,

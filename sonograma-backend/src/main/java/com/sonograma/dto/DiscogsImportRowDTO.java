@@ -26,6 +26,7 @@ public class DiscogsImportRowDTO {
     private String rawPrice;
     private BigDecimal manualPriceUyu;
     private String manualGenre;
+    private String observation;
     private String sourceStatus;
     private String internalCode;
     private Integer year;
