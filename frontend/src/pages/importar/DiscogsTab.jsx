@@ -229,7 +229,10 @@ function stepLabel(job, estado, processing) {
 function statusLabel(row) {
   if (row.status === 'pending_retry') return 'Pendiente de reintento'
   if (row.status === 'fetching_discogs') return 'Consultando Discogs'
-  if (row.status === 'parsed' && row.resolvedReleaseId) return row.imageUrl ? 'Metadata obtenida' : 'Portada faltante'
+  if (row.status === 'parsed' && row.resolvedReleaseId) {
+    if (!row.imageUrl) return 'Portada faltante'
+    return row.youtubeLinksFound > 0 ? 'Metadata + YouTube' : 'Metadata sin YouTube'
+  }
   if (row.status === 'parsed') return 'Metadata pendiente'
   if (row.status === 'sold') return 'Fila vendida omitida'
   if (row.status === 'reserved') return 'Fila reservada omitida'
@@ -402,6 +405,7 @@ function ExcelLinks() {
             {[
               ['Filas reales', job.realRowsRead ?? job.totalRowsRead],
               ['Filas vacías ignoradas', job.blankRowsIgnored],
+              ['Columnas extra', job.extraColumns?.length || 0],
               ['Release IDs', job.validReleaseUrls],
               ['Master IDs', job.validMasterUrls],
               ['Texto Discogs [rID]', job.visibleDiscogsTextRows],
@@ -426,6 +430,12 @@ function ExcelLinks() {
               </div>
             ))}
           </div>
+
+          {job.extraColumns?.length > 0 && (
+            <p className="text-xs text-slate-500 dark:text-stone-400">
+              Columnas no reconocidas (sus valores se conservaron en observaciones): {job.extraColumns.join(', ')}
+            </p>
+          )}
 
           {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
           {job.rateLimited > 0 && (
@@ -459,7 +469,7 @@ function ExcelLinks() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950">
-                  {['Fila', 'URL extraída', 'Fuente', 'Tipo / ID', 'Artista / Título', 'Excel', 'Estado', 'Detalle', ''].map(h => (
+                  {['Fila', 'Portada', 'URL extraída', 'Fuente', 'Tipo / ID', 'Discogs', 'Metadata', 'Excel', 'Estado', 'Detalle', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -468,6 +478,12 @@ function ExcelLinks() {
                 {filteredRows.map(row => (
                   <tr key={row.id} className={['failed', 'rate_limited', 'pending_retry'].includes(row.status) ? 'bg-red-50 dark:bg-red-900/10' : ''}>
                     <td className="px-3 py-2 font-mono">{row.sourceExcelRowNumber}</td>
+                    <td className="px-3 py-2">
+                      {row.imageUrl ? (
+                        <img src={row.imageUrl} alt="" loading="lazy"
+                          className="w-10 h-10 rounded object-cover bg-slate-100 dark:bg-stone-800" />
+                      ) : '—'}
+                    </td>
                     <td className="px-3 py-2 max-w-[240px]">
                       {row.normalizedDiscogsUrl ? (
                         <a href={row.normalizedDiscogsUrl} target="_blank" rel="noreferrer"
@@ -486,6 +502,14 @@ function ExcelLinks() {
                     <td className="px-3 py-2">
                       <div className="font-medium text-slate-800 dark:text-stone-200">{row.artist || '—'}</div>
                       <div className="text-slate-500 dark:text-stone-500">{row.title || '—'}</div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-stone-500">
+                      <div>{row.genre || row.manualGenre || '—'}</div>
+                      <div>{row.style || '—'} · {row.format || '—'}</div>
+                      <div>{row.country || '—'} · {row.label || '—'} · {row.year || '—'}</div>
+                      <div className={row.youtubeLinksFound > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}>
+                        YouTube: {row.youtubeLinksFound > 0 ? `${row.youtubeLinksFound} link(s)` : 'sin link'}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500">
                       <div>{row.manualCondition || '—'} · {row.manualPriceUyu ? `$${row.manualPriceUyu}` : 'sin precio'}</div>

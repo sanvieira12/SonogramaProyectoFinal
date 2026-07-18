@@ -33,6 +33,11 @@ public class DiscogsImportRowDTO {
     private String genre;
     private String label;
     private String catalogNumber;
+    private String country;
+    private String style;
+    private String format;
+    private String tracklist;
+    private int youtubeLinksFound;
     private String imageUrl;
     private String status;
     private String errorMessage;

@@ -95,6 +95,7 @@ class DiscogsExcelParserTest {
             assertThat(copiedText.manualGenre()).isEqualTo("Techno");
             assertThat(copiedText.sourceStatus()).isEqualTo("DISPONIBLE");
             assertThat(copiedText.internalCode()).isEqualTo("LOTE-A");
+            assertThat(parsed.extraColumns()).isEmpty();
 
             var soldRow = parsed.rows().get(1);
             assertThat(soldRow.discogsType()).isEqualTo("release");
@@ -106,7 +107,30 @@ class DiscogsExcelParserTest {
     }
 
     @Test
-    void marksRepeatedDiscogsIdsAsDuplicates() throws Exception {
+    void reportsUnknownHeadersAndPreservesTheirValuesInObservations() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("URL");
+            header.createCell(1).setCellValue("Vendedor interno");
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellValue("https://discogs.com/release/456");
+            row.createCell(1).setCellValue("Fede");
+            workbook.write(output);
+
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "extra-column.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.extraColumns()).containsExactly("Vendedor interno");
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow ->
+                    assertThat(parsedRow.observation()).contains("B2: Fede"));
+        }
+    }
+
+    @Test
+    void preservesRepeatedDiscogsIdsAsSeparatePhysicalCopies() throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Discogs");
@@ -121,8 +145,40 @@ class DiscogsExcelParserTest {
             var rows = parser.parse(file).rows();
 
             assertThat(rows.get(0).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
-            assertThat(rows.get(1).status()).isEqualTo(DiscogsImportRowStatus.IGNORED);
-            assertThat(rows.get(1).errorMessage()).contains("duplicado");
+            assertThat(rows.get(1).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
+            assertThat(rows.get(1).errorMessage()).isNull();
+        }
+    }
+
+    @Test
+    void readsFormulaHyperlinksAndSurvivesUnsupportedFormulaCells() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("URL DISCOGS");
+            header.createCell(1).setCellValue("Estilo");
+            header.createCell(2).setCellValue("Precio venta");
+
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellFormula(
+                    "HYPERLINK(\"https://www.discogs.com/release/987-title\",\"Abrir\")");
+            row.createCell(1).setCellFormula("IFERROR(_xlfn.DISCOS_STYLE(),\"Techno\")");
+            row.createCell(2).setCellValue("$1.400");
+
+            workbook.write(output);
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "formula-links.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow -> {
+                assertThat(parsedRow.discogsId()).isEqualTo(987L);
+                assertThat(parsedRow.urlSource()).isEqualTo("hyperlink_formula");
+                assertThat(parsedRow.hyperlinkUrl()).contains("/release/987-title");
+                assertThat(parsedRow.manualGenre()).isNotBlank();
+                assertThat(parsedRow.manualPriceUyu()).isEqualByComparingTo("1400");
+                assertThat(parsedRow.manualGenre()).doesNotContain("DUMMYFUNCTION");
+            });
         }
     }
 
@@ -160,7 +216,7 @@ class DiscogsExcelParserTest {
             assertThat(parsed.rows()).hasSize(1);
             assertThat(parsed.ignoredBlankRows()).isEqualTo(1);
             assertThat(parsed.rows().get(0).manualPriceUyu()).isEqualByComparingTo(new BigDecimal("1400"));
-            assertThat(parsed.rows().get(0).observation()).isEqualTo("H2: rayado");
+            assertThat(parsed.rows().get(0).observation()).contains("rayado");
             assertThat(parsed.rows().get(0).urlSource()).isEqualTo("hyperlink");
         }
     }
@@ -183,14 +239,16 @@ class DiscogsExcelParserTest {
             assertThat(parsed.rows()).filteredOn(row -> "release".equals(row.discogsType())).hasSize(24);
             assertThat(parsed.rows()).filteredOn(row -> "master".equals(row.discogsType())).hasSize(20);
             assertThat(parsed.rows()).filteredOn(row -> "hyperlink".equals(row.urlSource())).hasSize(44);
-            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.PARSED).hasSize(40);
+            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.PARSED).hasSize(41);
             assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.SOLD).hasSize(3);
-            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.IGNORED).hasSize(1);
+            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.IGNORED).isEmpty();
             assertThat(parsed.rows()).noneMatch(row -> row.manualGenre() != null
                     && row.manualGenre().contains("DUMMYFUNCTION"));
             assertThat(parsed.rows()).anyMatch(row -> new BigDecimal("1400").equals(row.manualPriceUyu()));
-            assertThat(parsed.rows()).anyMatch(row -> "H4: rayado".equals(row.observation()));
-            assertThat(parsed.rows()).anyMatch(row -> "G10: ROTO".equals(row.observation()));
+            assertThat(parsed.rows()).anyMatch(row -> row.observation() != null
+                    && row.observation().contains("rayado"));
+            assertThat(parsed.rows()).anyMatch(row -> row.observation() != null
+                    && row.observation().contains("ROTO"));
             assertThat(parsed.rows()).noneMatch(row -> "FP".equals(row.internalCode())
                     && row.discogsId() == null);
         }

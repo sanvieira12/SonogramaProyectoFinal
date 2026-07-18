@@ -32,29 +32,19 @@ import java.util.UUID;
 public class DiscogsImportService {
 
     private final DiscoRepository discoRepository;
-    private final DiscogsLinkParser discogsLinkParser;
     private final DiscogsApiClient discogsApiClient;
-    private final DiscogsCoverService coverService;
+    private final DiscogsEnrichmentService enrichmentService;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
 
     public DiscoImportPreviewDTO fetchDesdeLink(String url) {
-        Optional<DiscogsLinkParser.DiscogsLink> link = discogsLinkParser.parse(url);
-        if (link.isEmpty()) {
-            return errorPreview("No se pudo extraer un ID release/master de la URL: " + url);
+        DiscogsEnrichmentService.EnrichmentResult enriched = enrichmentService.enrich(
+                url, discogsApiClient.newSession());
+        if (!enriched.success()) {
+            return errorPreview(enriched.errorMessage());
         }
-        log.info("URL Discogs detectada: {} -> {} id={}",
-                url, link.get().type(), link.get().id());
-        DiscogsApiClient.FetchResult result = discogsApiClient.fetch(
-                discogsApiClient.newSession(),
-                link.get().type(),
-                link.get().id()
-        );
-        if (!result.success()) {
-            return errorPreview(result.errorMessage());
-        }
-        return toPreview(result, link.get().normalizedUrl(), downloadCover(result));
+        return toPreview(enriched.metadata(), enriched.normalizedUrl(), enriched.cover());
     }
 
     @Transactional
@@ -119,13 +109,6 @@ public class DiscogsImportService {
                 .notas(cover.warning() == null ? null : "Portada: " + cover.warning())
                 .errores(new ArrayList<>())
                 .build();
-    }
-
-    private DiscogsCoverService.CoverResult downloadCover(DiscogsApiClient.FetchResult result) {
-        if (result.resolvedReleaseId() == null) {
-            return DiscogsCoverService.CoverResult.missing("No se pudo resolver el release");
-        }
-        return coverService.download(result.imageUrl(), result.resolvedReleaseId());
     }
 
     private DiscoRequestDTO toRequest(DiscoImportPreviewDTO preview) {

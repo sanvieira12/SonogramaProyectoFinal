@@ -26,7 +26,6 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -91,6 +90,22 @@ class DiscogsImportJobServiceTest {
         assertThat(imported.getImported()).isZero();
         assertThat(imported.getRows()).singleElement()
                 .satisfies(row -> assertThat(row.getImportedCatalogProductId()).isNull());
+    }
+
+    @Test
+    void reuploadingTheSameWorkbookReusesTheExistingJob() throws Exception {
+        when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
+        when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
+                .thenReturn(successResult());
+
+        MockMultipartFile workbook = fixture();
+        DiscogsImportJobDTO first = service.createJob(workbook);
+        DiscogsImportJobDTO second = service.createJob(new MockMultipartFile(
+                "file", workbook.getOriginalFilename(), workbook.getContentType(), workbook.getBytes()
+        ));
+
+        assertThat(second.getId()).isEqualTo(first.getId());
+        assertThat(jobRepository.count()).isEqualTo(1);
     }
 
     @Test
@@ -211,17 +226,17 @@ class DiscogsImportJobServiceTest {
             DiscogsImportJobDTO current = service.getJob(created.getId());
             assertThat(current.getStatus()).isEqualTo("completed");
             assertThat(current.getTotalRowsRead()).isEqualTo(44);
-            assertThat(current.getMetadataFetched()).isEqualTo(40);
-            assertThat(current.getReadyToImport()).isEqualTo(40);
+            assertThat(current.getMetadataFetched()).isEqualTo(41);
+            assertThat(current.getReadyToImport()).isEqualTo(41);
         });
 
         DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
 
-        assertThat(imported.getImported()).isEqualTo(40);
-        assertThat(imported.getRows()).filteredOn(row -> "imported".equals(row.getStatus())).hasSize(40);
+        assertThat(imported.getImported()).isEqualTo(41);
+        assertThat(imported.getRows()).filteredOn(row -> "imported".equals(row.getStatus())).hasSize(41);
         assertThat(imported.getRows()).filteredOn(row -> "sold".equals(row.getStatus())).hasSize(3);
-        assertThat(imported.getRows()).filteredOn(row -> "ignored".equals(row.getStatus())).hasSize(1);
-        assertThat(imported.getRows()).filteredOn(row -> row.getImportedCatalogProductId() != null).hasSize(40);
+        assertThat(imported.getRows()).filteredOn(row -> "ignored".equals(row.getStatus())).isEmpty();
+        assertThat(imported.getRows()).filteredOn(row -> row.getImportedCatalogProductId() != null).hasSize(41);
         assertThat(discoRepository.findAll()).allSatisfy(disco -> {
             assertThat(disco.getCantidadCopias()).isPositive();
             assertThat(disco.getDiscogsUrl()).isNotBlank();
@@ -232,7 +247,7 @@ class DiscogsImportJobServiceTest {
         int totalCopies = discoRepository.findAll().stream()
                 .mapToInt(disco -> disco.getCantidadCopias() == null ? 0 : disco.getCantidadCopias())
                 .sum();
-        assertThat(totalCopies).isEqualTo(40);
+        assertThat(totalCopies).isEqualTo(41);
 
         service.importParsedRows(created.getId());
         int copiesAfterRepeat = discoRepository.findAll().stream()
@@ -242,7 +257,7 @@ class DiscogsImportJobServiceTest {
     }
 
     @Test
-    void rollsBackAllCatalogRowsWhenOneRowFails() {
+    void continuesImportingOtherRowsWhenOneRowFails() {
         DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
                 .nombreArchivo("rollback.xlsx")
                 .nombreHoja("Links")
@@ -261,19 +276,22 @@ class DiscogsImportJobServiceTest {
             return null;
         }).when(audioPreviewService).guardarDesdeTracks(anyLong(), any());
 
-        assertThatThrownBy(() -> service.importParsedRows(job.getIdDiscogsImportJob()))
-                .isInstanceOf(com.sonograma.exception.NegocioException.class)
-                .hasMessageContaining("Fila Excel 3")
-                .hasMessageContaining("LINK DE DISCOGS")
-                .hasMessageContaining("fallo de prueba");
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
 
-        assertThat(discoRepository.count()).isZero();
+        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getFailed()).isEqualTo(1);
+        assertThat(discoRepository.count()).isEqualTo(1);
         assertThat(rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(
                 job.getIdDiscogsImportJob()))
-                .allSatisfy(row -> {
-                    assertThat(row.getStatus()).isEqualTo(DiscogsImportRowStatus.PARSED);
-                    assertThat(row.getImportedCatalogProduct()).isNull();
-                });
+                .satisfiesExactly(
+                        first -> assertThat(first.getStatus()).isEqualTo(DiscogsImportRowStatus.IMPORTED),
+                        second -> {
+                            assertThat(second.getStatus()).isEqualTo(DiscogsImportRowStatus.FAILED);
+                            assertThat(second.getErrorMessage())
+                                    .contains("Fila Excel 3")
+                                    .contains("LINK DE DISCOGS")
+                                    .contains("fallo de prueba");
+                        });
     }
 
     private MockMultipartFile fixture() throws Exception {

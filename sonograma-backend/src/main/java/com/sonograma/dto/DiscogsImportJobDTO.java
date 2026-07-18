@@ -45,5 +45,6 @@ public class DiscogsImportJobDTO {
     private int qrEntriesCreated;
     private int pending;
     private int readyToImport;
+    private List<String> extraColumns;
     private List<DiscogsImportRowDTO> rows;
 }

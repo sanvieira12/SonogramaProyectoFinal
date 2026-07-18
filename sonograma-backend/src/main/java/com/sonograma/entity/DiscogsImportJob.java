@@ -24,6 +24,12 @@ public class DiscogsImportJob {
     @Column(name = "nombre_archivo", nullable = false, length = 500)
     private String nombreArchivo;
 
+    @Column(name = "source_fingerprint", length = 64)
+    private String sourceFingerprint;
+
+    @Column(name = "extra_columns", columnDefinition = "TEXT")
+    private String extraColumns;
+
     @Column(name = "nombre_hoja", length = 255)
     private String nombreHoja;
 
