@@ -12,7 +12,6 @@ import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,8 +21,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.io.ByteArrayOutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 
@@ -193,23 +191,21 @@ class DiscogsImportJobServiceTest {
 
     @Test
     void importsTheRealFedePintosWorkbookIntoCatalogStockWithoutPartialRows() throws Exception {
-        Path workbookPath = Path.of(System.getProperty(
-                "discogs.workbook",
-                "/Users/admin/Downloads/DISCOS FEDE PINTOS.xlsx"
-        ));
-        Assumptions.assumeTrue(Files.isRegularFile(workbookPath),
-                "Real workbook not available: " + workbookPath);
-
         when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
         when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
                 .thenAnswer(invocation -> successResult(invocation.getArgument(2)));
 
-        DiscogsImportJobDTO created = service.createJob(new MockMultipartFile(
-                "file",
-                workbookPath.getFileName().toString(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                Files.readAllBytes(workbookPath)
-        ));
+        DiscogsImportJobDTO created;
+        try (InputStream workbook = getClass().getResourceAsStream(
+                "/discogs/DISCOS FEDE PINTOS.xlsx")) {
+            assertThat(workbook).isNotNull();
+            created = service.createJob(new MockMultipartFile(
+                    "file",
+                    "DISCOS FEDE PINTOS.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    workbook.readAllBytes()
+            ));
+        }
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             DiscogsImportJobDTO current = service.getJob(created.getId());
