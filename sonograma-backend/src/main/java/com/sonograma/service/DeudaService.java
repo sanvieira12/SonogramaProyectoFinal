@@ -226,8 +226,10 @@ public class DeudaService {
         if (deudaRelacionada == null || deudaRelacionada.getIdDeuda() == null) {
             throw new NegocioException("El pago de deuda no tiene una deuda asociada");
         }
+        // The payment relationship is authoritative here. An inactive debt can
+        // still have a valid payment movement in the sales ledger, so it must
+        // not be treated as missing while reversing that payment.
         Deuda deuda = deudaRepository.findByIdForUpdate(deudaRelacionada.getIdDeuda())
-                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", deudaRelacionada.getIdDeuda()));
 
         pagoDeudaRepository.delete(pago);

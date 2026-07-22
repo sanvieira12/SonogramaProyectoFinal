@@ -137,6 +137,29 @@ class DeudaServiceTest {
     }
 
     @Test
+    void eliminarPagoUsaLaDeudaRelacionadaAunqueEsteInactiva() {
+        Deuda deuda = Deuda.builder().idDeuda(66L).activa(false)
+                .montoTotal(new BigDecimal("1370")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(new BigDecimal("1370")).montoPendiente(BigDecimal.ZERO)
+                .estadoPago(EstadoPago.PAGADO).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(25L).deuda(deuda)
+                .monto(new BigDecimal("1370")).fechaPago(LocalDate.of(2026, 7, 22)).build();
+
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(25L)).thenReturn(Optional.of(pago));
+        when(deudaRepository.findByIdForUpdate(66L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(66L))
+                .thenReturn(List.of());
+
+        service.eliminarPago(25L);
+
+        verify(pagoDeudaRepository).delete(pago);
+        assertThat(deuda.getActiva()).isFalse();
+        assertThat(deuda.getMontoPagado()).isZero();
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("1370");
+        assertThat(deuda.getEstadoPago()).isEqualTo(EstadoPago.PENDIENTE);
+    }
+
+    @Test
     void eliminarPagoRepetidoFallaSinModificarLaDeuda() {
         Deuda deuda = Deuda.builder().idDeuda(1L).activa(true)
                 .montoTotal(new BigDecimal("8000")).montoPagado(new BigDecimal("5000"))
