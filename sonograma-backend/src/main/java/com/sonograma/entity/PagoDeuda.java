@@ -33,6 +33,14 @@ public class PagoDeuda {
     @Column(name = "notas")
     private String notas;
 
+    /** Receipt number belonging to this payment, not to the debt movement. */
+    @Column(name = "numero_recibo")
+    private String numeroRecibo;
+
+    /** Client-generated key used to make payment retries idempotent. */
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();

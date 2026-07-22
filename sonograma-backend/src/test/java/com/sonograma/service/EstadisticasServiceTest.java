@@ -124,7 +124,7 @@ class EstadisticasServiceTest {
     }
 
     @Test
-    void dashboardUsaLaMismaFechaCreatedAtQueElLibroParaPagos() {
+    void dashboardUsaLaFechaDePagoQueElLibroParaPagos() {
         Fixture fixture = new Fixture();
         Deuda deuda = Deuda.builder().idDeuda(2L).build();
         PagoDeuda junio = pago(10L, deuda, "100", LocalDate.of(2026, 6, 30));
@@ -135,7 +135,7 @@ class EstadisticasServiceTest {
         var response = fixture.service.obtenerCatalogoInventarioVentas();
 
         assertThat(response.getVentasPorMes()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
-                .containsExactly("2026-07:300");
+                .containsExactly("2026-06:100", "2026-07:200");
         assertThat(response.getVentasPorSemana()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
                 .containsExactly("2026-S27:300");
     }
@@ -235,10 +235,10 @@ class EstadisticasServiceTest {
                 .map(bucket -> bucket.getTotalMonto())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        assertThat(response.getTotalMonto()).isEqualByComparingTo("41133.92");
-        assertThat(totalBuckets).isEqualByComparingTo("41133.92");
+        assertThat(response.getTotalMonto()).isEqualByComparingTo("36955");
+        assertThat(totalBuckets).isEqualByComparingTo("36955");
         assertThat(response.getCantidadVentas()).isEqualTo(2);
-        assertThat(response.getCantidadPagosDeuda()).isEqualTo(1);
+        assertThat(response.getCantidadPagosDeuda()).isZero();
     }
 
     @Test

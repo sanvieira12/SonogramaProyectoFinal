@@ -251,7 +251,9 @@ function discoMovimiento(v) {
 }
 
 function numeroBoletaMovimiento(v) {
-  return v.tipoMovimiento === 'VENTA' ? (v.numeroRecibo || '—') : '—'
+  return v.tipoMovimiento === 'VENTA' || v.tipoMovimiento === 'PAGO_DEUDA'
+    ? (v.numeroRecibo || '—')
+    : '—'
 }
 
 export default function LibroVentas() {

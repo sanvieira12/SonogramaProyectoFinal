@@ -302,7 +302,8 @@ class VentaServiceTest {
                 .deuda(deuda)
                 .monto(new BigDecimal("300"))
                 .fechaPago(LocalDate.of(2026, 6, 2))
-                .createdAt(LocalDateTime.of(2026, 6, 2, 9, 0))
+                .createdAt(LocalDateTime.of(2026, 6, 3, 9, 0))
+                .numeroRecibo("1258")
                 .notas("Transferencia")
                 .build();
 
@@ -316,6 +317,8 @@ class VentaServiceTest {
         assertThat(libro.get(0).getTipoMovimiento()).isEqualTo("PAGO_DEUDA");
         assertThat(libro.get(0).getDescripcionMovimiento()).isEqualTo("Pago de deuda");
         assertThat(libro.get(0).getMontoMovimiento()).isEqualByComparingTo("300");
+        assertThat(libro.get(0).getFechaVenta()).isEqualTo(LocalDate.of(2026, 6, 2).atStartOfDay());
+        assertThat(libro.get(0).getNumeroRecibo()).isEqualTo("1258");
         assertThat(libro.get(1).getTipoMovimiento()).isEqualTo("VENTA");
         assertThat(libro.get(1).getMontoMovimiento()).isEqualByComparingTo("400");
     }

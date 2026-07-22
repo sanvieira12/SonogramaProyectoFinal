@@ -167,9 +167,24 @@ public class DeudaService {
     }
 
     public DeudaResponseDTO registrarPago(Long idDeuda, BigDecimal monto, String notas) {
+        return registrarPago(idDeuda, monto, notas, null, null);
+    }
+
+    public DeudaResponseDTO registrarPago(Long idDeuda, BigDecimal monto, String notas,
+                                          String numeroRecibo, String idempotencyKey) {
         Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
+
+        String normalizedIdempotencyKey = textoNulo(idempotencyKey);
+        if (normalizedIdempotencyKey != null) {
+            PagoDeuda pagoExistente = pagoDeudaRepository
+                    .findByDeudaIdDeudaAndIdempotencyKey(idDeuda, normalizedIdempotencyKey)
+                    .orElse(null);
+            if (pagoExistente != null) {
+                return toDTO(deuda);
+            }
+        }
 
         recalcularEstado(deuda);
         if (deuda.getMontoPendiente().compareTo(BigDecimal.ZERO) == 0) {
@@ -187,6 +202,8 @@ public class DeudaService {
                 .monto(monto)
                 .fechaPago(LocalDate.now())
                 .notas(textoNulo(notas))
+                .numeroRecibo(textoNulo(numeroRecibo))
+                .idempotencyKey(normalizedIdempotencyKey)
                 .build();
         pagoDeudaRepository.save(pago);
 
@@ -448,6 +465,7 @@ public class DeudaService {
                 .monto(pago.getMonto())
                 .fechaPago(pago.getFechaPago())
                 .notas(pago.getNotas())
+                .numeroRecibo(pago.getNumeroRecibo())
                 .createdAt(pago.getCreatedAt())
                 .build();
     }

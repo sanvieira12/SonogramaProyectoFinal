@@ -76,7 +76,10 @@ public class DeudaController {
             @RequestBody Map<String, Object> body) {
         BigDecimal monto = requiredBigDecimal(body, "monto", "El monto del pago es obligatorio");
         String notas = optionalString(body, "notas");
-        return ResponseEntity.ok(deudaService.registrarPago(idDeuda, monto, notas));
+        String numeroRecibo = optionalString(body, "numeroRecibo");
+        if (numeroRecibo == null) numeroRecibo = optionalString(body, "numeroBoleta");
+        String idempotencyKey = optionalString(body, "idempotencyKey");
+        return ResponseEntity.ok(deudaService.registrarPago(idDeuda, monto, notas, numeroRecibo, idempotencyKey));
     }
 
     @PostMapping("/{idDeuda}/pagos")

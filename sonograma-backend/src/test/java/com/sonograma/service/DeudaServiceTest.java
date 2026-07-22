@@ -4,6 +4,7 @@ import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
+import com.sonograma.dto.PagoDeudaDTO;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.ClienteRepository;
@@ -17,11 +18,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +39,46 @@ class DeudaServiceTest {
     @BeforeEach
     void setUp() {
         service = new DeudaService(deudaRepository, clienteRepository, pagoDeudaRepository);
+    }
+
+    @Test
+    void registraPagosSeparadosConBoletaOpcionalYEvitaDuplicadosPorReintento() {
+        Deuda deuda = Deuda.builder().idDeuda(1L).activa(true)
+                .montoTotal(new BigDecimal("3000")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(BigDecimal.ZERO).montoPendiente(new BigDecimal("3000"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        List<PagoDeuda> pagos = new ArrayList<>();
+        when(deudaRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(1L))
+                .thenAnswer(invocation -> List.copyOf(pagos));
+        when(pagoDeudaRepository.findByDeudaIdDeudaAndIdempotencyKey(any(Long.class), any(String.class)))
+                .thenAnswer(invocation -> pagos.stream()
+                        .filter(p -> invocation.getArgument(1).equals(p.getIdempotencyKey()))
+                        .findFirst());
+        when(pagoDeudaRepository.save(any(PagoDeuda.class))).thenAnswer(invocation -> {
+            PagoDeuda pago = invocation.getArgument(0);
+            pago.setIdPagoDeuda((long) pagos.size() + 1);
+            pagos.add(pago);
+            return pago;
+        });
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var parcialConBoleta = service.registrarPago(1L, new BigDecimal("1000"), null, "1258", "payment-1");
+        var parcialSinBoleta = service.registrarPago(1L, new BigDecimal("500"), null, "", "payment-2");
+        var completoConBoleta = service.registrarPago(1L, new BigDecimal("1500"), null, "1320", "payment-3");
+
+        assertThat(parcialConBoleta.getMontoPendiente()).isEqualByComparingTo("2000");
+        assertThat(parcialSinBoleta.getMontoPendiente()).isEqualByComparingTo("1500");
+        assertThat(completoConBoleta.getMontoPendiente()).isEqualByComparingTo("0");
+        assertThat(completoConBoleta.getEstadoPago()).isEqualTo("PAGADO");
+        assertThat(pagos).extracting(PagoDeuda::getNumeroRecibo)
+                .containsExactly("1258", null, "1320");
+        assertThat(completoConBoleta.getPagos()).extracting(PagoDeudaDTO::getNumeroRecibo)
+                .containsExactly("1258", null, "1320");
+
+        service.registrarPago(1L, new BigDecimal("1500"), null, "1320", "payment-3");
+
+        assertThat(pagos).hasSize(3);
     }
 
     @Test

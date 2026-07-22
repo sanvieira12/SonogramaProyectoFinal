@@ -217,8 +217,8 @@ export const api = {
       if (!res.ok) throw new Error(data?.error || 'Error al importar')
       return data
     },
-    registrarPago: (idDeuda, monto, notas) =>
-      request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas }),
+    registrarPago: (idDeuda, monto, notas, numeroRecibo, idempotencyKey) =>
+      request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas, numeroRecibo, idempotencyKey }),
     eliminarPago: (idDeuda, idPagoDeuda) =>
       request('DELETE', `/deudas/${idDeuda}/pagos/${idPagoDeuda}`),
   },

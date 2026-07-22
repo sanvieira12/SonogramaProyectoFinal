@@ -21,8 +21,8 @@ public class IngresoLibroCalculator {
     }
 
     public LocalDateTime fechaPago(PagoDeuda pago) {
-        return pago.getCreatedAt() != null
-                ? pago.getCreatedAt()
-                : pago.getFechaPago().atStartOfDay();
+        return pago.getFechaPago() != null
+                ? pago.getFechaPago().atStartOfDay()
+                : pago.getCreatedAt();
     }
 }

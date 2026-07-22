@@ -9,7 +9,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
         onClick={e => e.stopPropagation()}
       >
         <h3 className="text-slate-900 dark:text-white font-bold text-base mb-2">{titulo}</h3>
-        <p className="text-slate-500 dark:text-stone-400 text-sm mb-6">{mensaje}</p>
+        <p className="text-slate-500 dark:text-white/70 text-sm mb-6">{mensaje}</p>
         <div className="flex gap-3">
           <button
             onClick={onCancelar}

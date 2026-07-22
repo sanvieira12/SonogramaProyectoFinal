@@ -10,4 +10,6 @@ public interface PagoDeudaRepository extends JpaRepository<PagoDeuda, Long> {
     List<PagoDeuda> findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(Long idDeuda);
 
     Optional<PagoDeuda> findByIdPagoDeudaAndDeudaIdDeuda(Long idPagoDeuda, Long idDeuda);
+
+    Optional<PagoDeuda> findByDeudaIdDeudaAndIdempotencyKey(Long idDeuda, String idempotencyKey);
 }

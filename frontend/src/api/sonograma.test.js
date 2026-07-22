@@ -16,6 +16,45 @@ describe('normalizeApiBase', () => {
     expect(normalizeApiBase('')).toBe('/api')
   })
 
+  it('envía el número de boleta opcional y la clave de idempotencia del pago', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{}'),
+    })
+
+    await api.deudas.registrarPago(42, 1000, null, '1258', 'payment-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/deudas/42/registrar-pago', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        monto: 1000,
+        notas: null,
+        numeroRecibo: '1258',
+        idempotencyKey: 'payment-1',
+      }),
+    }))
+  })
+
+  it('envía null cuando el número de boleta se deja vacío', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{}'),
+    })
+
+    await api.deudas.registrarPago(42, 500, null, null, 'payment-2')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/deudas/42/registrar-pago', expect.objectContaining({
+      body: JSON.stringify({
+        monto: 500,
+        notas: null,
+        numeroRecibo: null,
+        idempotencyKey: 'payment-2',
+      }),
+    }))
+  })
+
   it('exports VinylFuture ZIP from an import id', async () => {
     vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
     const blob = new Blob(['zip'])

@@ -15,5 +15,6 @@ public class PagoDeudaDTO {
     private BigDecimal monto;
     private LocalDate fechaPago;
     private String notas;
+    private String numeroRecibo;
     private LocalDateTime createdAt;
 }

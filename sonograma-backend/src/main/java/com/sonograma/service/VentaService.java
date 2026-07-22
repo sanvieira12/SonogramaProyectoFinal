@@ -349,7 +349,7 @@ public class VentaService {
                     meses.put(mes, meses.getOrDefault(mes, new MesIngreso(0, BigDecimal.ZERO)).sumarVenta(ingreso));
                 });
         pagos.forEach(p -> {
-            LocalDate fecha = p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : p.getFechaPago();
+            LocalDate fecha = ingresoLibroCalculator.fechaPago(p).toLocalDate();
             String mes = "%04d-%02d".formatted(fecha.getYear(), fecha.getMonthValue());
             meses.put(mes, meses.getOrDefault(mes, new MesIngreso(0, BigDecimal.ZERO)).sumarPago(p.getMonto()));
         });
@@ -447,7 +447,7 @@ public class VentaService {
                 .nombreCliente(nombre)
                 .fechaVenta(fecha)
                 .numeroFactura(numeroFactura)
-                .numeroRecibo(venta != null ? venta.getNumeroRecibo() : null)
+                .numeroRecibo(pago.getNumeroRecibo())
                 .clienteNombreSnapshot(nombre)
                 .total(pago.getMonto())
                 .totalFinal(pago.getMonto())
