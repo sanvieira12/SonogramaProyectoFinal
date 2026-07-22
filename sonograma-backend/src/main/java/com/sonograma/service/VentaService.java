@@ -332,7 +332,9 @@ public class VentaService {
             MesIngreso sumarPago(BigDecimal monto) { return new MesIngreso(cantidad, total.add(monto)); }
         }
         java.util.Map<String, MesIngreso> meses = new TreeMap<>();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
+                .toList();
         java.util.Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
                 .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
                 .collect(Collectors.groupingBy(
@@ -383,6 +385,7 @@ public class VentaService {
 
         if (canal == null || canal.isBlank()) {
             pagoDeudaRepository.findAll().stream()
+                    .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
                     .filter(p -> pagoDentroDeRango(p, desdeDate, hastaDate))
                     .map(this::mapearPagoDeudaADTO)
                     .filter(v -> coincideMovimiento(v, qLower))

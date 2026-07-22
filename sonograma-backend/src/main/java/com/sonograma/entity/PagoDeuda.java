@@ -44,4 +44,16 @@ public class PagoDeuda {
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    /** Financial records are retained and marked as reversed instead of deleted. */
+    @Column(name = "anulado", nullable = false)
+    @Builder.Default
+    private Boolean anulado = false;
+
+    @Column(name = "fecha_anulacion")
+    private LocalDateTime fechaAnulacion;
+
+    /** Username from the authenticated session that performed the reversal. */
+    @Column(name = "anulado_por", length = 150)
+    private String anuladoPor;
 }

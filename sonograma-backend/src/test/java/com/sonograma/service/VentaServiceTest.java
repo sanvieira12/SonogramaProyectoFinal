@@ -306,10 +306,18 @@ class VentaServiceTest {
                 .numeroRecibo("1258")
                 .notas("Transferencia")
                 .build();
+        PagoDeuda pagoAnulado = PagoDeuda.builder()
+                .idPagoDeuda(401L)
+                .deuda(deuda)
+                .monto(new BigDecimal("150"))
+                .fechaPago(LocalDate.of(2026, 6, 4))
+                .anulado(true)
+                .numeroRecibo("1259")
+                .build();
 
         when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of(venta));
         when(envioRepository.findByVentaIdVenta(200L)).thenReturn(Optional.empty());
-        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago));
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago, pagoAnulado));
 
         var libro = ventaService.obtenerLibro(null, null, null, null);
 

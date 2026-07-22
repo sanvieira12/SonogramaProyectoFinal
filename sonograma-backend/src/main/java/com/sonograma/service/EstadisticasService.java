@@ -53,7 +53,7 @@ public class EstadisticasService {
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
         List<Disco> discos = discoRepository.findAll();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        List<PagoDeuda> pagos = pagosVigentes();
 
         List<VentaDiscoItem> itemsVendidos = ventas.stream()
                 .flatMap(venta -> ventaItems(venta).stream())
@@ -132,7 +132,7 @@ public class EstadisticasService {
         List<Venta> ventas = ventaRepository.findAll().stream()
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .toList();
-        List<PagoDeuda> pagos = pagoDeudaRepository.findAll();
+        List<PagoDeuda> pagos = pagosVigentes();
 
         List<IngresoMovimiento> movimientos = new ArrayList<>();
         for (Venta venta : ventas) {
@@ -146,6 +146,12 @@ public class EstadisticasService {
         }
         movimientos.sort(Comparator.comparing(IngresoMovimiento::fecha));
         return movimientos;
+    }
+
+    private List<PagoDeuda> pagosVigentes() {
+        return pagoDeudaRepository.findAll().stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
+                .toList();
     }
 
     private static ResumenIngresos resumenEnRango(RangoPeriodo rango, List<IngresoMovimiento> movimientos) {

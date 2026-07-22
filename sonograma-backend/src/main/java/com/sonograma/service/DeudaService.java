@@ -18,6 +18,8 @@ import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.PagoDeudaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -218,15 +220,18 @@ public class DeudaService {
         Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
-        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeuda(idPagoDeuda, idDeuda)
+        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(idPagoDeuda, idDeuda)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Pago de deuda", idPagoDeuda));
 
-        BigDecimal nuevoPagado = deuda.getMontoPagado().subtract(pago.getMonto());
-        if (nuevoPagado.compareTo(BigDecimal.ZERO) < 0) {
-            throw new NegocioException("El pago no puede eliminarse porque el saldo de la deuda es inconsistente");
+        if (Boolean.TRUE.equals(pago.getAnulado())) {
+            throw new NegocioException("El pago de deuda ya fue anulado");
         }
-        pagoDeudaRepository.delete(pago);
-        pagoDeudaRepository.flush();
+
+        pago.setAnulado(true);
+        pago.setFechaAnulacion(LocalDateTime.now());
+        pago.setAnuladoPor(usuarioActual());
+        pagoDeudaRepository.save(pago);
+
         LocalDate fechaUltimoPago = pagoDeudaRepository
                 .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda).stream()
                 .findFirst().map(PagoDeuda::getFechaPago).orElse(null);
@@ -236,6 +241,13 @@ public class DeudaService {
         if (deuda.getMontoPagadoInicial() == null) deuda.setMontoPagadoInicial(BigDecimal.ZERO);
         recalcularEstado(deuda);
         deudaRepository.save(deuda);
+    }
+
+    private String usuarioActual() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) return null;
+        String nombre = authentication.getName();
+        return nombre == null || nombre.isBlank() || "anonymousUser".equals(nombre) ? null : nombre;
     }
 
     private void aplicarRequest(Deuda deuda, DeudaRequestDTO request, boolean creando) {
@@ -417,7 +429,9 @@ public class DeudaService {
     private List<PagoDeuda> pagosDeDeuda(Deuda deuda) {
         if (deuda.getIdDeuda() == null) return List.of();
         List<PagoDeuda> pagos = pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda());
-        return pagos == null ? List.of() : pagos;
+        return pagos == null ? List.of() : pagos.stream()
+                .filter(p -> p != null && !Boolean.TRUE.equals(p.getAnulado()))
+                .toList();
     }
 
     private Balance calcularBalance(Deuda deuda, List<PagoDeuda> pagos) {

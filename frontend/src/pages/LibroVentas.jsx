@@ -76,7 +76,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
         <div className="flex gap-2">
           {!esPagoDeuda && !esPreVenta && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
           {!esPreVenta && <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
-            {esPagoDeuda ? 'Eliminar pago' : 'Cancelar venta'}
+            {esPagoDeuda ? 'Anular pago' : 'Cancelar venta'}
           </button>}
           {esPreVenta && <p className="text-xs text-slate-400 dark:text-stone-500">Movimiento protegido; su origen se conserva en Pre-ventas.</p>}
         </div>
@@ -342,7 +342,7 @@ export default function LibroVentas() {
       setVentaPanel(null)
       setVentaCancelar(null)
       setSuccess(esPagoDeuda
-        ? 'Pago eliminado. El saldo de la deuda y los ingresos fueron actualizados.'
+        ? 'Pago anulado. El saldo de la deuda y los ingresos fueron actualizados.'
         : 'Venta cancelada correctamente.')
     } catch (e) {
       setError(e.message || 'No se pudo cancelar la venta')
@@ -542,9 +542,9 @@ export default function LibroVentas() {
       )}
       {ventaCancelar && (
         <ConfirmModal
-          titulo={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA' ? 'Eliminar pago de deuda' : 'Cancelar venta'}
+          titulo={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA' ? 'Anular pago de deuda' : 'Cancelar venta'}
           mensaje={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA'
-            ? '¿Seguro que querés eliminar este pago? El importe volverá al saldo pendiente de la deuda y se descontará de los ingresos.'
+            ? '¿Anular este pago de deuda? El importe volverá a sumarse al saldo pendiente del cliente y dejará de contar como ingreso.'
             : '¿Seguro que querés cancelar esta venta? Se restaurará el stock y se ocultará la deuda asociada si existe.'}
           onConfirmar={cancelarMovimiento}
           onCancelar={() => setVentaCancelar(null)}
