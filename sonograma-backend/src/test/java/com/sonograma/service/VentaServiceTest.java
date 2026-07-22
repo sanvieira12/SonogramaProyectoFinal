@@ -56,6 +56,7 @@ class VentaServiceTest {
     @Mock private ClienteService clienteService;
     @Mock private DiscoQrCopyService discoQrCopyService;
     @Mock private DiscoEstadoService discoEstadoService;
+    @Mock private ProfitCalculationService profitCalculationService;
 
     private VentaService ventaService;
 
@@ -72,7 +73,8 @@ class VentaServiceTest {
                 pagoDeudaRepository,
                 clienteService,
                 deudaService,
-                new CostosVentaService(),
+                new CostosVentaService(new ProfitCalculationService(org.mockito.Mockito.mock(VentaRepository.class))),
+                profitCalculationService,
                 discoQrCopyService,
                 discoEstadoService,
                 new IngresoLibroCalculator()
@@ -83,6 +85,8 @@ class VentaServiceTest {
                     ? EstadoDisco.DISPONIBLE : EstadoDisco.VENDIDO);
             return null;
         }).when(discoEstadoService).aplicar(any(Disco.class));
+        lenient().when(profitCalculationService.netProfitForSale(any()))
+                .thenReturn(new ProfitResult(BigDecimal.ZERO, ProfitStatus.ZERO, 0, java.util.List.of()));
     }
 
     @Test

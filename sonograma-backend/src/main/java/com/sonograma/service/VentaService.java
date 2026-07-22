@@ -67,6 +67,7 @@ public class VentaService {
     private final ClienteService clienteService;
     private final DeudaService deudaService;
     private final CostosVentaService costosVentaService;
+    private final ProfitCalculationService profitCalculationService;
     private final DiscoQrCopyService discoQrCopyService;
     private final DiscoEstadoService discoEstadoService;
     private final IngresoLibroCalculator ingresoLibroCalculator;
@@ -105,9 +106,7 @@ public class VentaService {
             }
             BigDecimal factor = CIEN.subtract(descuentoPct).divide(CIEN, 4, RoundingMode.HALF_UP);
             BigDecimal precioVentaNet = subtotalDetalles.multiply(factor).setScale(2, RoundingMode.HALF_UP);
-            BigDecimal costoDiTotal = detallesPreparados.stream()
-                    .map(PreparedDetalle::costoTotal)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal costoDiTotal = costoTotalHistorico(detallesPreparados);
             costos = costosVentaService.calcular(costoDiTotal, precioVentaNet, dto);
         } else {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
@@ -161,8 +160,12 @@ public class VentaService {
                 venta.getDetalles().add(detalleVentaRepository.save(detalle));
             }
         } else {
-            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
+            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null,
+                    costoHistorico(discoLegacy), null, null));
         }
+
+        actualizarGananciaHistorica(venta);
+        ventaRepository.save(venta);
 
         deudaService.sincronizarVenta(venta, cliente, costos.getTotalFinal(), montoPagado,
                 montoDeuda, estadoPago, fechaVenta);
@@ -225,9 +228,7 @@ public class VentaService {
             }
             BigDecimal factor = CIEN.subtract(descuentoPct).divide(CIEN, 4, RoundingMode.HALF_UP);
             BigDecimal precioVentaNet = subtotalDetalles.multiply(factor).setScale(2, RoundingMode.HALF_UP);
-            BigDecimal costoDiscoTotal = detallesPreparados.stream()
-                    .map(PreparedDetalle::costoTotal)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal costoDiscoTotal = costoTotalHistorico(detallesPreparados);
             costos = costosVentaService.calcular(costoDiscoTotal, precioVentaNet, dto);
         } else {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
@@ -277,8 +278,12 @@ public class VentaService {
                 venta.getDetalles().add(detalleVentaRepository.save(detalle));
             }
         } else {
-            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
+            reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null,
+                    costoHistorico(discoLegacy), null, null));
         }
+
+        actualizarGananciaHistorica(venta);
+        ventaRepository.save(venta);
 
         deudaService.sincronizarVenta(venta, cliente, costos.getTotalFinal(), montoPagado,
                 montoDeuda, estadoPago, fechaVenta);
@@ -507,8 +512,14 @@ public class VentaService {
         String album = venta.getDisco() != null ? venta.getDisco().getAlbum()
                 : (primerDetalle != null ? primerDetalle.getAlbumSnap() : null);
 
-        List<DetalleVentaResponseDTO> detallesDTO = detalles != null ? detalles.stream()
-                .map(d -> DetalleVentaResponseDTO.builder()
+        ProfitResult profit = profitCalculationService.netProfitForSale(venta);
+        List<ProfitItemResult> profitItems = profit.items();
+        List<DetalleVentaResponseDTO> detallesDTO = new ArrayList<>();
+        if (detalles != null) {
+            for (int index = 0; index < detalles.size(); index++) {
+                DetalleVenta d = detalles.get(index);
+                ProfitItemResult itemProfit = index < profitItems.size() ? profitItems.get(index) : null;
+                detallesDTO.add(DetalleVentaResponseDTO.builder()
                         .idDetalle(d.getIdDetalle())
                         .idDisco(d.getDisco() != null ? d.getDisco().getIdDisco() : null)
                         .artista(d.getArtistaSnap() != null ? d.getArtistaSnap() : (d.getDisco() != null ? d.getDisco().getArtista() : null))
@@ -518,9 +529,13 @@ public class VentaService {
                         .imagenUrl(d.getDisco() != null ? d.getDisco().getImagenUrl() : null)
                         .cantidad(cantidadDetalle(d))
                         .precioUnitario(d.getPrecioUnitario())
+                        .importeVentaReal(itemProfit != null ? itemProfit.actualSaleAmount() : null)
+                        .gananciaNeta(itemProfit != null ? itemProfit.netProfit() : null)
+                        .estadoGanancia(itemProfit != null ? itemProfit.status().name() : ProfitStatus.UNAVAILABLE.name())
                         .manualItem(Boolean.TRUE.equals(d.getManualItem()) || d.getDisco() == null)
-                        .build())
-                .collect(Collectors.toList()) : List.of();
+                        .build());
+            }
+        }
 
         return VentaResponseDTO.builder()
                 .idVenta(venta.getIdVenta())
@@ -541,6 +556,9 @@ public class VentaService {
                 .otrosCostos(venta.getOtrosCostos())
                 .totalFinal(VentaTotals.totalProductos(venta))
                 .gananciaEstimada(venta.getGananciaEstimada())
+                .gananciaNeta(profit.netProfit())
+                .estadoGanancia(profit.status().name())
+                .itemsGananciaNoDisponible(profit.affectedItemCount())
                 .tipoEntrega(venta.getTipoEntrega() != null ? venta.getTipoEntrega().name() : null)
                 .estado(venta.getEstado() != null ? venta.getEstado().name() : null)
                 .observaciones(venta.getObservaciones())
@@ -595,8 +613,7 @@ public class VentaService {
                     disco.getAlbum(),
                     descripcionDetalle(dto, disco),
                     disco.getCodigoInterno(),
-                    (disco.getCosto() != null ? disco.getCosto() : BigDecimal.ZERO)
-                            .multiply(BigDecimal.valueOf(cantidad)),
+                    costoHistorico(disco),
                     dto.getCopyId(),
                     dto.getCodigoQr()
             );
@@ -615,7 +632,7 @@ public class VentaService {
                 textoNulo(dto.getAlbum()),
                 descripcion,
                 textoNulo(dto.getCodigo()),
-                BigDecimal.ZERO,
+                null,
                 null,
                 null
         );
@@ -632,6 +649,7 @@ public class VentaService {
                 .albumSnap(preparado.albumSnap())
                 .descripcionSnap(preparado.descripcionSnap())
                 .codigoSnap(preparado.codigoSnap())
+                .costoAdquisicionUnitario(preparado.costoAdquisicionUnitario())
                 .copyIdsSnapshot(copyIdsSnapshot)
                 .build();
     }
@@ -822,10 +840,31 @@ public class VentaService {
             String albumSnap,
             String descripcionSnap,
             String codigoSnap,
-            BigDecimal costoTotal,
+            BigDecimal costoAdquisicionUnitario,
             Long copyId,
             String codigoQr
     ) {}
+
+    private BigDecimal costoTotalHistorico(List<PreparedDetalle> detalles) {
+        if (detalles.stream().anyMatch(d -> d.costoAdquisicionUnitario() == null)) {
+            return null;
+        }
+        return detalles.stream()
+                .map(d -> d.costoAdquisicionUnitario().multiply(BigDecimal.valueOf(d.cantidad())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal costoHistorico(Disco disco) {
+        return disco != null && disco.getCosto() != null
+                && disco.getCosto().compareTo(BigDecimal.ZERO) > 0
+                ? disco.getCosto()
+                : null;
+    }
+
+    private void actualizarGananciaHistorica(Venta venta) {
+        ProfitResult result = profitCalculationService.netProfitForSale(venta);
+        venta.setGananciaEstimada(result.isAvailable() ? result.netProfit() : null);
+    }
 
     private CanalVenta parseCanal(String canalVenta) {
         try {

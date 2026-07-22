@@ -8,11 +8,13 @@ import com.sonograma.enums.TipoEntrega;
 import com.sonograma.exception.NegocioException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import lombok.RequiredArgsConstructor;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 @Service
+@RequiredArgsConstructor
 public class CostosVentaService {
 
     private static final BigDecimal CIEN = new BigDecimal("100");
@@ -23,6 +25,8 @@ public class CostosVentaService {
     @Value("${sonograma.ventas.otros-costos:0}")
     private BigDecimal otrosCostosDefault;
 
+    private final ProfitCalculationService profitCalculationService;
+
     public ConfiguracionCostosDTO obtenerConfiguracion() {
         return ConfiguracionCostosDTO.builder()
                 .porcentajeImpuesto(moneda(porcentajeImpuestoDefault))
@@ -32,11 +36,11 @@ public class CostosVentaService {
     }
 
     public ResultadoCostoVentaDTO calcular(BigDecimal costoDisco, BigDecimal precioVenta, VentaRequestDTO dto) {
-        return calcularInterno(moneda(nvl(costoDisco)), precioVenta, dto);
+        return calcularInterno(costoDisco, precioVenta, dto);
     }
 
     public ResultadoCostoVentaDTO calcular(Disco disco, VentaRequestDTO dto) {
-        BigDecimal costoDisco = moneda(nvl(disco.getCosto()));
+        BigDecimal costoDisco = disco.getCosto();
         BigDecimal precioVenta = dto.getPrecioVenta() != null
                 ? dto.getPrecioVenta()
                 : (dto.getTotal() != null ? dto.getTotal() : disco.getPrecioVenta());
@@ -58,17 +62,18 @@ public class CostosVentaService {
         BigDecimal subtotal = nvl(precioVenta).add(otrosCostos);
         BigDecimal montoImpuesto = subtotal.multiply(porcentajeImpuesto).divide(CIEN, 4, RoundingMode.HALF_UP);
         BigDecimal totalFinal = subtotal.add(montoImpuesto);
-        BigDecimal ganancia = totalFinal.subtract(costoDisco).subtract(montoImpuesto).subtract(otrosCostos);
+        BigDecimal ganancia = profitCalculationService.netProfitForAmounts(
+                totalFinal.subtract(montoImpuesto).subtract(otrosCostos), costoDisco);
 
         return ResultadoCostoVentaDTO.builder()
-                .costoDisco(moneda(costoDisco))
+                .costoDisco(monedaNullable(costoDisco))
                 .precioVenta(moneda(precioVenta))
                 .costoEnvio(moneda(costoEnvio))
                 .porcentajeImpuesto(moneda(porcentajeImpuesto))
                 .montoImpuesto(moneda(montoImpuesto))
                 .otrosCostos(moneda(otrosCostos))
                 .totalFinal(moneda(totalFinal))
-                .gananciaEstimada(moneda(ganancia))
+                .gananciaEstimada(monedaNullable(ganancia))
                 .build();
     }
 
@@ -78,5 +83,9 @@ public class CostosVentaService {
 
     private static BigDecimal moneda(BigDecimal valor) {
         return nvl(valor).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal monedaNullable(BigDecimal valor) {
+        return valor == null ? null : valor.setScale(2, RoundingMode.HALF_UP);
     }
 }

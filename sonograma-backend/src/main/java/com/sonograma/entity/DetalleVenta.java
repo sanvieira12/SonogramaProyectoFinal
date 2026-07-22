@@ -31,6 +31,13 @@ public class DetalleVenta {
     @Column(name = "precio_unitario", precision = 10, scale = 2, nullable = false)
     private BigDecimal precioUnitario;
 
+    /**
+     * Historical acquisition cost captured when this item is sold.
+     * Nullable on purpose: old/manual records may not have trustworthy cost data.
+     */
+    @Column(name = "costo_adquisicion_unitario", precision = 14, scale = 6)
+    private BigDecimal costoAdquisicionUnitario;
+
     @Column(name = "cantidad", nullable = false)
     @Builder.Default
     private Integer cantidad = 1;

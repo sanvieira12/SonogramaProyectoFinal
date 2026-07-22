@@ -8,18 +8,14 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class DetalleVentaResponseDTO {
-    private Long idDetalle;
-    private Long idDisco;
+public class ItemResumenMensualDTO {
+    private Long idVenta;
     private String artista;
     private String album;
-    private String descripcion;
     private String codigoInterno;
-    private String imagenUrl;
     private Integer cantidad;
-    private BigDecimal precioUnitario;
     private BigDecimal importeVentaReal;
+    private BigDecimal costoAdquisicionOriginal;
     private BigDecimal gananciaNeta;
     private String estadoGanancia;
-    private Boolean manualItem;
 }

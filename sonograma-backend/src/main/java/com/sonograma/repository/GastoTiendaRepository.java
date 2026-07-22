@@ -9,4 +9,6 @@ import java.util.List;
 public interface GastoTiendaRepository extends JpaRepository<GastoTienda, Long> {
     List<GastoTienda> findAllByOrderByFechaDescIdGastoDesc();
     List<GastoTienda> findByFechaBetween(LocalDate desde, LocalDate hasta);
+
+    List<GastoTienda> findByFechaBetweenOrderByFechaAscIdGastoAsc(LocalDate desde, LocalDate hasta);
 }

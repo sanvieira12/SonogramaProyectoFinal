@@ -184,6 +184,8 @@ export const api = {
     cancelar: (id) => request('DELETE', `/ventas/${id}`),
     estadisticasPorMes: () => request('GET', '/ventas/estadisticas/por-mes'),
     configuracionCostos: () => request('GET', '/ventas/configuracion-costos'),
+    resumenMensual: (periodo) => request('GET', `/ventas/resumen-mensual${periodo ? `?periodo=${encodeURIComponent(periodo)}` : ''}`),
+    resumenMensualExportarUrl: (periodo) => `${BASE}/ventas/resumen-mensual/exportar${periodo ? `?periodo=${encodeURIComponent(periodo)}` : ''}`,
   },
 
   envios: {

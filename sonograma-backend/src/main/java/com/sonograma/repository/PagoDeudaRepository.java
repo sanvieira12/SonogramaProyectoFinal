@@ -9,8 +9,22 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDate;
 
 public interface PagoDeudaRepository extends JpaRepository<PagoDeuda, Long> {
+    @Query("""
+        SELECT p FROM PagoDeuda p
+        JOIN FETCH p.deuda d
+        LEFT JOIN FETCH d.venta v
+        LEFT JOIN FETCH d.cliente c
+        WHERE COALESCE(p.anulado, false) = false
+          AND COALESCE(d.activa, true) = true
+          AND (v IS NULL OR v.estado <> com.sonograma.enums.EstadoVenta.CANCELADA)
+          AND p.fechaPago BETWEEN :desde AND :hasta
+        ORDER BY p.fechaPago ASC, p.idPagoDeuda ASC
+        """)
+    List<PagoDeuda> findValidosEntre(@Param("desde") LocalDate desde, @Param("hasta") LocalDate hasta);
+
     @Query("""
         SELECT p FROM PagoDeuda p
         WHERE p.deuda.idDeuda = :idDeuda

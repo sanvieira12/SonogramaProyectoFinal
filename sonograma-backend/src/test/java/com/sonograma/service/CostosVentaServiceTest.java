@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.dto.ResultadoCostoVentaDTO;
 import com.sonograma.dto.VentaRequestDTO;
 import com.sonograma.entity.Disco;
+import com.sonograma.repository.VentaRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -14,7 +15,8 @@ class CostosVentaServiceTest {
 
     @Test
     void calcularNoIncluyeEnvioEnTotalFinalYCalculaGananciaSobreProductos() {
-        CostosVentaService service = new CostosVentaService();
+        CostosVentaService service = new CostosVentaService(
+                new ProfitCalculationService(org.mockito.Mockito.mock(VentaRepository.class)));
         ReflectionTestUtils.setField(service, "porcentajeImpuestoDefault", new BigDecimal("10"));
         ReflectionTestUtils.setField(service, "otrosCostosDefault", new BigDecimal("50"));
 

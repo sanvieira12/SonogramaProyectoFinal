@@ -5,6 +5,9 @@ import com.sonograma.dto.VentaRequestDTO;
 import com.sonograma.dto.VentaResponseDTO;
 import com.sonograma.dto.VentasPorMesDTO;
 import com.sonograma.service.ExcelExportService;
+import com.sonograma.dto.ResumenFinancieroMensualDTO;
+import com.sonograma.service.ResumenFinancieroMensualPdfService;
+import com.sonograma.service.ResumenFinancieroMensualService;
 import com.sonograma.service.VentaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +26,8 @@ public class VentaController {
 
     private final VentaService ventaService;
     private final ExcelExportService excelExportService;
+    private final ResumenFinancieroMensualService resumenFinancieroMensualService;
+    private final ResumenFinancieroMensualPdfService resumenFinancieroMensualPdfService;
 
     @GetMapping
     public ResponseEntity<List<VentaResponseDTO>> obtenerTodas() {
@@ -74,6 +79,22 @@ public class VentaController {
             @RequestParam(required = false) String canal,
             @RequestParam(required = false) String q) {
         return ResponseEntity.ok(ventaService.obtenerLibro(desde, hasta, canal, q));
+    }
+
+    @GetMapping("/resumen-mensual")
+    public ResponseEntity<ResumenFinancieroMensualDTO> resumenMensual(
+            @RequestParam(required = false) String periodo) {
+        return ResponseEntity.ok(resumenFinancieroMensualService.obtener(periodo));
+    }
+
+    @GetMapping("/resumen-mensual/exportar")
+    public ResponseEntity<byte[]> exportarResumenMensual(
+            @RequestParam(required = false) String periodo) {
+        byte[] bytes = resumenFinancieroMensualPdfService.generar(periodo);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"resumen-financiero-" + (periodo == null ? "actual" : periodo) + ".pdf\"")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(bytes);
     }
 
     @GetMapping("/libro/exportar")

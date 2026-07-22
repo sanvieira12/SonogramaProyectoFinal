@@ -93,9 +93,10 @@ public class PreVentaService {
         Venta venta = Venta.builder()
             .cliente(preVenta.getCliente()).fechaVenta(fechaPago).canalVenta(CanalVenta.LOCAL)
             .total(preVenta.getPrecio()).precioVenta(preVenta.getPrecio()).totalFinal(preVenta.getPrecio())
+            .costoDisco(costoHistorico(preVenta.getDisco(), cantidad))
             .subtotal(preVenta.getPrecio()).descuentoPorcentaje(BigDecimal.ZERO)
             .costoEnvio(BigDecimal.ZERO).otrosCostos(BigDecimal.ZERO).montoImpuesto(BigDecimal.ZERO)
-            .gananciaEstimada(BigDecimal.ZERO).tipoEntrega(TipoEntrega.RETIRO)
+            .gananciaEstimada(null).tipoEntrega(TipoEntrega.RETIRO)
             .estado(EstadoVenta.COMPLETADA).observaciones("Cobro de pre-venta #" + id)
             .numeroFactura("PV-" + id).clienteNombreSnapshot(clienteNombre)
             .medioPago(MedioPago.OTRO).montoPagado(preVenta.getPrecio()).montoDeuda(BigDecimal.ZERO)
@@ -105,6 +106,7 @@ public class PreVentaService {
         BigDecimal unitario = preVenta.getPrecio().divide(BigDecimal.valueOf(cantidad), 2, RoundingMode.HALF_UP);
         DetalleVenta detalle = DetalleVenta.builder().venta(venta).disco(preVenta.getDisco())
             .precioUnitario(unitario).cantidad(cantidad).manualItem(preVenta.getDisco() == null)
+            .costoAdquisicionUnitario(costoHistorico(preVenta.getDisco(), 1))
             .artistaSnap(preVenta.getDisco() != null ? preVenta.getDisco().getArtista() : preVenta.getArtistaSnap())
             .albumSnap(preVenta.getDisco() != null ? preVenta.getDisco().getAlbum() : preVenta.getAlbumSnap())
             .descripcionSnap(preVenta.getDescripcionSnap()).codigoSnap(preVenta.getCodigoDisco()).build();
@@ -114,6 +116,13 @@ public class PreVentaService {
         preVenta.setFechaPago(fechaPago);
         preVenta.setVentaPago(venta);
         return toDto(repository.save(preVenta));
+    }
+
+    private BigDecimal costoHistorico(Disco disco, int cantidad) {
+        if (disco == null || disco.getCosto() == null || disco.getCosto().compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+        return disco.getCosto().multiply(BigDecimal.valueOf(cantidad));
     }
 
     public void eliminar(Long id) {

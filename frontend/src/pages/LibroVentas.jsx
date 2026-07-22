@@ -13,6 +13,14 @@ function fechaInputLocal(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+function rangoPeriodo(mes, hoy = fechaInputLocal()) {
+  const [year, month] = mes.split('-').map(Number)
+  const hasta = mes === hoy.slice(0, 7)
+    ? hoy
+    : `${mes}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`
+  return { desde: `${mes}-01`, hasta }
+}
+
 function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel }) {
   if (!venta) return null
   const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
@@ -23,6 +31,9 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
     album: venta.album,
     codigoInterno: '',
     precioUnitario: venta.precioVenta,
+    importeVentaReal: venta.importeVentaReal ?? venta.precioVenta,
+    gananciaNeta: venta.gananciaNeta,
+    estadoGanancia: venta.estadoGanancia,
   }]
   const cover = selectedDisk?.imagenUrl
   return (
@@ -41,16 +52,17 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             ['Movimiento', venta.descripcionMovimiento || (esPagoDeuda ? 'Pago de deuda' : 'Venta')],
             ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
             ['Total venta', fmt(venta.totalFinal)],
+            ['Ganancia neta', esPagoDeuda ? '—' : fmtProfit(venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.gananciaNeta)],
             ['Método de pago', venta.medioPago],
             [esPagoDeuda ? 'Número de boleta' : 'Número de recibo', venta.numeroRecibo],
             ['Estado pago', venta.estadoPago],
             ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
             ['Monto pagado', fmt(venta.montoPagado)],
             ['Deuda pendiente', fmt(venta.montoDeuda)],
-          ].map(([label, value]) => (
+          ].map(([label, value, valueClass]) => (
             <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-              <p className="text-sm text-slate-800 dark:text-stone-200">{value || '—'}</p>
+              <p className={`text-sm text-slate-800 dark:text-stone-200 ${valueClass || ''}`}>{value || '—'}</p>
             </div>
           ))}
         </div>
@@ -62,7 +74,12 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             {detalles.map((d, index) => (
               <button key={d.idDetalle || d.idDisco || index} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
                 <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
-                <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.precioUnitario)}</p>
+                <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.importeVentaReal ?? d.precioUnitario)}</p>
+                <p className={`text-xs font-mono tabular-nums ${profitToneClass(d.estadoGanancia, d.gananciaNeta)}`}>
+                  {d.estadoGanancia === 'UNAVAILABLE' || d.gananciaNeta == null
+                    ? 'Ganancia no disponible'
+                    : fmtProfit(d.gananciaNeta, d.estadoGanancia)}
+                </p>
               </button>
             ))}
           </div>
@@ -198,6 +215,30 @@ function fmt(n) {
   return `UYU $${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function profitState(value, status) {
+  if (status === 'UNAVAILABLE' || value == null || Number.isNaN(Number(value))) return 'UNAVAILABLE'
+  const amount = Number(value)
+  if (amount > 0) return 'POSITIVE'
+  if (amount < 0) return 'NEGATIVE'
+  return 'ZERO'
+}
+
+function fmtProfit(value, status) {
+  const state = profitState(value, status)
+  if (state === 'UNAVAILABLE') return '—'
+  const amount = Number(value)
+  if (state === 'POSITIVE') return `+ ${fmt(amount)}`
+  if (state === 'NEGATIVE') return `- ${fmt(Math.abs(amount))}`
+  return fmt(0)
+}
+
+function profitToneClass(valueStatus, value) {
+  const state = profitState(value, valueStatus)
+  if (state === 'POSITIVE') return 'text-emerald-600 dark:text-emerald-400'
+  if (state === 'NEGATIVE') return 'text-red-600 dark:text-red-400'
+  return 'text-slate-500 dark:text-stone-400'
+}
+
 function fmtDate(s) {
   if (!s) return '—'
   return new Date(s).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -257,8 +298,11 @@ export default function LibroVentas() {
   const [error, setError] = useState(null)
   const hoy = fechaInputLocal()
   const primerDiaMes = `${hoy.slice(0, 8)}01`
-  const [filters, setFilters] = useState({ desde: primerDiaMes, hasta: hoy, q: '' })
-  const [applied, setApplied] = useState({ desde: primerDiaMes, hasta: hoy })
+  const periodoActual = hoy.slice(0, 7)
+  const [periodo, setPeriodo] = useState(periodoActual)
+  const [filters, setFilters] = useState({ q: '' })
+  const [applied, setApplied] = useState(rangoPeriodo(periodoActual, hoy))
+  const [resumen, setResumen] = useState(null)
   const [ventaPanel, setVentaPanel] = useState(null)
   const [selectedDisk, setSelectedDisk] = useState(null)
   const [ventaCancelar, setVentaCancelar] = useState(null)
@@ -279,22 +323,36 @@ export default function LibroVentas() {
     }
   }, [])
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { cargar({ desde: primerDiaMes, hasta: hoy }) }, [cargar, primerDiaMes, hoy])
+  const cargarResumen = useCallback(async (mes) => {
+    try {
+      setResumen(await api.ventas.resumenMensual(mes))
+    } catch (e) {
+      setError(e.message)
+    }
+  }, [])
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    cargar({ desde: primerDiaMes, hasta: hoy })
+    cargarResumen(periodoActual)
+  }, [cargar, cargarResumen, primerDiaMes, hoy, periodoActual])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function aplicar() {
-    const params = {}
-    if (filters.desde) params.desde = filters.desde
-    if (filters.hasta) params.hasta = filters.hasta
+    const params = rangoPeriodo(periodo, hoy)
     if (filters.q) params.q = filters.q
     setApplied(params)
     cargar(params)
+    cargarResumen(periodo)
   }
 
   function limpiar() {
-    setFilters({ desde: '', hasta: '', q: '' })
-    setApplied({})
-    cargar({})
+    setPeriodo(periodoActual)
+    setFilters({ q: '' })
+    const params = rangoPeriodo(periodoActual, hoy)
+    setApplied(params)
+    cargar(params)
+    cargarResumen(periodoActual)
   }
 
   function exportar() {
@@ -321,7 +379,28 @@ export default function LibroVentas() {
       .catch(e => setError(e.message))
   }
 
-  const totalFinal = ventas.reduce((s, v) => s + (v.montoMovimiento ?? v.montoPagado ?? v.totalFinal ?? 0), 0)
+  function exportarResumen() {
+    const token = localStorage.getItem('token')
+    const url = api.ventas.resumenMensualExportarUrl(periodo)
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => {
+        if (redirectIfUnauthorized(r)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+        if (!r.ok) throw new Error('No se pudo generar el reporte mensual')
+        return r.blob()
+      })
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = blobUrl
+        a.download = `resumen-financiero-${periodo}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(blobUrl)
+      })
+      .catch(e => setError(e.message))
+  }
+
   async function cancelarMovimiento() {
     if (!ventaCancelar) return
     setCancelando(true)
@@ -377,6 +456,12 @@ export default function LibroVentas() {
           </svg>
           Exportar Excel
         </button>
+        <button onClick={exportarResumen} className="btn-secondary flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V3m0 13.5 4.5-4.5M12 16.5 7.5 12M4.5 21h15" />
+          </svg>
+          Descargar resumen PDF
+        </button>
       </div>
       {success && <p className="text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">{success}</p>}
 
@@ -384,20 +469,15 @@ export default function LibroVentas() {
       <div className="card p-4">
         <div className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Desde</label>
+            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Mes a analizar</label>
             <input
-              type="date"
-              value={filters.desde}
-              onChange={e => setFilters(f => ({ ...f, desde: e.target.value }))}
-              className="input text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Hasta</label>
-            <input
-              type="date"
-              value={filters.hasta}
-              onChange={e => setFilters(f => ({ ...f, hasta: e.target.value }))}
+              type="month"
+              value={periodo}
+              max={periodoActual}
+              onChange={e => {
+                const mes = e.target.value || periodoActual
+                setPeriodo(mes)
+              }}
               className="input text-sm"
             />
           </div>
@@ -417,18 +497,24 @@ export default function LibroVentas() {
         </div>
       </div>
 
-      {/* Totales */}
-      {ventas.length > 0 && (
-        <div className="grid grid-cols-2 gap-4">
+      {/* Resumen mensual */}
+      {resumen && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Ventas', value: ventas.length },
-            { label: 'Ingresos registrados', value: fmt(totalFinal) },
-          ].map(({ label, value }) => (
+            { label: 'Ventas', value: resumen.cantidadVentas ?? 0 },
+            { label: 'Ítems vendidos', value: resumen.cantidadItems ?? 0 },
+            { label: 'Total ventas', value: fmt(resumen.totalVentas) },
+            { label: 'Ingresos registrados', value: fmt(resumen.ingresosRegistrados) },
+            { label: 'Ganancia de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
+            { label: 'Gastos tienda', value: fmt(resumen.gastos) },
+            { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
+          ].map(({ label, value, tone }) => (
             <div key={label} className="card p-4 text-center">
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">{value}</p>
+              <p className={`text-xl font-bold mt-1 tabular-nums ${tone || 'text-slate-900 dark:text-white'}`}>{value}</p>
             </div>
           ))}
+          {resumen.advertenciaGanancia && <p className="col-span-2 md:col-span-4 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">{resumen.advertenciaGanancia}</p>}
         </div>
       )}
 
@@ -448,7 +534,7 @@ export default function LibroVentas() {
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Medio Pago', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
+                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Ganancia neta', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
                   <th key={h} className="text-left px-2 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-[0.02em] whitespace-nowrap">
                     {h}
                   </th>
@@ -494,8 +580,10 @@ export default function LibroVentas() {
                         )}
                       </div>
                     </td>
-                    <td className="px-2 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">
-                      <div className="truncate" title={v.medioPago || '—'}>{v.medioPago || '—'}</div>
+                    <td className={`px-2 py-3 font-mono tabular-nums font-semibold whitespace-nowrap ${profitToneClass(v.estadoGanancia, v.gananciaNeta)}`}>
+                      <div className="truncate" title={v.tipoMovimiento === 'PAGO_DEUDA' ? 'No aplica' : fmtProfit(v.gananciaNeta, v.estadoGanancia)}>
+                        {v.tipoMovimiento === 'PAGO_DEUDA' ? '—' : fmtProfit(v.gananciaNeta, v.estadoGanancia)}
+                      </div>
                     </td>
                     <td className="px-2 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">
                       {fmt(v.montoMovimiento ?? v.montoPagado ?? v.totalFinal)}

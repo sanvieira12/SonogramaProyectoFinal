@@ -111,7 +111,7 @@ public class ExcelExportService {
 
             String[] headers = {
                 "Movimiento", "N° Factura", "Fecha", "Cliente", "Artista / Descripción", "Álbum",
-                "Canal", "Medio Pago", "Ingreso", "Total Venta", "Monto Deuda",
+                "Canal", "Ganancia neta", "Ingreso", "Total Venta", "Monto Deuda",
                 "Estado Pago", "Observaciones"
             };
 
@@ -124,6 +124,7 @@ public class ExcelExportService {
 
             int rowNum = 1;
             BigDecimal totalIngresos = BigDecimal.ZERO;
+            BigDecimal totalGanancia = BigDecimal.ZERO;
 
             for (VentaResponseDTO v : movimientos) {
                 Row row = sheet.createRow(rowNum++);
@@ -136,7 +137,7 @@ public class ExcelExportService {
                 row.createCell(4).setCellValue(orEmpty(descripcionMovimiento(v)));
                 row.createCell(5).setCellValue(orEmpty(v.getAlbum()));
                 row.createCell(6).setCellValue(orEmpty(v.getCanalVenta()));
-                row.createCell(7).setCellValue(orEmpty(v.getMedioPago()));
+                setMoney(row, 7, gananciaMovimiento(v), moneyStyle);
                 setMoney(row, 8, ingresoMovimiento(v), moneyStyle);
                 setMoney(row, 9, v.getTotalFinal(), moneyStyle);
                 setMoney(row, 10, v.getMontoDeuda(), moneyStyle);
@@ -144,13 +145,15 @@ public class ExcelExportService {
                 row.createCell(12).setCellValue(orEmpty(v.getObservaciones()));
 
                 totalIngresos = totalIngresos.add(ingresoMovimiento(v));
+                if (gananciaMovimiento(v) != null) totalGanancia = totalGanancia.add(gananciaMovimiento(v));
             }
 
             Row totalesRow = sheet.createRow(rowNum + 1);
             CellStyle boldStyle = buildBoldStyle(wb);
-            Cell totalLabel = totalesRow.createCell(7);
+            Cell totalLabel = totalesRow.createCell(6);
             totalLabel.setCellValue("TOTALES");
             totalLabel.setCellStyle(boldStyle);
+            setMoney(totalesRow, 7, totalGanancia, moneyStyle);
             setMoney(totalesRow, 8, totalIngresos, moneyStyle);
 
             sheet.setAutoFilter(new CellRangeAddress(0, 0, 0, headers.length - 1));
@@ -226,6 +229,11 @@ public class ExcelExportService {
         if (movimiento.getMontoMovimiento() != null) return movimiento.getMontoMovimiento();
         if (movimiento.getMontoPagado() != null) return movimiento.getMontoPagado();
         return movimiento.getTotalFinal() != null ? movimiento.getTotalFinal() : BigDecimal.ZERO;
+    }
+
+    private BigDecimal gananciaMovimiento(VentaResponseDTO movimiento) {
+        if ("PAGO_DEUDA".equals(movimiento.getTipoMovimiento())) return null;
+        return movimiento.getGananciaNeta();
     }
 
     private String descripcionMovimiento(VentaResponseDTO movimiento) {

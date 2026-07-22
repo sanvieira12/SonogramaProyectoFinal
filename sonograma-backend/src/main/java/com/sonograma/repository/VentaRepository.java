@@ -19,6 +19,20 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
 
     List<Venta> findByEstado(EstadoVenta estado);
 
+    /** Fetches all profit inputs for a period in one query, excluding cancelled sales. */
+    @Query("""
+        SELECT DISTINCT v FROM Venta v
+        LEFT JOIN FETCH v.detalles dv
+        LEFT JOIN FETCH dv.disco
+        WHERE v.estado <> com.sonograma.enums.EstadoVenta.CANCELADA
+          AND (:desde IS NULL OR v.fechaVenta >= :desde)
+          AND (:hasta IS NULL OR v.fechaVenta <= :hasta)
+        ORDER BY v.fechaVenta ASC, v.idVenta ASC
+        """)
+    List<Venta> findAllForProfitPeriod(
+            @Param("desde") LocalDateTime desde,
+            @Param("hasta") LocalDateTime hasta);
+
     @Query(value =
         "SELECT TO_CHAR(fecha_venta, 'YYYY-MM') AS mes, " +
         "TO_CHAR(fecha_venta, 'Mon YY') AS etiqueta, " +

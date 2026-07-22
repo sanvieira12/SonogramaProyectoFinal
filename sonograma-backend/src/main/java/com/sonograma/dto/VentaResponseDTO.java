@@ -31,6 +31,9 @@ public class VentaResponseDTO {
     private BigDecimal otrosCostos;
     private BigDecimal totalFinal;
     private BigDecimal gananciaEstimada;
+    private BigDecimal gananciaNeta;
+    private String estadoGanancia;
+    private Integer itemsGananciaNoDisponible;
     private String tipoEntrega;
     private String estado;
     private String observaciones;
