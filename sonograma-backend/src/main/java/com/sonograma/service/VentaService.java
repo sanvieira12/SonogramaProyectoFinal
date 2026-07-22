@@ -532,6 +532,11 @@ public class VentaService {
                         .importeVentaReal(itemProfit != null ? itemProfit.actualSaleAmount() : null)
                         .gananciaNeta(itemProfit != null ? itemProfit.netProfit() : null)
                         .estadoGanancia(itemProfit != null ? itemProfit.status().name() : ProfitStatus.UNAVAILABLE.name())
+                        .costoAdquisicionUyu(itemProfit != null ? itemProfit.acquisitionCost() : null)
+                        .fuenteCostoAdquisicion(itemProfit != null ? itemProfit.costSource() : null)
+                        .monedaCostoOriginal(itemProfit != null ? itemProfit.originalCostCurrency() : null)
+                        .tipoCambioUsado(itemProfit != null ? itemProfit.exchangeRateUsed() : null)
+                        .costoCompleto(itemProfit != null ? itemProfit.costComplete() : false)
                         .manualItem(Boolean.TRUE.equals(d.getManualItem()) || d.getDisco() == null)
                         .build());
             }
@@ -639,6 +644,7 @@ public class VentaService {
     }
 
     private DetalleVenta detalleDesdePreparado(Venta venta, PreparedDetalle preparado, String copyIdsSnapshot) {
+        AcquisitionCostResolution cost = preparado.costoAdquisicion();
         return DetalleVenta.builder()
                 .venta(venta)
                 .disco(preparado.disco())
@@ -649,7 +655,11 @@ public class VentaService {
                 .albumSnap(preparado.albumSnap())
                 .descripcionSnap(preparado.descripcionSnap())
                 .codigoSnap(preparado.codigoSnap())
-                .costoAdquisicionUnitario(preparado.costoAdquisicionUnitario())
+                .costoAdquisicionUnitario(cost != null ? cost.originalAmount() : null)
+                .costoAdquisicionUnitarioUyu(cost != null ? cost.unitCostUyu() : null)
+                .costoAdquisicionMonedaOriginal(cost != null ? cost.originalCurrency() : null)
+                .tipoCambioAdquisicion(cost != null ? cost.exchangeRateUsed() : null)
+                .costoAdquisicionFuente(cost != null ? cost.source() : null)
                 .copyIdsSnapshot(copyIdsSnapshot)
                 .build();
     }
@@ -840,25 +850,22 @@ public class VentaService {
             String albumSnap,
             String descripcionSnap,
             String codigoSnap,
-            BigDecimal costoAdquisicionUnitario,
+            AcquisitionCostResolution costoAdquisicion,
             Long copyId,
             String codigoQr
     ) {}
 
     private BigDecimal costoTotalHistorico(List<PreparedDetalle> detalles) {
-        if (detalles.stream().anyMatch(d -> d.costoAdquisicionUnitario() == null)) {
+        if (detalles.stream().anyMatch(d -> d.costoAdquisicion() == null || !d.costoAdquisicion().isComplete())) {
             return null;
         }
         return detalles.stream()
-                .map(d -> d.costoAdquisicionUnitario().multiply(BigDecimal.valueOf(d.cantidad())))
+                .map(d -> d.costoAdquisicion().unitCostUyu().multiply(BigDecimal.valueOf(d.cantidad())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private BigDecimal costoHistorico(Disco disco) {
-        return disco != null && disco.getCosto() != null
-                && disco.getCosto().compareTo(BigDecimal.ZERO) > 0
-                ? disco.getCosto()
-                : null;
+    private AcquisitionCostResolution costoHistorico(Disco disco) {
+        return profitCalculationService.acquisitionCostForDisco(disco);
     }
 
     private void actualizarGananciaHistorica(Venta venta) {

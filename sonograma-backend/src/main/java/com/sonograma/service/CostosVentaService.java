@@ -40,7 +40,7 @@ public class CostosVentaService {
     }
 
     public ResultadoCostoVentaDTO calcular(Disco disco, VentaRequestDTO dto) {
-        BigDecimal costoDisco = disco.getCosto();
+        BigDecimal costoDisco = profitCalculationService.acquisitionCostForDisco(disco).unitCostUyu();
         BigDecimal precioVenta = dto.getPrecioVenta() != null
                 ? dto.getPrecioVenta()
                 : (dto.getTotal() != null ? dto.getTotal() : disco.getPrecioVenta());

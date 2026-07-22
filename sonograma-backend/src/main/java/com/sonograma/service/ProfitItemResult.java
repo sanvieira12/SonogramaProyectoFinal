@@ -14,7 +14,11 @@ public record ProfitItemResult(
         BigDecimal acquisitionCost,
         BigDecimal netProfit,
         ProfitStatus status,
-        String unavailableReason
+        String unavailableReason,
+        String costSource,
+        String originalCostCurrency,
+        BigDecimal exchangeRateUsed,
+        boolean costComplete
 ) {
     public boolean isAvailable() {
         return status != ProfitStatus.UNAVAILABLE;

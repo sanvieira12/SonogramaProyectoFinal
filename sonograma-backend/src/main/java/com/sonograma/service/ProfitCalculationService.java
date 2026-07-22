@@ -1,8 +1,13 @@
 package com.sonograma.service;
 
 import com.sonograma.entity.DetalleVenta;
+import com.sonograma.entity.Disco;
+import com.sonograma.entity.Pedido;
+import com.sonograma.entity.PedidoItem;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.repository.PedidoItemRepository;
+import com.sonograma.repository.PedidoRepository;
 import com.sonograma.repository.VentaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -15,14 +20,16 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Locale;
 
 /**
  * Single source of truth for historical sale profit.
  *
- * This service deliberately never reads Disco.precioVenta or Disco.costo when
- * calculating an existing sale. The sold price comes from the sale/detail and
- * the acquisition cost comes from the detail snapshot (or a strictly
- * recoverable legacy sale-level snapshot).
+ * This service never reads Disco.precioVenta. The sold price comes from the
+ * sale/detail and the acquisition cost comes from the normalized detail
+ * snapshot, or from a strictly recoverable historical purchase record for
+ * legacy rows.
  */
 @Service
 @RequiredArgsConstructor
@@ -35,6 +42,8 @@ public class ProfitCalculationService {
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
 
     private final VentaRepository ventaRepository;
+    private final PedidoRepository pedidoRepository;
+    private final PedidoItemRepository pedidoItemRepository;
 
     /** Calculates one line using its recorded unit sale amount without sale-level allocation. */
     public ProfitItemResult netProfitForSoldItem(DetalleVenta detalle) {
@@ -43,6 +52,50 @@ public class ProfitCalculationService {
         BigDecimal actualAmount = money(nvl(detalle.getPrecioUnitario())
                 .multiply(BigDecimal.valueOf(quantity)));
         return calculateItem(detalle, actualAmount, null);
+    }
+
+    /** Resolves one catalog item's immutable acquisition cost in UYU. */
+    public AcquisitionCostResolution acquisitionCostForDisco(Disco disco) {
+        if (disco == null) {
+            return unavailableCost();
+        }
+
+        String currency = catalogCurrency(disco);
+        Optional<PedidoItem> purchaseItem = purchaseItemFor(disco);
+        if (purchaseItem.isPresent()) {
+            PedidoItem item = purchaseItem.get();
+            Pedido purchase = item.getPedido();
+            BigDecimal rate = purchase != null ? positive(purchase.getTipoCambio()) : null;
+            BigDecimal landedUyu = positiveOrZero(item.getCostoRealUyu());
+            if (landedUyu != null) {
+                return new AcquisitionCostResolution(
+                        cost(landedUyu),
+                        firstNonNull(item.getCostoRealEur(), disco.getCosto()),
+                        purchaseCurrency(purchase, currency),
+                        rate,
+                        "HISTORICAL_PURCHASE_LANDED_COST");
+            }
+            BigDecimal historicalEur = firstNonNull(item.getCostoRealEur(), disco.getCosto());
+            if (isForeign(currency) && rate != null && historicalEur != null) {
+                return new AcquisitionCostResolution(
+                        cost(historicalEur.multiply(rate)), historicalEur, currency, rate,
+                        "HISTORICAL_PURCHASE_CONVERSION");
+            }
+        }
+
+        if (isUyu(currency) && disco.getCosto() != null) {
+            return new AcquisitionCostResolution(
+                    cost(disco.getCosto()), disco.getCosto(), currency, null, "HISTORICAL_CATALOG_UYU");
+        }
+
+        Optional<Pedido> purchase = purchaseFor(disco);
+        BigDecimal rate = purchase.map(Pedido::getTipoCambio).map(this::positive).orElse(null);
+        if (rate != null && disco.getCosto() != null) {
+            return new AcquisitionCostResolution(
+                    cost(disco.getCosto().multiply(rate)), disco.getCosto(), currency, rate,
+                    "HISTORICAL_PURCHASE_CONVERSION");
+        }
+        return unavailableCost();
     }
 
     /** Calculates all sold lines in one sale, including any sale-level discount allocation. */
@@ -100,9 +153,13 @@ public class ProfitCalculationService {
 
     private ProfitResult calculateLegacySale(Venta venta) {
         BigDecimal actualAmount = actualLegacySaleAmount(venta);
-        BigDecimal acquisitionCost = positiveHistoricalCost(venta.getCostoDisco())
-                ? costMoney(venta.getCostoDisco())
-                : null;
+        AcquisitionCostResolution resolution = venta.getDisco() != null
+                ? acquisitionCostForDisco(venta.getDisco()) : unavailableCost();
+        BigDecimal acquisitionCost = resolution.isComplete()
+                ? costMoney(resolution.unitCostUyu())
+                : venta.getDisco() != null && isForeign(catalogCurrency(venta.getDisco()))
+                    ? null
+                    : positiveHistoricalCost(venta.getCostoDisco()) ? costMoney(venta.getCostoDisco()) : null;
         Long discoId = venta.getDisco() != null ? venta.getDisco().getIdDisco() : null;
         ProfitItemResult item = calculateItem(
                 null,
@@ -111,25 +168,34 @@ public class ProfitCalculationService {
                 null,
                 discoId,
                 1,
-                acquisitionCost == null ? "Missing historical sale acquisition cost" : null);
+                acquisitionCost == null ? "Missing historical sale acquisition cost" : null,
+                acquisitionCost == null
+                        ? unavailableCost()
+                        : resolution.isComplete()
+                            ? resolution
+                            : new AcquisitionCostResolution(acquisitionCost, acquisitionCost, "UYU", null, "LEGACY_SALE_SNAPSHOT"));
         return aggregate(List.of(item));
     }
 
     private ProfitItemResult calculateItem(DetalleVenta detalle, BigDecimal actualAmount, Venta sale) {
         int quantity = quantityOf(detalle);
-        BigDecimal acquisitionUnitCost = detalle.getCostoAdquisicionUnitario();
+        AcquisitionCostResolution resolution = acquisitionCostForDetail(detalle);
         String missingReason = null;
 
-        if (!validHistoricalCost(acquisitionUnitCost)) {
-            acquisitionUnitCost = recoverSingleLineLegacyCost(sale, detalle);
+        if (!resolution.isComplete()) {
+            BigDecimal legacyCost = recoverSingleLineLegacyCost(sale, detalle);
+            if (validHistoricalCost(legacyCost)) {
+                resolution = new AcquisitionCostResolution(
+                        cost(legacyCost), legacyCost, "UYU", null, "LEGACY_SALE_SNAPSHOT");
+            }
         }
-        if (!validHistoricalCost(acquisitionUnitCost)) {
+        if (!resolution.isComplete()) {
             missingReason = "Missing historical acquisition cost";
         }
 
-        BigDecimal acquisitionTotal = acquisitionUnitCost == null
+        BigDecimal acquisitionTotal = !resolution.isComplete()
                 ? null
-                : costMoney(acquisitionUnitCost.multiply(BigDecimal.valueOf(quantity)));
+                : costMoney(resolution.unitCostUyu().multiply(BigDecimal.valueOf(quantity)));
         return calculateItem(
                 detalle,
                 actualAmount,
@@ -137,7 +203,8 @@ public class ProfitCalculationService {
                 detalle != null ? detalle.getIdDetalle() : null,
                 detalle != null && detalle.getDisco() != null ? detalle.getDisco().getIdDisco() : null,
                 quantity,
-                missingReason);
+                missingReason,
+                resolution);
     }
 
     private ProfitItemResult calculateItem(
@@ -147,7 +214,8 @@ public class ProfitCalculationService {
             Long detailId,
             Long discoId,
             int quantity,
-            String missingReason) {
+            String missingReason,
+            AcquisitionCostResolution resolution) {
         BigDecimal saleAmount = money(actualAmount);
         if (acquisitionTotal == null) {
             return new ProfitItemResult(
@@ -158,7 +226,11 @@ public class ProfitCalculationService {
                     null,
                     null,
                     ProfitStatus.UNAVAILABLE,
-                    missingReason != null ? missingReason : "Missing historical acquisition cost");
+                    missingReason != null ? missingReason : "Missing historical acquisition cost",
+                    null,
+                    null,
+                    null,
+                    false);
         }
 
         BigDecimal netProfit = money(saleAmount.subtract(acquisitionTotal));
@@ -170,13 +242,89 @@ public class ProfitCalculationService {
                 acquisitionTotal,
                 netProfit,
                 statusFor(netProfit),
-                null);
+                null,
+                resolution.source(),
+                resolution.originalCurrency(),
+                resolution.exchangeRateUsed(),
+                true);
     }
+
+    private AcquisitionCostResolution acquisitionCostForDetail(DetalleVenta detail) {
+        if (detail == null) return unavailableCost();
+        if (validHistoricalCost(detail.getCostoAdquisicionUnitarioUyu())) {
+            return new AcquisitionCostResolution(
+                    cost(detail.getCostoAdquisicionUnitarioUyu()),
+                    detail.getCostoAdquisicionUnitario(),
+                    textOr(detail.getCostoAdquisicionMonedaOriginal(), "UYU"),
+                    detail.getTipoCambioAdquisicion(),
+                    textOr(detail.getCostoAdquisicionFuente(), "HISTORICAL_SALE_SNAPSHOT"));
+        }
+
+        // Rows created before the normalized snapshot was introduced may have
+        // copied a foreign catalog amount into the old snapshot column.
+        if (detail.getDisco() != null && isForeign(catalogCurrency(detail.getDisco()))) {
+            AcquisitionCostResolution catalogResolution = acquisitionCostForDisco(detail.getDisco());
+            if (catalogResolution.isComplete()) return catalogResolution;
+            return unavailableCost();
+        }
+        if (validHistoricalCost(detail.getCostoAdquisicionUnitario())) {
+            return new AcquisitionCostResolution(
+                    cost(detail.getCostoAdquisicionUnitario()), detail.getCostoAdquisicionUnitario(),
+                    textOr(detail.getCostoAdquisicionMonedaOriginal(), "UYU"),
+                    detail.getTipoCambioAdquisicion(), "LEGACY_SALE_SNAPSHOT");
+        }
+        return unavailableCost();
+    }
+
+    private Optional<PedidoItem> purchaseItemFor(Disco disco) {
+        if (pedidoItemRepository == null || disco.getIdDisco() == null) return Optional.empty();
+        Optional<PedidoItem> linked = pedidoItemRepository
+                .findFirstByDiscoIdDiscoOrderByIdPedidoItemDesc(disco.getIdDisco());
+        if (linked.isPresent()) return linked;
+        if (pedidoRepository == null || blank(disco.getNumeroFacturaCompra())) return Optional.empty();
+        return pedidoRepository.findByNumeroFactura(disco.getNumeroFacturaCompra()).stream()
+                .flatMap(pedido -> pedido.getItems().stream())
+                .filter(item -> sameCatalogItem(item, disco))
+                .findFirst();
+    }
+
+    private Optional<Pedido> purchaseFor(Disco disco) {
+        if (pedidoRepository == null || blank(disco.getNumeroFacturaCompra())) return Optional.empty();
+        return pedidoRepository.findByNumeroFactura(disco.getNumeroFacturaCompra()).stream().findFirst();
+    }
+
+    private boolean sameCatalogItem(PedidoItem item, Disco disco) {
+        if (item.getDisco() != null && Objects.equals(item.getDisco().getIdDisco(), disco.getIdDisco())) return true;
+        return item.getCodigo() != null && item.getCodigo().equalsIgnoreCase(disco.getCodigoInterno());
+    }
+
+    private String catalogCurrency(Disco disco) {
+        if (!blank(disco.getCostoMoneda())) return disco.getCostoMoneda().trim().toUpperCase(Locale.ROOT);
+        String source = disco.getProcedencia() == null ? "" : disco.getProcedencia().trim().toUpperCase(Locale.ROOT);
+        return source.contains("FUTURE") ? "EUR" : "UYU";
+    }
+
+    private String purchaseCurrency(Pedido purchase, String fallback) {
+        return purchase != null && !blank(purchase.getMoneda())
+                ? purchase.getMoneda().trim().toUpperCase(Locale.ROOT) : fallback;
+    }
+
+    private boolean isForeign(String currency) { return !isUyu(currency); }
+    private boolean isUyu(String currency) { return "UYU".equalsIgnoreCase(currency); }
+    private boolean blank(String value) { return value == null || value.isBlank(); }
+    private String textOr(String value, String fallback) { return blank(value) ? fallback : value; }
+    private BigDecimal firstNonNull(BigDecimal first, BigDecimal second) { return first != null ? first : second; }
+    private BigDecimal positive(BigDecimal value) { return value != null && value.compareTo(BigDecimal.ZERO) > 0 ? value : null; }
+    private BigDecimal positiveOrZero(BigDecimal value) { return value != null && value.compareTo(BigDecimal.ZERO) >= 0 ? value : null; }
+    private AcquisitionCostResolution unavailableCost() { return new AcquisitionCostResolution(null, null, null, null, null); }
 
     private BigDecimal recoverSingleLineLegacyCost(Venta sale, DetalleVenta detail) {
         if (sale == null || detail == null || sale.getDetalles() == null
                 || sale.getDetalles().size() != 1 || sale.getCostoDisco() == null
                 || !validHistoricalCost(sale.getCostoDisco())) {
+            return null;
+        }
+        if (detail.getDisco() != null && isForeign(catalogCurrency(detail.getDisco()))) {
             return null;
         }
         return costMoney(sale.getCostoDisco().divide(
@@ -292,5 +440,9 @@ public class ProfitCalculationService {
 
     private BigDecimal costMoney(BigDecimal value) {
         return value.setScale(COST_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal cost(BigDecimal value) {
+        return costMoney(value);
     }
 }

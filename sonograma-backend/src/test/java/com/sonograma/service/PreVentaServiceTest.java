@@ -27,7 +27,10 @@ class PreVentaServiceTest {
         DiscoRepository discos = mock(DiscoRepository.class);
         ventas = mock(VentaRepository.class);
         detalles = mock(DetalleVentaRepository.class);
-        service = new PreVentaService(preVentas, clientes, discos, ventas, detalles);
+        service = new PreVentaService(preVentas, clientes, discos, ventas, detalles,
+                new ProfitCalculationService(ventas,
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class)));
         cliente = new Cliente(); cliente.setIdCliente(3L); cliente.setNombre("Ana"); cliente.setApellido("Pérez"); cliente.setActivo(true);
         when(clientes.findById(3L)).thenReturn(Optional.of(cliente));
         when(preVentas.save(any())).thenAnswer(i -> {

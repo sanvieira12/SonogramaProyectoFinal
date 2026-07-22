@@ -16,7 +16,10 @@ class CostosVentaServiceTest {
     @Test
     void calcularNoIncluyeEnvioEnTotalFinalYCalculaGananciaSobreProductos() {
         CostosVentaService service = new CostosVentaService(
-                new ProfitCalculationService(org.mockito.Mockito.mock(VentaRepository.class)));
+                new ProfitCalculationService(
+                        org.mockito.Mockito.mock(VentaRepository.class),
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class)));
         ReflectionTestUtils.setField(service, "porcentajeImpuestoDefault", new BigDecimal("10"));
         ReflectionTestUtils.setField(service, "otrosCostosDefault", new BigDecimal("50"));
 

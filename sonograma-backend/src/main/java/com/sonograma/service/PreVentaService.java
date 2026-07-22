@@ -35,6 +35,7 @@ public class PreVentaService {
     private final DiscoRepository discoRepository;
     private final VentaRepository ventaRepository;
     private final DetalleVentaRepository detalleVentaRepository;
+    private final ProfitCalculationService profitCalculationService;
 
     @Transactional(readOnly = true)
     public List<PreVentaResponseDTO> listar() {
@@ -104,9 +105,15 @@ public class PreVentaService {
         venta = ventaRepository.saveAndFlush(venta);
 
         BigDecimal unitario = preVenta.getPrecio().divide(BigDecimal.valueOf(cantidad), 2, RoundingMode.HALF_UP);
+        AcquisitionCostResolution acquisition = preVenta.getDisco() != null
+            ? profitCalculationService.acquisitionCostForDisco(preVenta.getDisco()) : null;
         DetalleVenta detalle = DetalleVenta.builder().venta(venta).disco(preVenta.getDisco())
             .precioUnitario(unitario).cantidad(cantidad).manualItem(preVenta.getDisco() == null)
-            .costoAdquisicionUnitario(costoHistorico(preVenta.getDisco(), 1))
+            .costoAdquisicionUnitario(acquisition != null ? acquisition.originalAmount() : null)
+            .costoAdquisicionUnitarioUyu(acquisition != null ? acquisition.unitCostUyu() : null)
+            .costoAdquisicionMonedaOriginal(acquisition != null ? acquisition.originalCurrency() : null)
+            .tipoCambioAdquisicion(acquisition != null ? acquisition.exchangeRateUsed() : null)
+            .costoAdquisicionFuente(acquisition != null ? acquisition.source() : null)
             .artistaSnap(preVenta.getDisco() != null ? preVenta.getDisco().getArtista() : preVenta.getArtistaSnap())
             .albumSnap(preVenta.getDisco() != null ? preVenta.getDisco().getAlbum() : preVenta.getAlbumSnap())
             .descripcionSnap(preVenta.getDescripcionSnap()).codigoSnap(preVenta.getCodigoDisco()).build();
@@ -119,10 +126,12 @@ public class PreVentaService {
     }
 
     private BigDecimal costoHistorico(Disco disco, int cantidad) {
-        if (disco == null || disco.getCosto() == null || disco.getCosto().compareTo(BigDecimal.ZERO) <= 0) {
+        if (disco == null) {
             return null;
         }
-        return disco.getCosto().multiply(BigDecimal.valueOf(cantidad));
+        AcquisitionCostResolution acquisition = profitCalculationService.acquisitionCostForDisco(disco);
+        return acquisition.isComplete()
+            ? acquisition.unitCostUyu().multiply(BigDecimal.valueOf(cantidad)) : null;
     }
 
     public void eliminar(Long id) {

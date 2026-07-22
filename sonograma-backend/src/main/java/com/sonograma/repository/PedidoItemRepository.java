@@ -10,5 +10,7 @@ public interface PedidoItemRepository extends JpaRepository<PedidoItem, Long> {
 
     List<PedidoItem> findByPedidoIdPedido(Long pedidoId);
 
+    java.util.Optional<PedidoItem> findFirstByDiscoIdDiscoOrderByIdPedidoItemDesc(Long idDisco);
+
     List<PedidoItem> findByPedidoIdPedidoAndEnrichStatusIn(Long pedidoId, List<EnrichStatus> statuses);
 }

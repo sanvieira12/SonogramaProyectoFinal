@@ -20,6 +20,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExcelExportService {
 
+    private final ProfitCalculationService profitCalculationService;
+
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final DateTimeFormatter FMT_DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
@@ -76,11 +78,12 @@ public class ExcelExportService {
                 setMoney(row, 12, v.getMontoDeuda(), moneyStyle);
 
                 row.createCell(13).setCellValue(v.getEstadoPago() != null ? v.getEstadoPago().name() : "");
-                setMoney(row, 14, v.getGananciaEstimada(), moneyStyle);
+                ProfitResult profit = profitCalculationService.netProfitForSale(v);
+                setMoney(row, 14, profit.netProfit(), moneyStyle);
                 row.createCell(15).setCellValue(orEmpty(v.getObservaciones()));
 
                 totalVentas = totalVentas.add(VentaTotals.totalProductos(v));
-                if (v.getGananciaEstimada() != null) totalGanancia = totalGanancia.add(v.getGananciaEstimada());
+                totalGanancia = totalGanancia.add(profit.netProfit());
             }
 
             Row totalesRow = sheet.createRow(rowNum + 1);

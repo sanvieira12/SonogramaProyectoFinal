@@ -38,6 +38,19 @@ public class DetalleVenta {
     @Column(name = "costo_adquisicion_unitario", precision = 14, scale = 6)
     private BigDecimal costoAdquisicionUnitario;
 
+    /** Normalized historical unit acquisition cost used by profit calculations. */
+    @Column(name = "costo_adquisicion_unitario_uyu", precision = 14, scale = 6)
+    private BigDecimal costoAdquisicionUnitarioUyu;
+
+    @Column(name = "costo_adquisicion_moneda_original", length = 10)
+    private String costoAdquisicionMonedaOriginal;
+
+    @Column(name = "tipo_cambio_adquisicion", precision = 14, scale = 8)
+    private BigDecimal tipoCambioAdquisicion;
+
+    @Column(name = "costo_adquisicion_fuente", length = 80)
+    private String costoAdquisicionFuente;
+
     @Column(name = "cantidad", nullable = false)
     @Builder.Default
     private Integer cantidad = 1;

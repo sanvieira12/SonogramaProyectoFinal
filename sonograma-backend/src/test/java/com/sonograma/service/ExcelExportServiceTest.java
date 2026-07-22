@@ -12,12 +12,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class ExcelExportServiceTest {
 
     @Test
     void libroVentasExportaTotalFinalSinCostoDeEnvio() throws Exception {
-        ExcelExportService service = new ExcelExportService();
+        ExcelExportService service = new ExcelExportService(new ProfitCalculationService(
+                mock(com.sonograma.repository.VentaRepository.class),
+                mock(com.sonograma.repository.PedidoRepository.class),
+                mock(com.sonograma.repository.PedidoItemRepository.class)));
         Cliente cliente = new Cliente();
         cliente.setNombre("Cliente");
 
@@ -40,7 +44,10 @@ class ExcelExportServiceTest {
 
     @Test
     void libroMovimientosReemplazaMedioPagoPorGananciaNetaYNoAsignaGananciaAPagos() throws Exception {
-        ExcelExportService service = new ExcelExportService();
+        ExcelExportService service = new ExcelExportService(new ProfitCalculationService(
+                mock(com.sonograma.repository.VentaRepository.class),
+                mock(com.sonograma.repository.PedidoRepository.class),
+                mock(com.sonograma.repository.PedidoItemRepository.class)));
         VentaResponseDTO venta = VentaResponseDTO.builder()
                 .tipoMovimiento("VENTA")
                 .descripcionMovimiento("Venta")

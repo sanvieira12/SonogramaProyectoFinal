@@ -21,5 +21,10 @@ public class DetalleVentaResponseDTO {
     private BigDecimal importeVentaReal;
     private BigDecimal gananciaNeta;
     private String estadoGanancia;
+    private BigDecimal costoAdquisicionUyu;
+    private String fuenteCostoAdquisicion;
+    private String monedaCostoOriginal;
+    private BigDecimal tipoCambioUsado;
+    private Boolean costoCompleto;
     private Boolean manualItem;
 }
