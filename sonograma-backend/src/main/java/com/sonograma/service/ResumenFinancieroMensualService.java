@@ -28,7 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Single monthly source for the UI and downloadable financial report. */
+/** Single monthly source for the Sales Ledger UI summary. */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -104,7 +104,7 @@ public class ResumenFinancieroMensualService {
         }
 
         BigDecimal ingresosPagos = pagos.stream().map(PagoDeuda::getMonto).filter(Objects::nonNull).reduce(ZERO, BigDecimal::add);
-        BigDecimal ingresos = ingresosVentas.add(ingresosPagos).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal ingresosRegistrados = ingresosVentas.add(ingresosPagos).setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalGastos = gastos.stream().map(GastoTienda::getMonto).filter(Objects::nonNull).reduce(ZERO, BigDecimal::add);
 
         return ResumenFinancieroMensualDTO.builder()
@@ -114,10 +114,10 @@ public class ResumenFinancieroMensualService {
                 .cantidadVentas((long) ventas.size())
                 .cantidadItems(cantidadItems)
                 .totalVentas(totalVentas)
-                .ingresosRegistrados(ingresos)
+                .ingresosRegistrados(ingresosRegistrados)
                 .gananciaItems(ganancia)
                 .gastos(totalGastos)
-                .balanceFinal(ingresos.subtract(totalGastos).setScale(2, RoundingMode.HALF_UP))
+                .balanceFinal(ingresosRegistrados)
                 .itemsGananciaNoDisponible(faltantes)
                 .advertenciaGanancia(faltantes > 0
                         ? faltantes + " ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida."

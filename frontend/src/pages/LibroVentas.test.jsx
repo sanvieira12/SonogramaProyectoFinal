@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LibroVentas from './LibroVentas'
 import { api } from '../api/sonograma'
@@ -11,7 +11,6 @@ vi.mock('../api/sonograma', () => ({
     },
     ventas: {
       resumenMensual: vi.fn(),
-      resumenMensualExportarUrl: vi.fn(),
     },
     discos: {
       porId: vi.fn(),
@@ -129,9 +128,9 @@ describe('LibroVentas profit display', () => {
       ingresosRegistrados: 2850,
       gananciaItems: 170,
       gastos: 100,
-      balanceFinal: 2750,
+      balanceFinal: 2850,
+      advertenciaGanancia: '20 ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida.',
     })
-    api.ventas.resumenMensualExportarUrl.mockReturnValue('/api/ventas/resumen-mensual/exportar?periodo=2026-07')
   })
 
   it('replaces the payment-method column and renders profit statuses without changing row clicks', async () => {
@@ -178,5 +177,35 @@ describe('LibroVentas profit display', () => {
     const table = await screen.findByRole('table')
     expect(table).toHaveClass('table-fixed')
     expect(table.parentElement.parentElement).toHaveClass('overflow-hidden')
+  })
+
+  it('uses recorded income for final balance and removes the warning and PDF action', async () => {
+    render(<LibroVentas />)
+
+    expect(await screen.findByText('Balance final')).toBeInTheDocument()
+    expect(screen.getAllByText('UYU $2.850,00')).toHaveLength(2)
+    expect(screen.getByText('UYU $100,00')).toBeInTheDocument()
+    expect(screen.queryByText(/no tienen un costo de adquisición histórico válido/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descargar resumen PDF' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the Excel export action available', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      ok: true,
+      blob: async () => new Blob(['xlsx']),
+    })
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:excel') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(<LibroVentas />)
+    const button = await screen.findByRole('button', { name: 'Exportar Excel' })
+    fireEvent.click(button)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/ventas/libro/exportar',
+      expect.objectContaining({ headers: { Authorization: 'Bearer null' } }),
+    ))
   })
 })

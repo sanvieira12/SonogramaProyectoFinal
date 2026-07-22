@@ -379,28 +379,6 @@ export default function LibroVentas() {
       .catch(e => setError(e.message))
   }
 
-  function exportarResumen() {
-    const token = localStorage.getItem('token')
-    const url = api.ventas.resumenMensualExportarUrl(periodo)
-    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then(r => {
-        if (redirectIfUnauthorized(r)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
-        if (!r.ok) throw new Error('No se pudo generar el reporte mensual')
-        return r.blob()
-      })
-      .then(blob => {
-        const blobUrl = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = blobUrl
-        a.download = `resumen-financiero-${periodo}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(blobUrl)
-      })
-      .catch(e => setError(e.message))
-  }
-
   async function cancelarMovimiento() {
     if (!ventaCancelar) return
     setCancelando(true)
@@ -456,12 +434,6 @@ export default function LibroVentas() {
           </svg>
           Exportar Excel
         </button>
-        <button onClick={exportarResumen} className="btn-secondary flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V3m0 13.5 4.5-4.5M12 16.5 7.5 12M4.5 21h15" />
-          </svg>
-          Descargar resumen PDF
-        </button>
       </div>
       {success && <p className="text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">{success}</p>}
 
@@ -514,7 +486,6 @@ export default function LibroVentas() {
               <p className={`text-xl font-bold mt-1 tabular-nums ${tone || 'text-slate-900 dark:text-white'}`}>{value}</p>
             </div>
           ))}
-          {resumen.advertenciaGanancia && <p className="col-span-2 md:col-span-4 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">{resumen.advertenciaGanancia}</p>}
         </div>
       )}
 

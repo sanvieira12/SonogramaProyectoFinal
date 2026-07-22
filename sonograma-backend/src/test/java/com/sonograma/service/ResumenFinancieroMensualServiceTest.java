@@ -58,7 +58,8 @@ class ResumenFinancieroMensualServiceTest {
         assertThat(result.getIngresosRegistrados()).isEqualByComparingTo("750.00");
         assertThat(result.getGananciaItems()).isEqualByComparingTo("600.00");
         assertThat(result.getGastos()).isEqualByComparingTo("100.00");
-        assertThat(result.getBalanceFinal()).isEqualByComparingTo("650.00");
+        assertThat(result.getBalanceFinal()).isEqualByComparingTo("750.00");
+        assertThat(result.getBalanceFinal()).isEqualByComparingTo(result.getIngresosRegistrados());
         assertThat(result.getItemsGananciaNoDisponible()).isEqualTo(1);
         assertThat(result.getAdvertenciaGanancia()).contains("1 ítem");
     }
