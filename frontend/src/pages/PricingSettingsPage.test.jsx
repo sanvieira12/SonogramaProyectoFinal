@@ -46,6 +46,7 @@ const rows = [
     markup: 1.7,
     finalSalePriceUyu: 2819.7364,
     pricingMode: 'AUTO',
+    condicion: 'NUEVO',
   },
   {
     idDisco: 2,
@@ -67,6 +68,7 @@ const rows = [
     markup: 1.5,
     finalSalePriceUyu: 1480.5,
     pricingMode: 'MANUAL',
+    condicion: 'USADO',
   },
 ]
 
@@ -171,6 +173,97 @@ describe('PricingSettingsPage', () => {
 
     fireEvent.change(searchInput, { target: { value: 'discogs' } })
     expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
+  })
+
+  it('selecciona Todos por defecto y filtra por condición actualizando el contador', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevos' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.getByText('Artista 1')).toBeInTheDocument()
+    expect(screen.queryByText('Árbol Negro')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
+    expect(screen.queryByText('Artista 1')).not.toBeInTheDocument()
+  })
+
+  it('combina el filtro de condición con la búsqueda de texto', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar discos en stock' }), {
+      target: { value: 'ZX-200' },
+    })
+
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
+    expect(screen.queryByText('Artista 1')).not.toBeInTheDocument()
+  })
+
+  it('normaliza alias de condición nuevos y usados', async () => {
+    api.pricing.preview.mockResolvedValue({
+      rows: [
+        { ...rows[0], condicion: 'new' },
+        { ...rows[1], condicion: 'used' },
+      ],
+    })
+
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevos' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.getByText('Artista 1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
+  })
+
+  it('limpiar búsqueda también restablece la condición a Todos', async () => {
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar discos en stock' }), {
+      target: { value: 'Discogs' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Limpiar búsqueda' }))
+
+    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByText('2 resultados')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Buscar discos en stock' })).toHaveValue('')
+    expect(screen.getByText('Artista 1')).toBeInTheDocument()
+    expect(screen.getByText('Árbol Negro')).toBeInTheDocument()
+  })
+
+  it('mantiene Todos para condiciones ausentes o inesperadas y las excluye de Nuevos/Usados', async () => {
+    const rowsWithUnexpectedConditions = [
+      ...rows,
+      { ...rows[0], idDisco: 3, artist: 'Sin condición', condicion: null },
+      { ...rows[0], idDisco: 4, artist: 'Condición externa', condicion: 'CONSIGNACION' },
+    ]
+    api.pricing.preview.mockResolvedValue({ rows: rowsWithUnexpectedConditions })
+
+    renderPage()
+
+    await screen.findByText('4 resultados')
+    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevos' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(screen.queryByText('Sin condición')).not.toBeInTheDocument()
+    expect(screen.queryByText('Condición externa')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
   })
 
   it('muestra empty state en español y limpiar búsqueda restaura todas las filas', async () => {

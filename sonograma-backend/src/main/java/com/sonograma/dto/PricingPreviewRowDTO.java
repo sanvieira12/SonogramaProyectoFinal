@@ -19,5 +19,6 @@ public record PricingPreviewRowDTO(
     java.math.BigDecimal realCostUyu,
     java.math.BigDecimal markup,
     java.math.BigDecimal finalSalePriceUyu,
-    String pricingMode
+    String pricingMode,
+    String condicion
 ) {}

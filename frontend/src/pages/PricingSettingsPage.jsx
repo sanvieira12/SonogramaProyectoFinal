@@ -27,6 +27,12 @@ const TYPE_LABELS = {
   MULTI: 'Múltiple',
 }
 
+const CONDITION_FILTERS = [
+  { value: 'TODOS', label: 'Todos' },
+  { value: 'NUEVO', label: 'Nuevos' },
+  { value: 'USADO', label: 'Usados' },
+]
+
 function toForm(settings) {
   if (!settings) return EMPTY
   return {
@@ -116,6 +122,13 @@ function normalizeSearchValue(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
+}
+
+function normalizeCondition(value) {
+  const normalized = normalizeSearchValue(value)
+  if (['nuevo', 'nueva', 'new', 'mint', 'm'].includes(normalized)) return 'NUEVO'
+  if (['usado', 'used', 'very good', 'vg', 'vg+', 'vg++'].includes(normalized)) return 'USADO'
+  return 'OTRO'
 }
 
 function searchableValuesForRow(row) {
@@ -222,6 +235,7 @@ export default function PricingSettingsPage() {
   const [savingMarkupId, setSavingMarkupId] = useState(null)
   const [selectedDialogOpen, setSelectedDialogOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [conditionFilter, setConditionFilter] = useState('TODOS')
   const [supplierSort, setSupplierSort] = useState('none')
 
   function syncRows(nextRows) {
@@ -267,9 +281,14 @@ export default function PricingSettingsPage() {
 
   const normalizedSearch = normalizeSearchValue(search)
   const filteredPreview = useMemo(() => {
-    if (!normalizedSearch) return preview
-    return preview.filter(row => searchableValuesForRow(row).some(value => value.includes(normalizedSearch)))
-  }, [normalizedSearch, preview])
+    return preview.filter(row => {
+      const matchesCondition = conditionFilter === 'TODOS'
+        || normalizeCondition(row.condicion) === conditionFilter
+      const matchesSearch = !normalizedSearch
+        || searchableValuesForRow(row).some(value => value.includes(normalizedSearch))
+      return matchesCondition && matchesSearch
+    })
+  }, [conditionFilter, normalizedSearch, preview])
   const sortedPreview = useMemo(() => {
     if (supplierSort === 'none') return filteredPreview
     const factor = supplierSort === 'asc' ? 1 : -1
@@ -294,6 +313,11 @@ export default function PricingSettingsPage() {
       if (current === 'asc') return 'desc'
       return 'none'
     })
+  }
+
+  function clearSearchAndCondition() {
+    setSearch('')
+    setConditionFilter('TODOS')
   }
 
   function setField(field, value) {
@@ -540,7 +564,7 @@ export default function PricingSettingsPage() {
       <section className="card overflow-hidden">
         <div className="sticky top-0 z-20 border-b border-slate-100 bg-white px-5 py-3 dark:border-stone-800 dark:bg-stone-950">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 type="search"
                 value={search}
@@ -552,11 +576,32 @@ export default function PricingSettingsPage() {
               <button
                 type="button"
                 className="btn-secondary h-10 px-3 py-2 text-sm"
-                onClick={() => setSearch('')}
-                disabled={search.trim() === ''}
+                onClick={clearSearchAndCondition}
+                disabled={search.trim() === '' && conditionFilter === 'TODOS'}
               >
                 Limpiar búsqueda
               </button>
+              <div
+                className="inline-flex w-fit max-w-full shrink-0 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-stone-700 dark:bg-stone-900"
+                role="group"
+                aria-label="Filtrar por condición"
+              >
+                {CONDITION_FILTERS.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      conditionFilter === option.value
+                        ? 'bg-white text-slate-900 shadow-sm dark:bg-stone-700 dark:text-white'
+                        : 'text-slate-500 hover:text-slate-700 dark:text-stone-400 dark:hover:text-stone-200'
+                    }`}
+                    onClick={() => setConditionFilter(option.value)}
+                    aria-pressed={conditionFilter === option.value}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <p className="text-sm text-slate-600 dark:text-stone-400">
               {normalizedSearch && visibleCount === 0
@@ -723,7 +768,7 @@ export default function PricingSettingsPage() {
               {!loading && preview.length > 0 && filteredPreview.length === 0 ? (
                 <tr>
                   <td colSpan={19} className="px-4 py-10 text-center text-slate-500 dark:text-stone-500">
-                    Sin resultados para esta búsqueda
+                    {normalizedSearch ? 'Sin resultados para esta búsqueda' : 'Sin resultados para este filtro'}
                   </td>
                 </tr>
               ) : null}

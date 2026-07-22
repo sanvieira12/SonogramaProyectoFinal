@@ -11,6 +11,7 @@ import com.sonograma.dto.PricingSettingsUpdateDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PricingSettings;
+import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.PricingRoundingRule;
 import com.sonograma.enums.RecordType;
@@ -341,6 +342,17 @@ class CatalogPricingServiceTest {
 
         assertEquals("Discogs", preview.rows().get(0).supplier());
         assertEquals("Correo certificado", preview.rows().get(0).shipping());
+    }
+
+    @Test
+    void previewIncludesStoredConditionWithoutChangingIt() {
+        Disco disco = disco(1L, "Condition Album", BigDecimal.ZERO, PricingMode.AUTO, null);
+        disco.setCondicion(CondicionDisco.USADO);
+        when(discoRepository.findAll()).thenReturn(List.of(disco));
+
+        PricingPreviewResponseDTO preview = service.preview(defaultSettings());
+
+        assertEquals("USADO", preview.rows().get(0).condicion());
     }
 
     private PricingSettingsUpdateDTO defaultSettings() {

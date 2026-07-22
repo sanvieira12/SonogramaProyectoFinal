@@ -316,7 +316,8 @@ public class CatalogPricingService {
             pricing != null ? pricing.realUnitCostUyu() : null,
             pricing != null ? pricing.markup() : null,
             pricing != null ? pricing.finalPriceUyu() : disco.getPrecioVenta(),
-            (disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO).name()
+            (disco.getPricingMode() != null ? disco.getPricingMode() : PricingMode.AUTO).name(),
+            disco.getCondicion() != null ? disco.getCondicion().name() : null
         );
     }
 
