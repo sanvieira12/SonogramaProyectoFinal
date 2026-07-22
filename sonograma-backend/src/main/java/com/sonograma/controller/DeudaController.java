@@ -1,13 +1,11 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.DeudaRequestDTO;
+import com.sonograma.dto.DeudaConsolidadaResponseDTO;
 import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.entity.Cliente;
-import com.sonograma.entity.Deuda;
-import com.sonograma.enums.EstadoPago;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
-import com.sonograma.repository.DeudaRepository;
 import com.sonograma.service.DeudaService;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
@@ -33,10 +31,9 @@ public class DeudaController {
 
     private final DeudaService deudaService;
     private final ClienteRepository clienteRepository;
-    private final DeudaRepository deudaRepository;
 
     @GetMapping
-    public List<DeudaResponseDTO> listar(@RequestParam(required = false) String q) {
+    public List<DeudaConsolidadaResponseDTO> listar(@RequestParam(required = false) String q) {
         return deudaService.obtenerPendientes(q);
     }
 
@@ -145,16 +142,14 @@ public class DeudaController {
                         try { fecha = LocalDate.parse(fechaStr); } catch (DateTimeParseException ignored) {}
                     }
 
-                    Deuda deuda = Deuda.builder()
-                        .cliente(clienteOpt.get())
+                    deudaService.crear(DeudaRequestDTO.builder()
+                        .idCliente(clienteOpt.get().getIdCliente())
                         .montoTotal(monto)
                         .montoPagado(BigDecimal.ZERO)
-                        .montoPendiente(monto)
                         .fechaVenta(fecha)
-                        .estadoPago(EstadoPago.PENDIENTE)
+                        .fechaDeuda(fecha)
                         .notas(notasFila)
-                        .build();
-                    deudaRepository.save(deuda);
+                        .build());
                     creados++;
                 } catch (Exception e) {
                     errores.add("Fila " + (i+1) + ": " + e.getMessage());

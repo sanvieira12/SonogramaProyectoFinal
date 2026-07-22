@@ -4,6 +4,9 @@ import com.sonograma.entity.Cliente;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Lock;
+
+import jakarta.persistence.LockModeType;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +16,10 @@ public interface ClienteRepository extends JpaRepository<Cliente, Long> {
     List<Cliente> findByActivoTrue();
 
     Optional<Cliente> findByCedulaAndActivoTrue(String cedula);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Cliente c WHERE c.idCliente = :id")
+    Optional<Cliente> findByIdForUpdate(@Param("id") Long id);
 
     Optional<Cliente> findByCedula(String cedula);
 

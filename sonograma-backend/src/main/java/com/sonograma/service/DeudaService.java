@@ -1,12 +1,15 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.DeudaRequestDTO;
+import com.sonograma.dto.DeudaConsolidadaResponseDTO;
 import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.dto.DetalleVentaResponseDTO;
 import com.sonograma.dto.PagoDeudaDTO;
 import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.PagoDeuda;
+import com.sonograma.entity.Venta;
+import com.sonograma.enums.EstadoVenta;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -21,10 +24,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -37,17 +42,35 @@ public class DeudaService {
     private final PagoDeudaRepository pagoDeudaRepository;
 
     @Transactional(readOnly = true)
-    public List<DeudaResponseDTO> obtenerPendientes(String q) {
-        List<Deuda> deudas = (q != null && !q.isBlank())
+    public List<DeudaConsolidadaResponseDTO> obtenerPendientes(String q) {
+        List<Deuda> candidates = (q != null && !q.isBlank())
                 ? deudaRepository.buscarPendientes(q)
                 : deudaRepository.findAllByActivaTrueOrderByFechaDeudaDescFechaCreacionDesc();
-        return deudas.stream().map(this::toDTO).collect(Collectors.toList());
+
+        // A search may match just one movement. Expand matching customer IDs
+        // before grouping so opening a result still shows the complete history.
+        List<Deuda> deudas = new ArrayList<>(candidates);
+        if (q != null && !q.isBlank()) {
+            List<Long> idClientes = candidates.stream()
+                    .map(Deuda::getCliente)
+                    .filter(Objects::nonNull)
+                    .map(Cliente::getIdCliente)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (!idClientes.isEmpty()) {
+                deudaRepository.findAllByActivaTrueAndClienteIdClienteInOrderByFechaDeudaDescFechaCreacionDesc(idClientes)
+                        .forEach(d -> { if (deudas.stream().noneMatch(existing -> Objects.equals(existing.getIdDeuda(), d.getIdDeuda()))) deudas.add(d); });
+            }
+        }
+
+        return consolidar(deudas);
     }
 
     @Transactional(readOnly = true)
     public List<DeudaResponseDTO> obtenerPorCliente(Long idCliente) {
         return deudaRepository.findByClienteIdClienteAndActivaTrueOrderByFechaCreacionDesc(idCliente)
-                .stream().map(this::toDTO).collect(Collectors.toList());
+                .stream().filter(this::esMovimientoVigente).map(this::toDTO).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -60,29 +83,35 @@ public class DeudaService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> obtenerResumen() {
-        List<Deuda> pendientes = deudaRepository.findByEstadoPagoNotAndActivaTrue(EstadoPago.PAGADO);
-        BigDecimal totalPendiente = pendientes.stream()
-                .map(Deuda::getMontoPendiente)
+        List<DeudaResponseDTO> movimientos = deudaRepository.findAllByActivaTrueOrderByFechaDeudaDescFechaCreacionDesc()
+                .stream()
+                .filter(this::esMovimientoVigente)
+                .map(this::toDTO)
+                .filter(d -> d.getMontoPendiente().compareTo(BigDecimal.ZERO) > 0)
+                .toList();
+        List<DeudaConsolidadaResponseDTO> consolidadas = consolidarDTOs(movimientos);
+        BigDecimal totalPendiente = consolidadas.stream()
+                .map(DeudaConsolidadaResponseDTO::getMontoPendiente)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        long cantDeudores = pendientes.stream()
-                .map(this::deudorKey)
-                .distinct().count();
-        BigDecimal mayorDeuda = pendientes.stream()
-                .map(Deuda::getMontoPendiente)
+        long cantDeudores = consolidadas.size();
+        BigDecimal mayorDeuda = consolidadas.stream()
+                .map(DeudaConsolidadaResponseDTO::getMontoPendiente)
                 .max(BigDecimal::compareTo)
                 .orElse(BigDecimal.ZERO);
         return Map.of(
                 "totalPendiente", totalPendiente,
                 "cantDeudores", cantDeudores,
                 "mayorDeuda", mayorDeuda,
-                "cantDeudas", pendientes.size()
+                "cantDeudas", movimientos.size()
         );
     }
 
     public DeudaResponseDTO crear(DeudaRequestDTO request) {
         Deuda deuda = new Deuda();
         aplicarRequest(deuda, request, true);
-        return toDTO(deudaRepository.save(deuda));
+        deuda.setMontoPagadoInicial(Objects.requireNonNullElse(deuda.getMontoPagado(), BigDecimal.ZERO));
+        Deuda saved = deudaRepository.save(deuda);
+        return toDTO(saved);
     }
 
     public DeudaResponseDTO actualizar(Long idDeuda, DeudaRequestDTO request) {
@@ -90,7 +119,42 @@ public class DeudaService {
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
         aplicarRequest(deuda, request, false);
+        deuda.setMontoPagadoInicial(inicialDesdeMontoActual(deuda));
+        recalcularEstado(deuda);
         return toDTO(deudaRepository.save(deuda));
+    }
+
+    /**
+     * Central debt writer used by every sale path. A debt row is a movement,
+     * not a customer container; the customer is consolidated when read.
+     */
+    public void sincronizarVenta(Venta venta, Cliente cliente, BigDecimal total, BigDecimal montoPagado,
+                                 BigDecimal montoDeuda, EstadoPago estadoPago, LocalDateTime fechaVenta) {
+        Cliente clienteBloqueado = clienteRepository.findByIdForUpdate(cliente.getIdCliente())
+                .filter(Cliente::getActivo)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente", cliente.getIdCliente()));
+        Deuda deuda = deudaRepository.findByVentaIdVenta(venta.getIdVenta()).orElse(null);
+        if (deuda == null && montoDeuda.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        if (deuda == null) {
+            deuda = new Deuda();
+            deuda.setVenta(venta);
+            deuda.setFechaCreacion(LocalDateTime.now());
+            deuda.setMontoPagadoInicial(Objects.requireNonNullElse(montoPagado, BigDecimal.ZERO));
+        } else {
+            // Set the new sale total before clamping the recovered initial payment.
+            deuda.setMontoTotal(total);
+            deuda.setMontoPagadoInicial(inicialDesdeMontoActual(deuda, montoPagado));
+        }
+        deuda.setCliente(clienteBloqueado);
+        deuda.setMontoTotal(total);
+        deuda.setFechaVenta(fechaVenta.toLocalDate());
+        deuda.setFechaDeuda(fechaVenta.toLocalDate());
+        deuda.setActiva(true);
+        deuda.setUpdatedAt(LocalDateTime.now());
+        recalcularEstado(deuda);
+        deudaRepository.save(deuda);
     }
 
     public void eliminar(Long idDeuda) {
@@ -107,7 +171,8 @@ public class DeudaService {
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
 
-        if (deuda.getEstadoPago() == EstadoPago.PAGADO) {
+        recalcularEstado(deuda);
+        if (deuda.getMontoPendiente().compareTo(BigDecimal.ZERO) == 0) {
             throw new NegocioException("La deuda ya está pagada");
         }
         if (monto.compareTo(BigDecimal.ZERO) <= 0) {
@@ -125,24 +190,10 @@ public class DeudaService {
                 .build();
         pagoDeudaRepository.save(pago);
 
-        BigDecimal nuevoPagado = deuda.getMontoPagado().add(monto);
-        BigDecimal nuevoPendiente = deuda.getMontoTotal().subtract(nuevoPagado);
-        if (nuevoPendiente.compareTo(BigDecimal.ZERO) < 0) nuevoPendiente = BigDecimal.ZERO;
-
-        deuda.setMontoPagado(nuevoPagado);
-        deuda.setMontoPendiente(nuevoPendiente);
         deuda.setFechaUltimoPago(LocalDate.now());
         deuda.setUpdatedAt(LocalDateTime.now());
-        deuda.setEstadoPago(nuevoPendiente.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PAGADO : EstadoPago.PARCIAL);
         if (notas != null && !notas.isBlank()) deuda.setNotas(notas);
-
-        // Sync back to Venta
-        if (deuda.getVenta() != null) {
-            deuda.getVenta().setMontoPagado(nuevoPagado);
-            deuda.getVenta().setMontoDeuda(nuevoPendiente);
-            deuda.getVenta().setEstadoPago(deuda.getEstadoPago());
-        }
-
+        recalcularEstado(deuda);
         return toDTO(deudaRepository.save(deuda));
     }
 
@@ -157,27 +208,16 @@ public class DeudaService {
         if (nuevoPagado.compareTo(BigDecimal.ZERO) < 0) {
             throw new NegocioException("El pago no puede eliminarse porque el saldo de la deuda es inconsistente");
         }
-        BigDecimal nuevoPendiente = deuda.getMontoTotal().subtract(nuevoPagado);
-        EstadoPago nuevoEstado = nuevoPendiente.compareTo(BigDecimal.ZERO) == 0
-                ? EstadoPago.PAGADO
-                : nuevoPagado.compareTo(BigDecimal.ZERO) == 0 ? EstadoPago.PENDIENTE : EstadoPago.PARCIAL;
-
         pagoDeudaRepository.delete(pago);
         pagoDeudaRepository.flush();
         LocalDate fechaUltimoPago = pagoDeudaRepository
                 .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda).stream()
                 .findFirst().map(PagoDeuda::getFechaPago).orElse(null);
 
-        deuda.setMontoPagado(nuevoPagado);
-        deuda.setMontoPendiente(nuevoPendiente);
-        deuda.setEstadoPago(nuevoEstado);
         deuda.setFechaUltimoPago(fechaUltimoPago);
         deuda.setUpdatedAt(LocalDateTime.now());
-        if (deuda.getVenta() != null) {
-            deuda.getVenta().setMontoPagado(nuevoPagado);
-            deuda.getVenta().setMontoDeuda(nuevoPendiente);
-            deuda.getVenta().setEstadoPago(nuevoEstado);
-        }
+        if (deuda.getMontoPagadoInicial() == null) deuda.setMontoPagadoInicial(BigDecimal.ZERO);
+        recalcularEstado(deuda);
         deudaRepository.save(deuda);
     }
 
@@ -250,9 +290,10 @@ public class DeudaService {
     }
 
     private DeudaResponseDTO toDTO(Deuda d) {
-        List<PagoDeudaDTO> pagos = pagoDeudaRepository
-                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(d.getIdDeuda())
-                .stream()
+        List<PagoDeuda> pagosOrigen = pagosDeDeuda(d);
+        Balance balance = calcularBalance(d, pagosOrigen);
+        List<PagoDeudaDTO> pagos = pagosOrigen.stream()
+                .filter(p -> p.getMonto() != null && p.getMonto().compareTo(BigDecimal.ZERO) > 0)
                 .map(this::toPagoDTO)
                 .toList();
         return DeudaResponseDTO.builder()
@@ -267,15 +308,15 @@ public class DeudaService {
                 .instagramManual(!isBlank(d.getInstagramManual()) ? d.getInstagramManual() : (d.getCliente() != null ? d.getCliente().getInstagramUsuario() : null))
                 .ciManual(!isBlank(d.getCiManual()) ? d.getCiManual() : (d.getCliente() != null ? d.getCliente().getCedula() : null))
                 .descripcion(d.getDescripcion())
-                .montoTotal(d.getMontoTotal())
-                .montoPagado(d.getMontoPagado())
-                .montoPendiente(d.getMontoPendiente())
+                .montoTotal(balance.total())
+                .montoPagado(balance.pagado())
+                .montoPendiente(balance.pendiente())
                 .fechaVenta(d.getFechaVenta())
                 .fechaDeuda(d.getFechaDeuda())
                 .fechaUltimoPago(d.getFechaUltimoPago())
                 .fechaCreacion(d.getFechaCreacion())
                 .updatedAt(d.getUpdatedAt())
-                .estadoPago(d.getEstadoPago().name())
+                .estadoPago(balance.estado().name())
                 .notas(d.getNotas())
                 .pagos(pagos)
                 .detalles(d.getVenta() != null && d.getVenta().getDetalles() != null
@@ -292,8 +333,114 @@ public class DeudaService {
                                 .manualItem(Boolean.TRUE.equals(detalle.getManualItem()) || detalle.getDisco() == null)
                                 .build()).toList()
                         : List.of())
+                .movimientos(null)
                 .build();
     }
+
+    private List<DeudaConsolidadaResponseDTO> consolidar(List<Deuda> deudas) {
+        List<DeudaResponseDTO> movimientos = deudas.stream()
+                .filter(this::esMovimientoVigente)
+                .map(this::toDTO)
+                .toList();
+        return consolidarDTOs(movimientos);
+    }
+
+    private List<DeudaConsolidadaResponseDTO> consolidarDTOs(List<DeudaResponseDTO> movimientos) {
+        Map<String, List<DeudaResponseDTO>> porGrupo = movimientos.stream()
+                .collect(Collectors.groupingBy(this::grupoKey, LinkedHashMap::new, Collectors.toList()));
+        return porGrupo.values().stream()
+                .map(this::consolidarGrupo)
+                .filter(d -> d.getMontoPendiente().compareTo(BigDecimal.ZERO) > 0)
+                .sorted(Comparator.comparing(DeudaConsolidadaResponseDTO::getFechaDeuda,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+    }
+
+    private DeudaConsolidadaResponseDTO consolidarGrupo(List<DeudaResponseDTO> movimientos) {
+        DeudaResponseDTO primero = movimientos.get(0);
+        BigDecimal total = movimientos.stream().map(DeudaResponseDTO::getMontoTotal)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pagado = movimientos.stream().map(DeudaResponseDTO::getMontoPagado)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pendiente = movimientos.stream().map(DeudaResponseDTO::getMontoPendiente)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        String estado = estadoDesdeMontos(total, pagado).name();
+        return DeudaConsolidadaResponseDTO.builder()
+                .idDeuda(primero.getIdDeuda())
+                .grupoKey(grupoKey(primero))
+                .idCliente(primero.getIdCliente())
+                .nombreCliente(primero.getNombreCliente())
+                .nombreDeudorManual(primero.getNombreDeudorManual())
+                .mailManual(primero.getMailManual())
+                .instagramManual(primero.getInstagramManual())
+                .ciManual(primero.getCiManual())
+                .montoTotal(total)
+                .montoPagado(pagado)
+                .montoPendiente(pendiente)
+                .fechaVenta(movimientos.stream().map(DeudaResponseDTO::getFechaVenta).filter(Objects::nonNull).max(LocalDate::compareTo).orElse(null))
+                .fechaDeuda(movimientos.stream().map(DeudaResponseDTO::getFechaDeuda).filter(Objects::nonNull).max(LocalDate::compareTo).orElse(null))
+                .fechaUltimoPago(movimientos.stream().map(DeudaResponseDTO::getFechaUltimoPago).filter(Objects::nonNull).max(LocalDate::compareTo).orElse(null))
+                .fechaCreacion(movimientos.stream().map(DeudaResponseDTO::getFechaCreacion).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(null))
+                .updatedAt(movimientos.stream().map(DeudaResponseDTO::getUpdatedAt).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(null))
+                .estadoPago(estado)
+                .cantidadMovimientos(movimientos.size())
+                .movimientos(movimientos)
+                .build();
+    }
+
+    private String grupoKey(DeudaResponseDTO deuda) {
+        return deuda.getIdCliente() != null ? "cliente:" + deuda.getIdCliente() : "manual:" + deuda.getIdDeuda();
+    }
+
+    private boolean esMovimientoVigente(Deuda deuda) {
+        return Boolean.TRUE.equals(deuda.getActiva())
+                && (deuda.getVenta() == null || deuda.getVenta().getEstado() != EstadoVenta.CANCELADA);
+    }
+
+    private List<PagoDeuda> pagosDeDeuda(Deuda deuda) {
+        if (deuda.getIdDeuda() == null) return List.of();
+        List<PagoDeuda> pagos = pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda());
+        return pagos == null ? List.of() : pagos;
+    }
+
+    private Balance calcularBalance(Deuda deuda, List<PagoDeuda> pagos) {
+        BigDecimal total = Objects.requireNonNullElse(deuda.getMontoTotal(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+        BigDecimal inicial = Objects.requireNonNullElse(deuda.getMontoPagadoInicial(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+        BigDecimal pagosValidos = pagos.stream()
+                .filter(p -> p != null && p.getMonto() != null && p.getMonto().compareTo(BigDecimal.ZERO) > 0)
+                .map(PagoDeuda::getMonto)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pagado = inicial.add(pagosValidos).min(total);
+        BigDecimal pendiente = total.subtract(pagado).max(BigDecimal.ZERO);
+        return new Balance(total, pagado, pendiente, estadoDesdeMontos(total, pagado));
+    }
+
+    private void recalcularEstado(Deuda deuda) {
+        Balance balance = calcularBalance(deuda, pagosDeDeuda(deuda));
+        deuda.setMontoTotal(balance.total());
+        deuda.setMontoPagado(balance.pagado());
+        deuda.setMontoPendiente(balance.pendiente());
+        deuda.setEstadoPago(balance.estado());
+        if (deuda.getVenta() != null) {
+            deuda.getVenta().setMontoPagado(balance.pagado());
+            deuda.getVenta().setMontoDeuda(balance.pendiente());
+            deuda.getVenta().setEstadoPago(balance.estado());
+        }
+    }
+
+    private BigDecimal inicialDesdeMontoActual(Deuda deuda) {
+        return inicialDesdeMontoActual(deuda, Objects.requireNonNullElse(deuda.getMontoPagado(), BigDecimal.ZERO));
+    }
+
+    private BigDecimal inicialDesdeMontoActual(Deuda deuda, BigDecimal montoActual) {
+        BigDecimal pagos = pagosDeDeuda(deuda).stream()
+                .filter(p -> p != null && p.getMonto() != null && p.getMonto().compareTo(BigDecimal.ZERO) > 0)
+                .map(PagoDeuda::getMonto).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total = Objects.requireNonNullElse(deuda.getMontoTotal(), BigDecimal.ZERO);
+        return montoActual.subtract(pagos).max(BigDecimal.ZERO).min(total);
+    }
+
+    private record Balance(BigDecimal total, BigDecimal pagado, BigDecimal pendiente, EstadoPago estado) {}
 
     private PagoDeudaDTO toPagoDTO(PagoDeuda pago) {
         return PagoDeudaDTO.builder()
@@ -326,23 +473,6 @@ public class DeudaService {
             return null;
         }
 
-        if (!isBlank(cedula)) {
-            Cliente byCedula = clienteRepository.findByCedulaAndActivoTrue(cedula).orElse(null);
-            if (byCedula != null) {
-                return byCedula;
-            }
-        }
-
-        String normalizedName = normalizarNombre(nombre);
-        Cliente existing = clienteRepository.findByActivoTrue().stream()
-                .filter(cliente -> !isBlank(email) && email.equalsIgnoreCase(textoNulo(cliente.getEmail()))
-                        || !normalizedName.isBlank() && normalizedName.equals(normalizarNombre(nombreCompleto(cliente))))
-                .findFirst()
-                .orElse(null);
-        if (existing != null) {
-            return existing;
-        }
-
         if (isBlank(nombre)) {
             throw new NegocioException("Ingresá el nombre del cliente para registrar la deuda");
         }
@@ -358,26 +488,12 @@ public class DeudaService {
         return clienteRepository.save(nuevo);
     }
 
-    private String deudorKey(Deuda d) {
-        if (d.getCliente() != null) return "cliente:" + d.getCliente().getIdCliente();
-        return "manual:" + Objects.toString(d.getNombreDeudorManual(), d.getIdDeuda().toString()).toLowerCase();
-    }
-
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 
     private String textoNulo(String value) {
         return isBlank(value) ? null : value.trim();
-    }
-
-    private String nombreCompleto(Cliente cliente) {
-        return ((cliente.getNombre() == null ? "" : cliente.getNombre()) + " "
-                + (cliente.getApellido() == null ? "" : cliente.getApellido())).trim();
-    }
-
-    private String normalizarNombre(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 
     private String[] splitNombre(String nombreCompleto) {

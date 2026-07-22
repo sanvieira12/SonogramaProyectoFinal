@@ -49,9 +49,10 @@ function buildForm(deuda) {
   }
 }
 
-function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
+function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
   const [mode, setMode] = useState(deuda?.idDeuda ? 'view' : 'edit')
-  const [form, setForm] = useState(() => buildForm(deuda))
+  const [movimientoId, setMovimientoId] = useState(() => deuda?.movimientos?.[0]?.idDeuda || deuda?.idDeuda)
+  const [form, setForm] = useState(() => buildForm(deuda?.movimientos?.[0] || deuda))
   const [payment, setPayment] = useState({ monto: '', notas: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -59,13 +60,17 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setForm(buildForm(deuda))
+      setForm(buildForm(deuda?.movimientos?.[0] || deuda))
+      setMovimientoId(deuda?.movimientos?.[0]?.idDeuda || deuda?.idDeuda)
       setMode(deuda?.idDeuda ? 'view' : 'edit')
       setError('')
       setMessage('')
     }, 0)
     return () => window.clearTimeout(timer)
   }, [deuda])
+
+  const movimientos = deuda?.movimientos?.length ? deuda.movimientos : (deuda?.idDeuda ? [deuda] : [])
+  const movimiento = movimientos.find(m => m.idDeuda === movimientoId) || movimientos[0] || null
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -94,8 +99,8 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
     setError('')
     setMessage('')
     try {
-      const saved = deuda?.idDeuda
-        ? await api.deudas.actualizar(deuda.idDeuda, payload())
+      const saved = movimiento?.idDeuda
+        ? await api.deudas.actualizar(movimiento.idDeuda, payload())
         : await api.deudas.crear(payload())
       onSaved(saved)
       setMode('view')
@@ -118,7 +123,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
     setError('')
     setMessage('')
     try {
-      const updated = await api.deudas.registrarPago(deuda.idDeuda, monto, payment.notas || null)
+      const updated = await api.deudas.registrarPago(movimiento.idDeuda, monto, payment.notas || null)
       onPaid(updated)
       setPayment({ monto: '', notas: '' })
       setMessage('Pago registrado')
@@ -136,10 +141,10 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
       <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur border-b border-slate-100 dark:border-stone-800 px-5 py-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white">{deuda?.idDeuda ? current.nombreCliente : 'Nueva deuda'}</h2>
-          <p className="text-sm text-slate-400 dark:text-stone-500">{current.numeroRecibo ? `Recibo ${current.numeroRecibo}` : 'Deuda manual editable'}</p>
+          <p className="text-sm text-slate-400 dark:text-stone-500">{deuda?.cantidadMovimientos ? `${deuda.cantidadMovimientos} movimientos asociados` : 'Deuda manual editable'}</p>
         </div>
         <div className="flex items-center gap-2">
-          {deuda?.idDeuda && <button onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')} className="btn-secondary text-sm">{mode === 'edit' ? 'Ver' : 'Editar'}</button>}
+          {deuda?.idDeuda && movimiento && <button onClick={() => { setForm(buildForm(movimiento)); setMode(mode === 'edit' ? 'view' : 'edit') }} className="btn-secondary text-sm">{mode === 'edit' ? 'Ver' : 'Editar'}</button>}
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800">✕</button>
         </div>
       </div>
@@ -150,6 +155,14 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
 
         {mode === 'edit' ? (
           <form onSubmit={save} className="space-y-4">
+            {movimientos.length > 1 && (
+              <div>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Movimiento a editar</label>
+                <select className="input w-full" value={movimiento?.idDeuda || ''} onChange={e => { const next = movimientos.find(m => m.idDeuda === Number(e.target.value)); setMovimientoId(Number(e.target.value)); setForm(buildForm(next)) }}>
+                  {movimientos.map(m => <option key={m.idDeuda} value={m.idDeuda}>{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Recibo ${m.numeroRecibo}` : `Deuda #${m.idDeuda}`} · {fmt(m.montoPendiente)}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Cliente existente</label>
               <select className="input w-full" value={form.idCliente || ''} onChange={e => set('idCliente', e.target.value)}>
@@ -209,79 +222,28 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid }) {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <div className="card p-4"><p className="text-xs text-slate-400 dark:text-stone-500">Total</p><p className="text-lg font-bold text-slate-900 dark:text-white">{fmt(current.montoTotal)}</p></div>
+              <div className="card p-4"><p className="text-xs text-slate-400 dark:text-stone-500">Total consolidado</p><p className="text-lg font-bold text-slate-900 dark:text-white">{fmt(current.montoTotal)}</p></div>
               <div className="card p-4"><p className="text-xs text-slate-400 dark:text-stone-500">Pendiente</p><p className="text-lg font-bold text-red-600 dark:text-red-400">{fmt(current.montoPendiente)}</p></div>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              {[
-                ['Número de recibo', current.numeroRecibo],
-                ['Fecha', fmtDate(current.fechaDeuda || current.fechaVenta)],
-                ['Mail', current.mailManual],
-                ['Instagram', current.instagramManual],
-                ['CI', current.ciManual],
-                ['Último pago', fmtDate(current.fechaUltimoPago)],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">{label}</p>
-                  <p className="text-slate-700 dark:text-stone-300">{value || '—'}</p>
-                </div>
+              {[['Mail', current.mailManual], ['Instagram', current.instagramManual], ['CI', current.ciManual], ['Movimientos', current.cantidadMovimientos]].map(([label, value]) => (
+                <div key={label}><p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">{label}</p><p className="text-slate-700 dark:text-stone-300">{value || '—'}</p></div>
               ))}
             </div>
-            {(current.descripcion || current.notas) && (
-              <div className="space-y-3">
-                {current.descripcion && <p className="text-sm text-slate-600 dark:text-stone-400 whitespace-pre-wrap">{current.descripcion}</p>}
-                {current.notas && <p className="text-sm text-slate-500 dark:text-stone-500 whitespace-pre-wrap">{current.notas}</p>}
-              </div>
-            )}
-            {current.detalles?.length > 0 && (
-              <div>
-                <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</h3>
-                <div className="space-y-2">
-                  {current.detalles.map((detalle, index) => (
-                    <div key={detalle.idDetalle || detalle.idDisco || index} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center gap-3">
-                      {detalle.imagenUrl && (
-                        <img
-                          src={resolveApiUrl(detalle.imagenUrl)}
-                          alt={detalle.album || 'Portada del disco'}
-                          className="w-14 h-14 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p>
-                        <p className="text-xs text-slate-400 dark:text-stone-500">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p>
-                      </div>
-                    </div>
-                  ))}
+            <div className="space-y-4">
+              {movimientos.map(m => (
+                <div key={m.idDeuda} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div><p className="text-sm font-semibold text-slate-800 dark:text-stone-200">Movimiento #{m.idDeuda}</p><p className="text-xs text-slate-400 dark:text-stone-500">{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Recibo ${m.numeroRecibo}` : 'Sin número de boleta'}</p></div>
+                    <div className="flex items-center gap-3">{m.estadoPago !== 'PAGADO' && <button type="button" onClick={() => { setMovimientoId(m.idDeuda); setPayment({ monto: '', notas: '' }) }} className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-medium">Pago</button>}<button type="button" onClick={() => onDelete(m)} className="text-xs text-red-600 dark:text-red-400 hover:underline font-medium">Eliminar</button></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-xs text-slate-400">Original</p><p className="font-semibold">{fmt(m.montoTotal)}</p></div><div><p className="text-xs text-slate-400">Pagado</p><p className="font-semibold">{fmt(m.montoPagado)}</p></div><div><p className="text-xs text-slate-400">Restante</p><p className="font-semibold text-red-600">{fmt(m.montoPendiente)}</p></div></div>
+                  {m.detalles?.length > 0 && <div className="space-y-2"><p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Discos vendidos</p>{m.detalles.map((detalle, index) => <div key={detalle.idDetalle || detalle.idDisco || index} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center gap-3">{detalle.imagenUrl && <img src={resolveApiUrl(detalle.imagenUrl)} alt={detalle.album || 'Portada del disco'} className="w-14 h-14 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />}<div className="min-w-0"><p className="text-sm font-medium text-slate-800 dark:text-stone-200">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p><p className="text-xs text-slate-400 dark:text-stone-500">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p></div></div>)}</div>}
+                  {(m.descripcion || m.notas) && <div className="space-y-1">{m.descripcion && <p className="text-sm text-slate-600 dark:text-stone-400 whitespace-pre-wrap">{m.descripcion}</p>}{m.notas && <p className="text-sm text-slate-500 dark:text-stone-500 whitespace-pre-wrap">{m.notas}</p>}</div>}
+                  {m.estadoPago !== 'PAGADO' && movimientoId === m.idDeuda && <form onSubmit={pay} className="rounded-xl bg-slate-50 dark:bg-stone-900/60 p-3 space-y-3"><h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Registrar pago</h3><div className="grid grid-cols-2 gap-3"><input type="number" step="0.01" min="0.01" max={m.montoPendiente} className="input w-full" placeholder={`Máx. ${fmt(m.montoPendiente)}`} value={payment.monto} onChange={e => setPayment(p => ({ ...p, monto: e.target.value }))} /><input className="input w-full" placeholder="Notas" value={payment.notas} onChange={e => setPayment(p => ({ ...p, notas: e.target.value }))} /></div><button disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Registrando…' : 'Confirmar pago'}</button></form>}
+                  <div><p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Historial de pagos</p>{(m.pagos || []).length === 0 ? <p className="text-sm text-slate-400 dark:text-stone-600">Sin pagos registrados.</p> : <div className="space-y-2">{m.pagos.map(p => <div key={p.idPagoDeuda} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center justify-between gap-3 text-sm"><div><p className="font-medium text-slate-800 dark:text-stone-200">{fmt(p.monto)}</p>{p.notas && <p className="text-xs text-slate-400 dark:text-stone-500">{p.notas}</p>}</div><span className="text-xs text-slate-400 dark:text-stone-500">{fmtDate(p.fechaPago)}</span></div>)}</div>}</div>
                 </div>
-              </div>
-            )}
-            {current.estadoPago !== 'PAGADO' && (
-              <form onSubmit={pay} className="rounded-xl border border-slate-100 dark:border-stone-800 p-4 space-y-3">
-                <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Registrar pago</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="number" step="0.01" min="0.01" max={current.montoPendiente} className="input w-full" placeholder={`Máx. ${fmt(current.montoPendiente)}`} value={payment.monto} onChange={e => setPayment(p => ({ ...p, monto: e.target.value }))} />
-                  <input className="input w-full" placeholder="Notas" value={payment.notas} onChange={e => setPayment(p => ({ ...p, notas: e.target.value }))} />
-                </div>
-                <button disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Registrando…' : 'Confirmar pago'}</button>
-              </form>
-            )}
-            <div>
-              <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Historial de pagos</h3>
-              {(current.pagos || []).length === 0 ? (
-                <p className="text-sm text-slate-400 dark:text-stone-600">Sin pagos registrados.</p>
-              ) : (
-                <div className="space-y-2">
-                  {current.pagos.map(p => (
-                    <div key={p.idPagoDeuda} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center justify-between gap-3 text-sm">
-                      <div>
-                        <p className="font-medium text-slate-800 dark:text-stone-200">{fmt(p.monto)}</p>
-                        {p.notas && <p className="text-xs text-slate-400 dark:text-stone-500">{p.notas}</p>}
-                      </div>
-                      <span className="text-xs text-slate-400 dark:text-stone-500">{fmtDate(p.fechaPago)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
           </>
         )}
@@ -303,7 +265,7 @@ export default function Deudas() {
   const [eliminando, setEliminando] = useState(false)
   const [error, setError] = useState('')
 
-  const cargar = useCallback(async (query = search) => {
+  const cargar = useCallback(async (query = search, focusMovementId = null) => {
     setLoading(true)
     setError('')
     try {
@@ -313,6 +275,10 @@ export default function Deudas() {
         api.clientes.todos(),
       ])
       setDeudas(d)
+      if (focusMovementId != null) {
+        const focused = d.find(row => row.movimientos?.some(m => m.idDeuda === focusMovementId))
+        setPanelDeuda(focused || null)
+      }
       setResumen(r)
       setClientes(c)
     } catch (e) {
@@ -332,15 +298,9 @@ export default function Deudas() {
     cargar(q)
   }
 
-  function upsert(updated) {
-    setDeudas(prev => {
-      const exists = prev.some(d => d.idDeuda === updated.idDeuda)
-      return exists ? prev.map(d => d.idDeuda === updated.idDeuda ? updated : d) : [updated, ...prev]
-    })
-    setPanelDeuda(updated)
+  async function upsert(updated) {
     setCreating(false)
-    api.deudas.resumen().then(setResumen).catch(() => {})
-    api.clientes.todos().then(setClientes).catch(() => {})
+    await cargar(search, updated?.idDeuda)
   }
 
   async function eliminarDeuda() {
@@ -349,12 +309,9 @@ export default function Deudas() {
     setError('')
     try {
       await api.deudas.eliminar(deudaEliminar.idDeuda)
-      setDeudas(prev => prev.filter(d => d.idDeuda !== deudaEliminar.idDeuda))
-      setPanelDeuda(prev => prev?.idDeuda === deudaEliminar.idDeuda ? null : prev)
       setDeudaEliminar(null)
-      const [r, c] = await Promise.all([api.deudas.resumen(), api.clientes.todos()])
-      setResumen(r)
-      setClientes(c)
+      setPanelDeuda(null)
+      await cargar(search)
     } catch (e) {
       setError(e.message || 'No se pudo eliminar la deuda')
     } finally {
@@ -418,10 +375,10 @@ export default function Deudas() {
             ) : deudas.length === 0 ? (
               <tr><td colSpan={6} className="px-5 py-16 text-center text-slate-400 dark:text-stone-500 text-sm">{search ? 'No se encontraron deudas para esa búsqueda' : 'No hay deudas registradas'}</td></tr>
             ) : deudas.map(d => (
-              <tr key={d.idDeuda} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
+              <tr key={d.grupoKey || d.idDeuda} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
                 <td className="px-4 py-3 text-slate-600 dark:text-stone-400">{fmtDate(d.fechaDeuda || d.fechaVenta)}</td>
                 <td className="px-4 py-3 font-medium text-slate-800 dark:text-stone-200 truncate">{d.nombreCliente || 'Sin cliente'}</td>
-                <td className="hidden md:table-cell px-4 py-3 text-slate-600 dark:text-stone-400 truncate" title={d.descripcion || ''}>{d.descripcion || 'Sin descripción'}</td>
+                <td className="hidden md:table-cell px-4 py-3 text-slate-600 dark:text-stone-400 truncate">{d.cantidadMovimientos} movimiento{d.cantidadMovimientos === 1 ? '' : 's'}</td>
                 <td className="px-4 py-3 tabular-nums text-right font-semibold text-red-600 dark:text-red-400">{fmt(d.montoPendiente)}</td>
                 <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_STYLES[d.estadoPago] || ''}`}>{d.estadoPago}</span></td>
                 <td className="px-4 py-3">
@@ -430,7 +387,6 @@ export default function Deudas() {
                     {d.estadoPago !== 'PAGADO' && (
                       <button onClick={() => { setPanelDeuda(d); setCreating(false) }} className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-medium">Pago</button>
                     )}
-                    <button onClick={() => setDeudaEliminar(d)} className="text-xs text-red-600 dark:text-red-400 hover:underline font-medium">Eliminar</button>
                   </div>
                 </td>
               </tr>
@@ -446,17 +402,10 @@ export default function Deudas() {
           onClose={() => { setPanelDeuda(null); setCreating(false) }}
           onSaved={upsert}
           onPaid={upsert}
+          onDelete={setDeudaEliminar}
         />
       )}
-      {deudaEliminar && (
-        <ConfirmModal
-          titulo="Eliminar deuda"
-          mensaje={`¿Seguro que querés eliminar la deuda de ${deudaEliminar.nombreCliente || 'este deudor'}? Se ocultará del listado sin borrar pagos ni ventas relacionadas.`}
-          onConfirmar={eliminarDeuda}
-          onCancelar={() => setDeudaEliminar(null)}
-          cargando={eliminando}
-        />
-      )}
+      {deudaEliminar && <ConfirmModal titulo="Eliminar movimiento" mensaje={`¿Seguro que querés ocultar este movimiento de ${deudaEliminar.nombreCliente || 'este deudor'}? No se borrarán pagos ni ventas relacionadas.`} onConfirmar={eliminarDeuda} onCancelar={() => setDeudaEliminar(null)} cargando={eliminando} />}
     </div>
   )
 }

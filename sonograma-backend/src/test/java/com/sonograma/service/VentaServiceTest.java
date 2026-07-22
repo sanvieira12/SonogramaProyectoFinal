@@ -24,7 +24,6 @@ import com.sonograma.repository.VentaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -53,6 +52,7 @@ class VentaServiceTest {
     @Mock private DeudaRepository deudaRepository;
     @Mock private DetalleVentaRepository detalleVentaRepository;
     @Mock private PagoDeudaRepository pagoDeudaRepository;
+    @Mock private DeudaService deudaService;
     @Mock private ClienteService clienteService;
     @Mock private DiscoQrCopyService discoQrCopyService;
     @Mock private DiscoEstadoService discoEstadoService;
@@ -71,6 +71,7 @@ class VentaServiceTest {
                 detalleVentaRepository,
                 pagoDeudaRepository,
                 clienteService,
+                deudaService,
                 new CostosVentaService(),
                 discoQrCopyService,
                 discoEstadoService,
@@ -122,12 +123,7 @@ class VentaServiceTest {
         assertThat(disco.getCantidadCopias()).isZero();
         assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
 
-        ArgumentCaptor<Deuda> deudaCaptor = ArgumentCaptor.forClass(Deuda.class);
-        verify(deudaRepository).save(deudaCaptor.capture());
-        Deuda deuda = deudaCaptor.getValue();
-        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("3000.00");
-        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("2000.00");
-        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("1000.00");
+        verify(deudaService).sincronizarVenta(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -239,7 +235,7 @@ class VentaServiceTest {
             assertThat(detalle.getCantidad()).isEqualTo(2);
         });
         verify(discoRepository, never()).save(any(Disco.class));
-        verify(deudaRepository).save(any(Deuda.class));
+        verify(deudaService).sincronizarVenta(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

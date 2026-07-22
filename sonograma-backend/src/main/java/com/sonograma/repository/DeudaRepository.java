@@ -21,9 +21,13 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
 
     List<Deuda> findAllByActivaTrueOrderByFechaDeudaDescFechaCreacionDesc();
 
+    List<Deuda> findAllByActivaTrueAndClienteIdClienteInOrderByFechaDeudaDescFechaCreacionDesc(List<Long> idClientes);
+
     List<Deuda> findByEstadoPagoNotAndActivaTrue(EstadoPago estadoPago);
 
     Optional<Deuda> findByVentaIdVentaAndActivaTrue(Long idVenta);
+
+    Optional<Deuda> findByVentaIdVenta(Long idVenta);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT d FROM Deuda d WHERE d.idDeuda = :id")
@@ -40,6 +44,7 @@ public interface DeudaRepository extends JpaRepository<Deuda, Long> {
         LEFT JOIN d.cliente c
         LEFT JOIN d.venta v
         WHERE d.activa = true
+          AND (d.venta IS NULL OR d.venta.estado <> com.sonograma.enums.EstadoVenta.CANCELADA)
           AND (LOWER(CONCAT(COALESCE(c.nombre, ''), ' ', COALESCE(c.apellido, ''))) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.nombreDeudorManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             OR LOWER(COALESCE(d.mailManual, '')) LIKE LOWER(CONCAT('%', :q, '%'))

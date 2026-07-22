@@ -7,22 +7,21 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/** One active debt-list row per customer, while retaining every movement. */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class DeudaResponseDTO {
+public class DeudaConsolidadaResponseDTO {
+    /** Representative movement id, retained for backwards-compatible clients. */
     private Long idDeuda;
-    private Long idVenta;
-    private String numeroFactura;
-    private String numeroRecibo;
+    private String grupoKey;
     private Long idCliente;
     private String nombreCliente;
     private String nombreDeudorManual;
     private String mailManual;
     private String instagramManual;
     private String ciManual;
-    private String descripcion;
     private BigDecimal montoTotal;
     private BigDecimal montoPagado;
     private BigDecimal montoPendiente;
@@ -32,9 +31,6 @@ public class DeudaResponseDTO {
     private LocalDateTime fechaCreacion;
     private LocalDateTime updatedAt;
     private String estadoPago;
-    private String notas;
-    private List<PagoDeudaDTO> pagos;
-    private List<DetalleVentaResponseDTO> detalles;
-    /** Populated only when this DTO is used as a consolidated customer row. */
+    private int cantidadMovimientos;
     private List<DeudaResponseDTO> movimientos;
 }

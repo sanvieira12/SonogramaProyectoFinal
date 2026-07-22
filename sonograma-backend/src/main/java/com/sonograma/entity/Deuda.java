@@ -54,6 +54,11 @@ public class Deuda {
     @Builder.Default
     private BigDecimal montoPagado = BigDecimal.ZERO;
 
+    /** Amount paid when the debt movement was created. */
+    @Column(name = "monto_pagado_inicial", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal montoPagadoInicial = BigDecimal.ZERO;
+
     @Column(name = "monto_pendiente", nullable = false, precision = 10, scale = 2)
     private BigDecimal montoPendiente;
 

@@ -65,6 +65,7 @@ public class VentaService {
     private final DetalleVentaRepository detalleVentaRepository;
     private final PagoDeudaRepository pagoDeudaRepository;
     private final ClienteService clienteService;
+    private final DeudaService deudaService;
     private final CostosVentaService costosVentaService;
     private final DiscoQrCopyService discoQrCopyService;
     private final DiscoEstadoService discoEstadoService;
@@ -163,18 +164,8 @@ public class VentaService {
             reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
         }
 
-        if (montoDeuda.compareTo(BigDecimal.ZERO) > 0) {
-            Deuda deuda = Deuda.builder()
-                    .venta(venta)
-                    .cliente(cliente)
-                    .montoTotal(costos.getTotalFinal())
-                    .montoPagado(montoPagado)
-                    .montoPendiente(montoDeuda)
-                    .fechaVenta(fechaVenta.toLocalDate())
-                    .estadoPago(estadoPago)
-                    .build();
-            deudaRepository.save(deuda);
-        }
+        deudaService.sincronizarVenta(venta, cliente, costos.getTotalFinal(), montoPagado,
+                montoDeuda, estadoPago, fechaVenta);
 
         Envio envio = null;
         if (entrega == TipoEntrega.ENVIO) {
@@ -289,7 +280,8 @@ public class VentaService {
             reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null, BigDecimal.ZERO, null, null));
         }
 
-        sincronizarDeuda(venta, cliente, costos.getTotalFinal(), montoPagado, montoDeuda, estadoPago, fechaVenta);
+        deudaService.sincronizarVenta(venta, cliente, costos.getTotalFinal(), montoPagado,
+                montoDeuda, estadoPago, fechaVenta);
         Envio envio = sincronizarEnvio(venta, cliente, dto, entrega, costos);
         return mapearADTO(venta, envio);
     }
@@ -693,40 +685,6 @@ public class VentaService {
         discoQrCopyService.restoreCopies(detalle.getCopyIdsSnapshot());
         discoEstadoService.aplicar(detalle.getDisco());
         discoRepository.save(detalle.getDisco());
-    }
-
-    private void sincronizarDeuda(
-            Venta venta,
-            Cliente cliente,
-            BigDecimal total,
-            BigDecimal montoPagado,
-            BigDecimal montoDeuda,
-            EstadoPago estadoPago,
-            LocalDateTime fechaVenta) {
-        Deuda deuda = deudaRepository.findByVentaIdVentaAndActivaTrue(venta.getIdVenta()).orElse(null);
-        if (montoDeuda.compareTo(BigDecimal.ZERO) <= 0) {
-            if (deuda != null) {
-                deuda.setActiva(false);
-                deuda.setUpdatedAt(LocalDateTime.now());
-                deudaRepository.save(deuda);
-            }
-            return;
-        }
-        if (deuda == null) {
-            deuda = new Deuda();
-            deuda.setVenta(venta);
-            deuda.setFechaCreacion(LocalDateTime.now());
-            deuda.setActiva(true);
-        }
-        deuda.setCliente(cliente);
-        deuda.setMontoTotal(total);
-        deuda.setMontoPagado(montoPagado);
-        deuda.setMontoPendiente(montoDeuda);
-        deuda.setFechaVenta(fechaVenta.toLocalDate());
-        deuda.setFechaDeuda(fechaVenta.toLocalDate());
-        deuda.setEstadoPago(estadoPago);
-        deuda.setUpdatedAt(LocalDateTime.now());
-        deudaRepository.save(deuda);
     }
 
     private BigDecimal calcularMontoPagado(VentaRequestDTO dto, BigDecimal totalProductos) {
