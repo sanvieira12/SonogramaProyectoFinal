@@ -25,8 +25,8 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         LEFT JOIN FETCH v.detalles dv
         LEFT JOIN FETCH dv.disco
         WHERE v.estado <> com.sonograma.enums.EstadoVenta.CANCELADA
-          AND (:desde IS NULL OR v.fechaVenta >= :desde)
-          AND (:hasta IS NULL OR v.fechaVenta <= :hasta)
+          AND v.fechaVenta >= :desde
+          AND v.fechaVenta <= :hasta
         ORDER BY v.fechaVenta ASC, v.idVenta ASC
         """)
     List<Venta> findAllForProfitPeriod(
