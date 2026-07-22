@@ -20,10 +20,8 @@ public interface PagoDeudaRepository extends JpaRepository<PagoDeuda, Long> {
     List<PagoDeuda> findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(@Param("idDeuda") Long idDeuda);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT p FROM PagoDeuda p WHERE p.idPagoDeuda = :idPagoDeuda AND p.deuda.idDeuda = :idDeuda")
-    Optional<PagoDeuda> findByIdPagoDeudaAndDeudaIdDeudaForUpdate(
-            @Param("idPagoDeuda") Long idPagoDeuda,
-            @Param("idDeuda") Long idDeuda);
+    @Query("SELECT p FROM PagoDeuda p WHERE p.idPagoDeuda = :idPagoDeuda")
+    Optional<PagoDeuda> findByIdPagoDeudaForUpdate(@Param("idPagoDeuda") Long idPagoDeuda);
 
     Optional<PagoDeuda> findByDeudaIdDeudaAndIdempotencyKey(Long idDeuda, String idempotencyKey);
 }

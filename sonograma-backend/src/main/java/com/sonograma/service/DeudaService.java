@@ -18,8 +18,6 @@ import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.PagoDeudaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -216,24 +214,27 @@ public class DeudaService {
         return toDTO(deudaRepository.save(deuda));
     }
 
-    public void eliminarPago(Long idDeuda, Long idPagoDeuda) {
-        Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
-                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
-                .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
-        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(idPagoDeuda, idDeuda)
+    public void eliminarPago(Long idPagoDeuda) {
+        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaForUpdate(idPagoDeuda)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Pago de deuda", idPagoDeuda));
 
         if (Boolean.TRUE.equals(pago.getAnulado())) {
             throw new NegocioException("El pago de deuda ya fue anulado");
         }
 
-        pago.setAnulado(true);
-        pago.setFechaAnulacion(LocalDateTime.now());
-        pago.setAnuladoPor(usuarioActual());
-        pagoDeudaRepository.save(pago);
+        Deuda deudaRelacionada = pago.getDeuda();
+        if (deudaRelacionada == null || deudaRelacionada.getIdDeuda() == null) {
+            throw new NegocioException("El pago de deuda no tiene una deuda asociada");
+        }
+        Deuda deuda = deudaRepository.findByIdForUpdate(deudaRelacionada.getIdDeuda())
+                .filter(d -> Boolean.TRUE.equals(d.getActiva()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", deudaRelacionada.getIdDeuda()));
+
+        pagoDeudaRepository.delete(pago);
+        pagoDeudaRepository.flush();
 
         LocalDate fechaUltimoPago = pagoDeudaRepository
-                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda).stream()
+                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda()).stream()
                 .findFirst().map(PagoDeuda::getFechaPago).orElse(null);
 
         deuda.setFechaUltimoPago(fechaUltimoPago);
@@ -241,13 +242,6 @@ public class DeudaService {
         if (deuda.getMontoPagadoInicial() == null) deuda.setMontoPagadoInicial(BigDecimal.ZERO);
         recalcularEstado(deuda);
         deudaRepository.save(deuda);
-    }
-
-    private String usuarioActual() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) return null;
-        String nombre = authentication.getName();
-        return nombre == null || nombre.isBlank() || "anonymousUser".equals(nombre) ? null : nombre;
     }
 
     private void aplicarRequest(Deuda deuda, DeudaRequestDTO request, boolean creando) {

@@ -1,6 +1,8 @@
 import { redirectIfUnauthorized } from './session'
 import { filenameFromContentDisposition } from '../utils/downloadBlob'
 
+export const FINANCIAL_DATA_CHANGED_EVENT = 'sonograma:financial-data-changed'
+
 export function normalizeApiBase(value) {
   const base = (value || '/api').trim().replace(/\/+$/, '')
   return base || '/api'
@@ -219,8 +221,8 @@ export const api = {
     },
     registrarPago: (idDeuda, monto, notas, numeroRecibo, idempotencyKey) =>
       request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas, numeroRecibo, idempotencyKey }),
-    eliminarPago: (idDeuda, idPagoDeuda) =>
-      request('DELETE', `/deudas/${idDeuda}/pagos/${idPagoDeuda}`),
+    eliminarPago: (idPagoDeuda) =>
+      request('DELETE', `/deudas/pagos/${idPagoDeuda}`),
   },
 
   libro: {

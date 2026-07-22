@@ -93,10 +93,10 @@ class DeudaServiceTest {
         PagoDeuda anterior = PagoDeuda.builder().idPagoDeuda(9L).deuda(deuda)
                 .monto(new BigDecimal("2000")).fechaPago(LocalDate.of(2026, 7, 8)).build();
         when(deudaRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(10L, 1L)).thenReturn(Optional.of(eliminado));
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(10L)).thenReturn(Optional.of(eliminado));
         when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(1L)).thenReturn(List.of(anterior));
 
-        service.eliminarPago(1L, 10L);
+        service.eliminarPago(10L);
 
         assertThat(deuda.getMontoPagado()).isEqualByComparingTo("2000");
         assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("6000");
@@ -104,14 +104,12 @@ class DeudaServiceTest {
         assertThat(deuda.getFechaUltimoPago()).isEqualTo(LocalDate.of(2026, 7, 8));
         assertThat(venta.getMontoPagado()).isEqualByComparingTo("2000");
         assertThat(venta.getMontoDeuda()).isEqualByComparingTo("6000");
-        assertThat(eliminado.getAnulado()).isTrue();
-        assertThat(eliminado.getFechaAnulacion()).isNotNull();
-        verify(pagoDeudaRepository).save(eliminado);
+        verify(pagoDeudaRepository).delete(eliminado);
         verify(deudaRepository).save(deuda);
     }
 
     @Test
-    void anularPagoCompletoReabreLaDeudaSinBorrarElRecibo() {
+    void eliminarPagoCompletoReabreLaDeuda() {
         Venta venta = Venta.builder().montoPagado(new BigDecimal("3000"))
                 .montoDeuda(BigDecimal.ZERO).estadoPago(EstadoPago.PAGADO).build();
         Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta).activa(true)
@@ -123,14 +121,13 @@ class DeudaServiceTest {
                 .numeroRecibo("BOLETA-20").build();
 
         when(deudaRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(20L, 2L)).thenReturn(Optional.of(pago));
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(20L)).thenReturn(Optional.of(pago));
         when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(2L))
                 .thenReturn(List.of());
 
-        service.eliminarPago(2L, 20L);
+        service.eliminarPago(20L);
 
-        assertThat(pago.getAnulado()).isTrue();
-        assertThat(pago.getNumeroRecibo()).isEqualTo("BOLETA-20");
+        verify(pagoDeudaRepository).delete(pago);
         assertThat(deuda.getMontoPagado()).isZero();
         assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("3000");
         assertThat(deuda.getEstadoPago()).isEqualTo(EstadoPago.PENDIENTE);
@@ -144,10 +141,9 @@ class DeudaServiceTest {
         Deuda deuda = Deuda.builder().idDeuda(1L).activa(true)
                 .montoTotal(new BigDecimal("8000")).montoPagado(new BigDecimal("5000"))
                 .montoPendiente(new BigDecimal("3000")).estadoPago(EstadoPago.PARCIAL).build();
-        when(deudaRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(10L, 1L)).thenReturn(Optional.empty());
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(10L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.eliminarPago(1L, 10L))
+        assertThatThrownBy(() -> service.eliminarPago(10L))
                 .isInstanceOf(RecursoNoEncontradoException.class);
         assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("3000");
     }
@@ -160,11 +156,10 @@ class DeudaServiceTest {
                 .estadoPago(EstadoPago.PAGADO).build();
         PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(30L).deuda(deuda)
                 .monto(new BigDecimal("1000")).anulado(true).build();
-        when(deudaRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByIdPagoDeudaAndDeudaIdDeudaForUpdate(30L, 3L))
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(30L))
                 .thenReturn(Optional.of(pago));
 
-        assertThatThrownBy(() -> service.eliminarPago(3L, 30L))
+        assertThatThrownBy(() -> service.eliminarPago(30L))
                 .isInstanceOf(com.sonograma.exception.NegocioException.class)
                 .hasMessage("El pago de deuda ya fue anulado");
         assertThat(deuda.getMontoPendiente()).isZero();

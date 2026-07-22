@@ -55,6 +55,20 @@ describe('normalizeApiBase', () => {
     }))
   })
 
+  it('elimina un pago usando únicamente el id estable del pago', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: () => Promise.resolve(''),
+    })
+
+    await api.deudas.eliminarPago(66)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/deudas/pagos/66', expect.objectContaining({
+      method: 'DELETE',
+    }))
+  })
+
   it('exports VinylFuture ZIP from an import id', async () => {
     vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
     const blob = new Blob(['zip'])

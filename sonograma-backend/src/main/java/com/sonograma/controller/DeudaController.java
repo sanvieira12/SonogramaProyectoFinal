@@ -90,12 +90,11 @@ public class DeudaController {
         return registrarPago(idDeuda, body);
     }
 
-    @DeleteMapping("/{idDeuda}/pagos/{idPagoDeuda}")
+    @DeleteMapping({"/pagos/{idPagoDeuda}", "/{idDeuda}/pagos/{idPagoDeuda}"})
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
     public ResponseEntity<Void> eliminarPago(
-            @PathVariable Long idDeuda,
             @PathVariable Long idPagoDeuda) {
-        deudaService.eliminarPago(idDeuda, idPagoDeuda);
+        deudaService.eliminarPago(idPagoDeuda);
         return ResponseEntity.noContent().build();
     }
 

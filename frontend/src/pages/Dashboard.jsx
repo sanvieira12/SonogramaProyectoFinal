@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from 'recharts'
-import { api } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
 import { cantidadPagosLabel, cantidadVentasLabel, ingresosPeriodoLabel } from '../utils/dashboardIncome'
 
@@ -62,30 +62,43 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    api.libro.listar({})
-      .then(data => setUltimasVentas(Array.isArray(data) ? data : []))
-      .catch(() => setUltimasVentas([]))
-    api.gastosTienda.resumen()
-      .then(data => setGastosMesActual(Number(data?.totalMesActual || 0)))
-      .catch(() => setGastosMesActual(0))
+    function cargarResumen() {
+      api.libro.listar({})
+        .then(data => setUltimasVentas(Array.isArray(data) ? data : []))
+        .catch(() => setUltimasVentas([]))
+      api.gastosTienda.resumen()
+        .then(data => setGastosMesActual(Number(data?.totalMesActual || 0)))
+        .catch(() => setGastosMesActual(0))
+    }
+    cargarResumen()
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarResumen)
+    return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarResumen)
   }, [])
 
   useEffect(() => {
     let cancelado = false
-    api.estadisticas.ingresos(periodoIngresos)
-      .then(data => {
-        if (!cancelado) setSerieIngresos(data)
-      })
-      .catch(err => {
-        if (!cancelado) {
-          setSerieIngresos(null)
-          setErrorSerie(err.message || 'No se pudo cargar la serie de ingresos')
-        }
-      })
-      .finally(() => {
-        if (!cancelado) setLoadingSerie(false)
-      })
-    return () => { cancelado = true }
+    function cargarSerie() {
+      setLoadingSerie(true)
+      api.estadisticas.ingresos(periodoIngresos)
+        .then(data => {
+          if (!cancelado) setSerieIngresos(data)
+        })
+        .catch(err => {
+          if (!cancelado) {
+            setSerieIngresos(null)
+            setErrorSerie(err.message || 'No se pudo cargar la serie de ingresos')
+          }
+        })
+        .finally(() => {
+          if (!cancelado) setLoadingSerie(false)
+        })
+    }
+    cargarSerie()
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarSerie)
+    return () => {
+      cancelado = true
+      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarSerie)
+    }
   }, [periodoIngresos])
 
   const stats = {

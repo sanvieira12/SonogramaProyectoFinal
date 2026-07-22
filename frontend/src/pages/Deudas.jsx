@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, resolveApiUrl } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
 
 const ESTADO_STYLES = {
@@ -169,7 +169,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
               <div>
                 <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Movimiento a editar</label>
                 <select className="input w-full" value={movimiento?.idDeuda || ''} onChange={e => { const next = movimientos.find(m => m.idDeuda === Number(e.target.value)); setMovimientoId(Number(e.target.value)); setForm(buildForm(next)) }}>
-                  {movimientos.map(m => <option key={m.idDeuda} value={m.idDeuda}>{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Recibo ${m.numeroRecibo}` : `Deuda #${m.idDeuda}`} · {fmt(m.montoPendiente)}</option>)}
+                  {movimientos.map(m => <option key={m.idDeuda} value={m.idDeuda}>{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Boleta ${m.numeroRecibo}` : `Deuda #${m.idDeuda}`} · {fmt(m.montoPendiente)}</option>)}
                 </select>
               </div>
             )}
@@ -244,7 +244,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
               {movimientos.map(m => (
                 <div key={m.idDeuda} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-sm font-semibold text-slate-800 dark:text-white">Movimiento #{m.idDeuda}</p><p className="text-xs text-slate-400 dark:text-white/60">{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Recibo ${m.numeroRecibo}` : 'Sin número de boleta'}</p></div>
+                    <div><p className="text-sm font-semibold text-slate-800 dark:text-white">Movimiento #{m.idDeuda}</p><p className="text-xs text-slate-400 dark:text-white/60">{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Boleta ${m.numeroRecibo}` : 'Sin número de boleta'}</p></div>
                     <div className="flex items-center gap-3">{m.estadoPago !== 'PAGADO' && <button type="button" onClick={() => { setMovimientoId(m.idDeuda); setPayment({ monto: '', notas: '', numeroRecibo: '', idempotencyKey: nuevoIdempotencyKey() }) }} className="text-xs text-emerald-700 dark:text-white hover:underline font-medium">Pago</button>}<button type="button" onClick={() => onDelete(m)} className="text-xs text-red-600 dark:text-white hover:underline font-medium">Eliminar</button></div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-xs text-slate-400 dark:text-white/60">Original</p><p className="font-semibold text-slate-900 dark:text-white">{fmt(m.montoTotal)}</p></div><div><p className="text-xs text-slate-400 dark:text-white/60">Pagado</p><p className="font-semibold text-slate-900 dark:text-white">{fmt(m.montoPagado)}</p></div><div><p className="text-xs text-slate-400 dark:text-white/60">Restante</p><p className="font-semibold text-red-600 dark:text-white">{fmt(m.montoPendiente)}</p></div></div>
@@ -300,7 +300,14 @@ export default function Deudas() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => cargar(''), 0)
-    return () => window.clearTimeout(timer)
+    function refreshFromFinancialChange() {
+      cargar()
+    }
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, refreshFromFinancialChange)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, refreshFromFinancialChange)
+    }
   }, [cargar])
 
   function buscar() {

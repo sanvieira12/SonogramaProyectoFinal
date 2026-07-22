@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, resolveApiUrl } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
 import ConfirmModal from '../components/ConfirmModal'
 
@@ -42,7 +42,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
             ['Total venta', fmt(venta.totalFinal)],
             ['Método de pago', venta.medioPago],
-            ['Número de recibo', venta.numeroRecibo],
+            [esPagoDeuda ? 'Número de boleta' : 'Número de recibo', venta.numeroRecibo],
             ['Estado pago', venta.estadoPago],
             ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
             ['Monto pagado', fmt(venta.montoPagado)],
@@ -67,11 +67,6 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             ))}
           </div>
         </div>
-        )}
-        {esPagoDeuda && (
-          <p className="text-sm text-slate-500 dark:text-stone-400">
-            Pago registrado sobre {venta.numeroFactura ? `la factura ${venta.numeroFactura}` : 'una deuda'}.
-          </p>
         )}
         <div className="flex gap-2">
           {!esPagoDeuda && !esPreVenta && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
@@ -334,11 +329,12 @@ export default function LibroVentas() {
     try {
       const esPagoDeuda = ventaCancelar.tipoMovimiento === 'PAGO_DEUDA'
       if (esPagoDeuda) {
-        await api.deudas.eliminarPago(ventaCancelar.idDeuda, ventaCancelar.idPagoDeuda)
+        await api.deudas.eliminarPago(ventaCancelar.idPagoDeuda)
       } else {
         await api.ventas.cancelar(ventaCancelar.idVenta)
       }
       await cargar(applied)
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
       setVentaPanel(null)
       setVentaCancelar(null)
       setSuccess(esPagoDeuda
@@ -544,7 +540,7 @@ export default function LibroVentas() {
         <ConfirmModal
           titulo={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA' ? 'Anular pago de deuda' : 'Cancelar venta'}
           mensaje={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA'
-            ? '¿Anular este pago de deuda? El importe volverá a sumarse al saldo pendiente del cliente y dejará de contar como ingreso.'
+            ? '¿Eliminar este pago de deuda? El importe volverá a sumarse al saldo pendiente del cliente y dejará de contar como ingreso.'
             : '¿Seguro que querés cancelar esta venta? Se restaurará el stock y se ocultará la deuda asociada si existe.'}
           onConfirmar={cancelarMovimiento}
           onCancelar={() => setVentaCancelar(null)}
