@@ -85,6 +85,8 @@ public class ResumenFinancieroMensualService {
                         .importeVentaReal(item.actualSaleAmount())
                         .costoAdquisicionOriginal(item.acquisitionCost())
                         .gananciaNeta(item.netProfit())
+                        .grossProfit(item.grossProfit())
+                        .detailGrossProfit(item.grossProfit())
                         .estadoGanancia(item.status().name())
                         .build());
             }
@@ -99,6 +101,11 @@ public class ResumenFinancieroMensualService {
                     .montoRecibido(ingresoVentaEnFechaDeVenta(venta))
                     .deudaPendiente(nvl(venta.getMontoDeuda()))
                     .gananciaNeta(profit.netProfit())
+                    .grossProfit(profit.grossProfit())
+                    .saleGrossProfit(profit.grossProfit())
+                    .grossProfitAvailable(profit.grossProfitAvailable())
+                    .grossProfitUnavailableReason(profit.affectedItemCount() > 0
+                            ? "Uno o más ítems no tienen un costo histórico confiable" : null)
                     .estadoGanancia(profit.status().name())
                     .build());
         }
@@ -143,6 +150,8 @@ public class ResumenFinancieroMensualService {
                 .importeVentaReal(item != null ? item.actualSaleAmount() : null)
                 .costoAdquisicionOriginal(item != null ? item.acquisitionCost() : null)
                 .gananciaNeta(item != null ? item.netProfit() : null)
+                .grossProfit(item != null ? item.grossProfit() : null)
+                .detailGrossProfit(item != null ? item.grossProfit() : null)
                 .estadoGanancia(item != null ? item.status().name() : ProfitStatus.UNAVAILABLE.name())
                 .build();
     }

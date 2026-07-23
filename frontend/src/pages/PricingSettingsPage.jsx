@@ -571,7 +571,7 @@ export default function PricingSettingsPage() {
                 onChange={event => setSearch(event.target.value)}
                 placeholder="Buscar por artista, título, código, proveedor, factura…"
                 aria-label="Buscar discos en stock"
-                className="input h-10 max-w-2xl"
+                className="input h-10 min-w-0 max-w-2xl"
               />
               <button
                 type="button"

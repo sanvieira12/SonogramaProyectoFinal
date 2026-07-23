@@ -84,8 +84,8 @@ public class ProfitCalculationService {
         }
 
         if (isUyu(currency) && disco.getCosto() != null) {
-            return new AcquisitionCostResolution(
-                    cost(disco.getCosto()), disco.getCosto(), currency, null, "HISTORICAL_CATALOG_UYU");
+                return new AcquisitionCostResolution(
+                    cost(disco.getCosto()), disco.getCosto(), currency, null, "CURRENT_STOCK_REAL_COST_FALLBACK");
         }
 
         Optional<Pedido> purchase = purchaseFor(disco);
@@ -96,6 +96,11 @@ public class ProfitCalculationService {
                     "HISTORICAL_PURCHASE_CONVERSION");
         }
         return unavailableCost();
+    }
+
+    /** Resolution used by the explicit backfill/reporting workflow. */
+    public AcquisitionCostResolution resolveHistoricalCostForBackfill(DetalleVenta detail) {
+        return acquisitionCostForDetail(detail);
     }
 
     /** Calculates all sold lines in one sale, including any sale-level discount allocation. */

@@ -20,6 +20,9 @@ public class DetalleVentaResponseDTO {
     private BigDecimal precioUnitario;
     private BigDecimal importeVentaReal;
     private BigDecimal gananciaNeta;
+    /** Canonical name for the historical merchandise gross profit. */
+    private BigDecimal grossProfit;
+    private BigDecimal detailGrossProfit;
     private String estadoGanancia;
     private BigDecimal costoAdquisicionUyu;
     private String fuenteCostoAdquisicion;

@@ -20,6 +20,7 @@ public record ProfitItemResult(
         BigDecimal exchangeRateUsed,
         boolean costComplete
 ) {
+    public BigDecimal grossProfit() { return netProfit; }
     public boolean isAvailable() {
         return status != ProfitStatus.UNAVAILABLE;
     }

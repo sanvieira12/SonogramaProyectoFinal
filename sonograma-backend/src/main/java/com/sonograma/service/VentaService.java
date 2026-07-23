@@ -44,6 +44,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.Map;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -196,6 +199,9 @@ public class VentaService {
             throw new NegocioException("No se puede editar una venta cancelada");
         }
 
+        // Keep the immutable historical cost when the same catalog item remains
+        // in the edited sale. The new entered price is always used below.
+        Map<Long, LinkedList<HistoricalCost>> previousCosts = historicalCostsByDisco(venta);
         restaurarStockVenta(venta);
         detalleVentaRepository.deleteAll(new ArrayList<>(venta.getDetalles()));
         venta.getDetalles().clear();
@@ -221,6 +227,12 @@ public class VentaService {
         if (tieneDetalles) {
             for (DetalleVentaDTO d : dto.getDetalles()) {
                 PreparedDetalle preparado = prepararDetalle(d);
+                if (preparado.disco() != null) {
+                    LinkedList<HistoricalCost> costsForItem = previousCosts.get(preparado.disco().getIdDisco());
+                    if (costsForItem != null && !costsForItem.isEmpty()) {
+                        preparado = preparado.withCost(costsForItem.removeFirst().resolution());
+                    }
+                }
                 detallesPreparados.add(preparado);
                 subtotalDetalles = subtotalDetalles.add(
                         preparado.precioUnitario().multiply(BigDecimal.valueOf(preparado.cantidad()))
@@ -531,6 +543,8 @@ public class VentaService {
                         .precioUnitario(d.getPrecioUnitario())
                         .importeVentaReal(itemProfit != null ? itemProfit.actualSaleAmount() : null)
                         .gananciaNeta(itemProfit != null ? itemProfit.netProfit() : null)
+                        .grossProfit(itemProfit != null ? itemProfit.grossProfit() : null)
+                        .detailGrossProfit(itemProfit != null ? itemProfit.grossProfit() : null)
                         .estadoGanancia(itemProfit != null ? itemProfit.status().name() : ProfitStatus.UNAVAILABLE.name())
                         .costoAdquisicionUyu(itemProfit != null ? itemProfit.acquisitionCost() : null)
                         .fuenteCostoAdquisicion(itemProfit != null ? itemProfit.costSource() : null)
@@ -562,6 +576,11 @@ public class VentaService {
                 .totalFinal(VentaTotals.totalProductos(venta))
                 .gananciaEstimada(venta.getGananciaEstimada())
                 .gananciaNeta(profit.netProfit())
+                .grossProfit(profit.grossProfit())
+                .saleGrossProfit(profit.grossProfit())
+                .grossProfitAvailable(profit.grossProfitAvailable())
+                .grossProfitUnavailableReason(profit.affectedItemCount() > 0
+                        ? "Uno o más ítems no tienen un costo histórico confiable" : null)
                 .estadoGanancia(profit.status().name())
                 .itemsGananciaNoDisponible(profit.affectedItemCount())
                 .tipoEntrega(venta.getTipoEntrega() != null ? venta.getTipoEntrega().name() : null)
@@ -853,7 +872,31 @@ public class VentaService {
             AcquisitionCostResolution costoAdquisicion,
             Long copyId,
             String codigoQr
-    ) {}
+    ) {
+        PreparedDetalle withCost(AcquisitionCostResolution cost) {
+            return new PreparedDetalle(disco, precioUnitario, cantidad, manualItem, artistaSnap,
+                    albumSnap, descripcionSnap, codigoSnap, cost, copyId, codigoQr);
+        }
+    }
+
+    private record HistoricalCost(AcquisitionCostResolution resolution) {}
+
+    private Map<Long, LinkedList<HistoricalCost>> historicalCostsByDisco(Venta venta) {
+        Map<Long, LinkedList<HistoricalCost>> result = new HashMap<>();
+        if (venta.getDetalles() == null) return result;
+        for (DetalleVenta detail : venta.getDetalles()) {
+            if (detail.getDisco() == null || detail.getDisco().getIdDisco() == null) continue;
+            AcquisitionCostResolution resolution = new AcquisitionCostResolution(
+                    detail.getCostoAdquisicionUnitarioUyu(), detail.getCostoAdquisicionUnitario(),
+                    detail.getCostoAdquisicionMonedaOriginal(), detail.getTipoCambioAdquisicion(),
+                    detail.getCostoAdquisicionFuente());
+            if (resolution.isComplete()) {
+                result.computeIfAbsent(detail.getDisco().getIdDisco(), ignored -> new LinkedList<>())
+                        .add(new HistoricalCost(resolution));
+            }
+        }
+        return result;
+    }
 
     private BigDecimal costoTotalHistorico(List<PreparedDetalle> detalles) {
         if (detalles.stream().anyMatch(d -> d.costoAdquisicion() == null || !d.costoAdquisicion().isComplete())) {

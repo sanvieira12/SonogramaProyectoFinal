@@ -32,6 +32,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
     codigoInterno: '',
     precioUnitario: venta.precioVenta,
     importeVentaReal: venta.importeVentaReal ?? venta.precioVenta,
+    grossProfit: venta.grossProfit ?? venta.gananciaNeta,
     gananciaNeta: venta.gananciaNeta,
     estadoGanancia: venta.estadoGanancia,
   }]
@@ -52,7 +53,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
             ['Movimiento', venta.descripcionMovimiento || (esPagoDeuda ? 'Pago de deuda' : 'Venta')],
             ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
             ['Total venta', fmt(venta.totalFinal)],
-            ['Ganancia neta', esPagoDeuda ? '—' : fmtProfit(venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.gananciaNeta)],
+            ['Ganancia bruta de la venta', esPagoDeuda ? '—' : fmtProfit(venta.grossProfit ?? venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.grossProfit ?? venta.gananciaNeta)],
             ['Método de pago', venta.medioPago],
             [esPagoDeuda ? 'Número de boleta' : 'Número de recibo', venta.numeroRecibo],
             ['Estado pago', venta.estadoPago],
@@ -75,10 +76,10 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
               <button key={d.idDetalle || d.idDisco || index} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
                 <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
                 <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.importeVentaReal ?? d.precioUnitario)}</p>
-                <p className={`text-xs font-mono tabular-nums ${profitToneClass(d.estadoGanancia, d.gananciaNeta)}`}>
-                  {d.estadoGanancia === 'UNAVAILABLE' || d.gananciaNeta == null
+                <p className={`text-xs font-mono tabular-nums ${profitToneClass(d.estadoGanancia, d.grossProfit ?? d.gananciaNeta)}`}>
+                  {d.estadoGanancia === 'UNAVAILABLE' || (d.grossProfit ?? d.gananciaNeta) == null
                     ? 'Ganancia no disponible'
-                    : fmtProfit(d.gananciaNeta, d.estadoGanancia)}
+                    : fmtProfit(d.grossProfit ?? d.gananciaNeta, d.estadoGanancia)}
                 </p>
               </button>
             ))}
@@ -477,7 +478,7 @@ export default function LibroVentas() {
             { label: 'Ítems vendidos', value: resumen.cantidadItems ?? 0 },
             { label: 'Total ventas', value: fmt(resumen.totalVentas) },
             { label: 'Ingresos registrados', value: fmt(resumen.ingresosRegistrados) },
-            { label: 'Ganancia de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
+            { label: 'Ganancia bruta de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
             { label: 'Gastos tienda', value: fmt(resumen.gastos) },
             { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
           ].map(({ label, value, tone }) => (
@@ -505,7 +506,7 @@ export default function LibroVentas() {
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Ganancia neta', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
+                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Ganancia bruta', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
                   <th key={h} className="text-left px-2 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-[0.02em] whitespace-nowrap">
                     {h}
                   </th>
@@ -551,9 +552,9 @@ export default function LibroVentas() {
                         )}
                       </div>
                     </td>
-                    <td className={`px-2 py-3 font-mono tabular-nums font-semibold whitespace-nowrap ${profitToneClass(v.estadoGanancia, v.gananciaNeta)}`}>
-                      <div className="truncate" title={v.tipoMovimiento === 'PAGO_DEUDA' ? 'No aplica' : fmtProfit(v.gananciaNeta, v.estadoGanancia)}>
-                        {v.tipoMovimiento === 'PAGO_DEUDA' ? '—' : fmtProfit(v.gananciaNeta, v.estadoGanancia)}
+                    <td className={`px-2 py-3 font-mono tabular-nums font-semibold whitespace-nowrap ${profitToneClass(v.estadoGanancia, v.grossProfit ?? v.gananciaNeta)}`}>
+                      <div className="truncate" title={v.tipoMovimiento === 'PAGO_DEUDA' ? 'No aplica' : fmtProfit(v.grossProfit ?? v.gananciaNeta, v.estadoGanancia)}>
+                        {v.tipoMovimiento === 'PAGO_DEUDA' ? '—' : fmtProfit(v.grossProfit ?? v.gananciaNeta, v.estadoGanancia)}
                       </div>
                     </td>
                     <td className="px-2 py-3 font-mono tabular-nums font-semibold text-slate-800 dark:text-stone-200 whitespace-nowrap">

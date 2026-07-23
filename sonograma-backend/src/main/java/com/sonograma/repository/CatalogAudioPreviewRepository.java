@@ -11,3 +11,4 @@ public interface CatalogAudioPreviewRepository extends JpaRepository<CatalogAudi
 
     void deleteByIdDisco(Long idDisco);
 }
+

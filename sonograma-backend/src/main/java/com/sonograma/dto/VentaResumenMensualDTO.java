@@ -19,5 +19,9 @@ public class VentaResumenMensualDTO {
     private BigDecimal montoRecibido;
     private BigDecimal deudaPendiente;
     private BigDecimal gananciaNeta;
+    private BigDecimal grossProfit;
+    private BigDecimal saleGrossProfit;
+    private Boolean grossProfitAvailable;
+    private String grossProfitUnavailableReason;
     private String estadoGanancia;
 }

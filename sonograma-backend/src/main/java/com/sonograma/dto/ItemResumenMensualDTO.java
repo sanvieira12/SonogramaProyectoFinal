@@ -17,5 +17,7 @@ public class ItemResumenMensualDTO {
     private BigDecimal importeVentaReal;
     private BigDecimal costoAdquisicionOriginal;
     private BigDecimal gananciaNeta;
+    private BigDecimal grossProfit;
+    private BigDecimal detailGrossProfit;
     private String estadoGanancia;
 }

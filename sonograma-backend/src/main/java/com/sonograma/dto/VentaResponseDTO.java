@@ -32,6 +32,11 @@ public class VentaResponseDTO {
     private BigDecimal totalFinal;
     private BigDecimal gananciaEstimada;
     private BigDecimal gananciaNeta;
+    /** Canonical name; gananciaNeta remains as a compatibility alias. */
+    private BigDecimal grossProfit;
+    private BigDecimal saleGrossProfit;
+    private Boolean grossProfitAvailable;
+    private String grossProfitUnavailableReason;
     private String estadoGanancia;
     private Integer itemsGananciaNoDisponible;
     private String tipoEntrega;

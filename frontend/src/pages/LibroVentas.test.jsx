@@ -137,7 +137,7 @@ describe('LibroVentas profit display', () => {
     render(<LibroVentas />)
 
     const table = await screen.findByRole('table')
-    expect(screen.getByRole('columnheader', { name: 'Ganancia neta' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Ganancia bruta' })).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: 'Medio Pago' })).not.toBeInTheDocument()
 
     const positiveRow = rowContaining(table, 'Ana Pérez')

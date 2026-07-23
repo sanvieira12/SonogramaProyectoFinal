@@ -10,6 +10,8 @@ public record ProfitResult(
         int affectedItemCount,
         List<ProfitItemResult> items
 ) {
+    public BigDecimal grossProfit() { return netProfit; }
+    public boolean grossProfitAvailable() { return status != ProfitStatus.UNAVAILABLE; }
     public ProfitResult {
         items = items == null ? List.of() : List.copyOf(items);
     }
