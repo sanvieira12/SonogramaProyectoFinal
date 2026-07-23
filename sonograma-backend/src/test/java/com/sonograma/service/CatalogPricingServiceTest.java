@@ -81,6 +81,27 @@ class CatalogPricingServiceTest {
     }
 
     @Test
+    void quantityOnlyChangesStockAndNeverChangesUnitPricing() {
+        CatalogPricingService.PricingResult quantityOne = service.calculate(
+            new BigDecimal("12.29"), 1, "LP", pricingFrom(defaultSettings()));
+
+        for (int quantity : List.of(2, 3, 10, 100)) {
+            CatalogPricingService.PricingResult result = service.calculate(
+                new BigDecimal("12.29"), quantity, "LP", pricingFrom(defaultSettings()));
+
+            assertEquals(quantityOne.unitLineTotalEur(), result.unitLineTotalEur());
+            assertEquals(quantityOne.extraCostEur(), result.extraCostEur());
+            assertEquals(quantityOne.realUnitCostEur(), result.realUnitCostEur());
+            assertEquals(quantityOne.realUnitCostUyu(), result.realUnitCostUyu());
+            assertEquals(quantityOne.finalPriceUyu(), result.finalPriceUyu());
+        }
+
+        assertEquals(new BigDecimal("12.29"), quantityOne.unitLineTotalEur());
+        assertEquals(TEST_SINGLE_EXTRA, quantityOne.extraCostEur());
+        assertEquals(new BigDecimal("17.4156"), quantityOne.realUnitCostEur());
+    }
+
+    @Test
     void calculatesDoubleRecordFrom2x12() {
         CatalogPricingService.PricingResult result = service.calculate(new BigDecimal("10.1234"), 1, "2x12\"", pricingFrom(defaultSettings()));
 

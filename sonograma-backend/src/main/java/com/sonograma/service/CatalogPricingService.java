@@ -118,7 +118,6 @@ public class CatalogPricingService {
             }
             PricingResult result = calculate(
                 disco.getCosto(),
-                disco.getCantidadCopias(),
                 disco.getFormato(),
                 savedSettings
             );
@@ -141,7 +140,7 @@ public class CatalogPricingService {
         Disco disco = discoRepository.findById(id)
             .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
         PricingSettings settings = getOrCreateSettings();
-        PricingResult result = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings, markup);
+        PricingResult result = calculate(disco.getCosto(), disco.getFormato(), settings, markup);
         if (result == null) {
             throw new NegocioException("No se pudo recalcular el precio final del disco seleccionado");
         }
@@ -159,7 +158,7 @@ public class CatalogPricingService {
 
     @Transactional(readOnly = true)
     public PricingResult calculate(BigDecimal unitPriceEur, String format) {
-        return calculate(unitPriceEur, 1, format, getOrCreateSettings());
+        return calculate(unitPriceEur, format, getOrCreateSettings());
     }
 
     @Transactional(readOnly = true)
@@ -169,7 +168,8 @@ public class CatalogPricingService {
 
     @Transactional(readOnly = true)
     public PricingResult calculate(BigDecimal unitPriceEur, Integer quantity, String format) {
-        return calculate(unitPriceEur, quantity, format, getOrCreateSettings());
+        // Kept for callers that still pass inventory quantity; pricing is always per copy.
+        return calculate(unitPriceEur, format, getOrCreateSettings());
     }
 
     @Transactional(readOnly = true)
@@ -178,12 +178,12 @@ public class CatalogPricingService {
     }
 
     public PricingResult calculate(BigDecimal unitPriceEur, Integer quantity, String format, PricingSettings settings) {
-        return calculate(unitPriceEur, quantity, format, settings, null);
+        // Kept for callers that still pass inventory quantity; pricing is always per copy.
+        return calculate(unitPriceEur, format, settings);
     }
 
     public PricingResult calculate(
         BigDecimal unitPriceEur,
-        Integer quantity,
         String format,
         PricingSettings settings,
         BigDecimal markupOverride
@@ -193,18 +193,24 @@ public class CatalogPricingService {
         }
 
         RecordType recordType = detectRecordType(format);
-        int normalizedQuantity = normalizeQuantity(quantity);
         BigDecimal extra = extraForRecordType(recordType, settings);
         BigDecimal markup = markupOverride != null ? markupOverride : markupForRecordType(recordType, settings);
 
-        BigDecimal quantityFactor = BigDecimal.valueOf(normalizedQuantity);
-        BigDecimal lineTotal = unitPriceEur.multiply(quantityFactor);
-        BigDecimal extraLineCostEur = extra.multiply(quantityFactor);
+        BigDecimal lineTotal = unitPriceEur;
+        BigDecimal extraLineCostEur = extra;
         BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur);
         BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate());
         BigDecimal finalPriceUyu = unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup);
 
         return new PricingResult(recordType, lineTotal, extraLineCostEur, realLineCostEur, realLineCostUyu, markup, finalPriceUyu);
+    }
+
+    private PricingResult calculate(
+        BigDecimal unitPriceEur,
+        String format,
+        PricingSettings settings
+    ) {
+        return calculate(unitPriceEur, format, settings, null);
     }
 
     public RecordType detectRecordType(String format) {
@@ -254,7 +260,7 @@ public class CatalogPricingService {
         }
 
         if (requestedMode == PricingMode.AUTO || (request.getPrecioVenta() == null && request.getCosto() != null)) {
-            PricingResult pricing = calculate(request.getCosto(), request.getCantidadCopias(), request.getFormato());
+            PricingResult pricing = calculate(request.getCosto(), request.getFormato());
             if (pricing != null) {
                 disco.setPrecioVenta(pricing.finalPriceUyu());
                 disco.setPricingMode(PricingMode.AUTO);
@@ -264,7 +270,7 @@ public class CatalogPricingService {
         }
 
         if (currentMode == PricingMode.AUTO && disco.getCosto() != null && disco.getPrecioVenta() == null) {
-            PricingResult pricing = calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato());
+            PricingResult pricing = calculate(disco.getCosto(), disco.getFormato());
             if (pricing != null) {
                 disco.setPrecioVenta(pricing.finalPriceUyu());
                 disco.setManualMarkup(null);
@@ -323,7 +329,7 @@ public class CatalogPricingService {
 
     private PricingResult calculateForDisco(Disco disco, PricingSettings settings) {
         BigDecimal markupOverride = effectiveMarkupOverride(disco, settings);
-        return calculate(disco.getCosto(), disco.getCantidadCopias(), disco.getFormato(), settings, markupOverride);
+        return calculate(disco.getCosto(), disco.getFormato(), settings, markupOverride);
     }
 
     private BigDecimal effectiveMarkupOverride(Disco disco, PricingSettings settings) {
