@@ -1,5 +1,6 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.CategoriaGasto;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -28,6 +29,10 @@ public class GastoTienda {
 
     @Column(name = "monto", nullable = false, precision = 12, scale = 2)
     private BigDecimal monto;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "categoria", length = 30)
+    private CategoriaGasto categoria;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

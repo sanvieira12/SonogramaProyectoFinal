@@ -1,8 +1,10 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.GastoTiendaDTO;
+import com.sonograma.dto.GastoTiendaRequestDTO;
 import com.sonograma.dto.GastoTiendaResumenDTO;
 import com.sonograma.service.GastoTiendaService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,12 +30,12 @@ public class GastoTiendaController {
     }
 
     @PostMapping
-    public ResponseEntity<GastoTiendaDTO> crear(@RequestBody GastoTiendaDTO request) {
+    public ResponseEntity<GastoTiendaDTO> crear(@Valid @RequestBody GastoTiendaRequestDTO request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.crear(request));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<GastoTiendaDTO> actualizar(@PathVariable Long id, @RequestBody GastoTiendaDTO request) {
+    public ResponseEntity<GastoTiendaDTO> actualizar(@PathVariable Long id, @Valid @RequestBody GastoTiendaRequestDTO request) {
         return ResponseEntity.ok(service.actualizar(id, request));
     }
 

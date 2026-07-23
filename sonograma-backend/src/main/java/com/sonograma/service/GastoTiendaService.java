@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.GastoTiendaDTO;
+import com.sonograma.dto.GastoTiendaRequestDTO;
 import com.sonograma.dto.GastoTiendaResumenDTO;
 import com.sonograma.entity.GastoTienda;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -25,21 +26,23 @@ public class GastoTiendaService {
         return repository.findAllByOrderByFechaDescIdGastoDesc().stream().map(this::toDto).toList();
     }
 
-    public GastoTiendaDTO crear(GastoTiendaDTO request) {
+    public GastoTiendaDTO crear(GastoTiendaRequestDTO request) {
         GastoTienda gasto = GastoTienda.builder()
             .fecha(request.getFecha() != null ? request.getFecha() : LocalDate.now())
             .descripcion(request.getDescripcion())
             .monto(request.getMonto())
+            .categoria(request.getCategoria())
             .build();
         return toDto(repository.save(gasto));
     }
 
-    public GastoTiendaDTO actualizar(Long id, GastoTiendaDTO request) {
+    public GastoTiendaDTO actualizar(Long id, GastoTiendaRequestDTO request) {
         GastoTienda gasto = repository.findById(id)
             .orElseThrow(() -> new RecursoNoEncontradoException("Gasto", id));
         if (request.getFecha() != null) gasto.setFecha(request.getFecha());
         if (request.getDescripcion() != null) gasto.setDescripcion(request.getDescripcion());
         if (request.getMonto() != null) gasto.setMonto(request.getMonto());
+        gasto.setCategoria(request.getCategoria());
         return toDto(repository.save(gasto));
     }
 
@@ -68,6 +71,7 @@ public class GastoTiendaService {
             .fecha(gasto.getFecha())
             .descripcion(gasto.getDescripcion())
             .monto(gasto.getMonto())
+            .categoria(gasto.getCategoria())
             .build();
     }
 }

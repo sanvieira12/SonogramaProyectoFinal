@@ -158,7 +158,7 @@ public class ResumenFinancieroMensualService {
 
     private GastoTiendaDTO gastoDto(GastoTienda gasto) {
         return GastoTiendaDTO.builder().idGasto(gasto.getIdGasto()).fecha(gasto.getFecha())
-                .descripcion(gasto.getDescripcion()).monto(gasto.getMonto()).build();
+                .descripcion(gasto.getDescripcion()).monto(gasto.getMonto()).categoria(gasto.getCategoria()).build();
     }
 
     private String nombreCliente(Venta venta) {
