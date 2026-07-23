@@ -161,6 +161,21 @@ public class CatalogPricingService {
         return calculate(unitPriceEur, format, getOrCreateSettings());
     }
 
+    /**
+     * Returns the REAL COST (UYU) shown for a stock item.
+     *
+     * The Sales Book must consume this stock value, not a sale-line snapshot
+     * that may have been populated by an older acquisition-cost resolver.
+     */
+    @Transactional(readOnly = true)
+    public BigDecimal realCostUyuForStock(Disco disco) {
+        if (disco == null) {
+            return null;
+        }
+        PricingResult pricing = calculateForDisco(disco, getOrCreateSettings());
+        return pricing != null ? pricing.realUnitCostUyu() : null;
+    }
+
     @Transactional(readOnly = true)
     public PricingResult calcular(BigDecimal unitPriceEur, String format) {
         return calculate(unitPriceEur, format);

@@ -26,10 +26,10 @@ import java.util.Locale;
 /**
  * Single source of truth for historical sale profit.
  *
- * This service never reads Disco.precioVenta. The sold price comes from the
- * sale/detail and the acquisition cost comes from the normalized detail
- * snapshot, or from a strictly recoverable historical purchase record for
- * legacy rows.
+ * This service never reads Disco.precioVenta. For Sales Book profit, the sold
+ * price comes from the sale detail and the cost comes from the stock item's
+ * REAL COST (UYU) field. The older snapshot resolver remains available for
+ * acquisition-cost workflows that are unrelated to Sales Book reporting.
  */
 @Service
 @RequiredArgsConstructor
@@ -39,11 +39,11 @@ public class ProfitCalculationService {
     private static final int MONEY_SCALE = 2;
     private static final int COST_SCALE = 6;
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-    private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
 
     private final VentaRepository ventaRepository;
     private final PedidoRepository pedidoRepository;
     private final PedidoItemRepository pedidoItemRepository;
+    private final CatalogPricingService catalogPricingService;
 
     /** Calculates one line using its recorded unit sale amount without sale-level allocation. */
     public ProfitItemResult netProfitForSoldItem(DetalleVenta detalle) {
@@ -103,7 +103,7 @@ public class ProfitCalculationService {
         return acquisitionCostForDetail(detail);
     }
 
-    /** Calculates all sold lines in one sale, including any sale-level discount allocation. */
+    /** Calculates all sold lines using each detail's stored sale price and stock REAL COST (UYU). */
     public ProfitResult netProfitForSale(Venta venta) {
         if (venta == null || venta.getEstado() == EstadoVenta.CANCELADA) {
             return emptyResult();
@@ -117,10 +117,19 @@ public class ProfitCalculationService {
             return calculateLegacySale(venta);
         }
 
-        List<BigDecimal> actualAmounts = allocateActualLineAmounts(venta, details);
         List<ProfitItemResult> items = new ArrayList<>(details.size());
-        for (int i = 0; i < details.size(); i++) {
-            items.add(calculateItem(details.get(i), actualAmounts.get(i), venta));
+        for (DetalleVenta detail : details) {
+            // Manual lines have no stock record and retain their existing
+            // unavailable/legacy handling. Stock-backed lines use only the
+            // sale item price and Stock REAL COST (UYU).
+            if (detail.getDisco() == null) {
+                int quantity = quantityOf(detail);
+                BigDecimal actualAmount = money(nvl(detail.getPrecioUnitario())
+                        .multiply(BigDecimal.valueOf(quantity)));
+                items.add(calculateItem(detail, actualAmount, venta));
+            } else {
+                items.add(calculateSalesBookItem(detail));
+            }
         }
         return aggregate(items);
     }
@@ -159,12 +168,11 @@ public class ProfitCalculationService {
     private ProfitResult calculateLegacySale(Venta venta) {
         BigDecimal actualAmount = actualLegacySaleAmount(venta);
         AcquisitionCostResolution resolution = venta.getDisco() != null
-                ? acquisitionCostForDisco(venta.getDisco()) : unavailableCost();
+                ? salesBookCostForDisco(venta.getDisco()) : unavailableCost();
         BigDecimal acquisitionCost = resolution.isComplete()
                 ? costMoney(resolution.unitCostUyu())
-                : venta.getDisco() != null && isForeign(catalogCurrency(venta.getDisco()))
-                    ? null
-                    : positiveHistoricalCost(venta.getCostoDisco()) ? costMoney(venta.getCostoDisco()) : null;
+                : venta.getDisco() == null && positiveHistoricalCost(venta.getCostoDisco())
+                    ? costMoney(venta.getCostoDisco()) : null;
         Long discoId = venta.getDisco() != null ? venta.getDisco().getIdDisco() : null;
         ProfitItemResult item = calculateItem(
                 null,
@@ -210,6 +218,46 @@ public class ProfitCalculationService {
                 quantity,
                 missingReason,
                 resolution);
+    }
+
+    private ProfitItemResult calculateSalesBookItem(DetalleVenta detail) {
+        int quantity = quantityOf(detail);
+        BigDecimal actualAmount = money(nvl(detail.getPrecioUnitario())
+                .multiply(BigDecimal.valueOf(quantity)));
+        AcquisitionCostResolution resolution = salesBookCostForDetail(detail);
+        BigDecimal acquisitionTotal = resolution.isComplete()
+                ? costMoney(resolution.unitCostUyu().multiply(BigDecimal.valueOf(quantity)))
+                : null;
+        return calculateItem(
+                detail,
+                actualAmount,
+                acquisitionTotal,
+                detail.getIdDetalle(),
+                detail.getDisco() != null ? detail.getDisco().getIdDisco() : null,
+                quantity,
+                resolution.isComplete() ? null : "Missing stock REAL COST (UYU)",
+                resolution);
+    }
+
+    private AcquisitionCostResolution salesBookCostForDetail(DetalleVenta detail) {
+        if (detail == null || detail.getDisco() == null || catalogPricingService == null) {
+            // Manual sale lines have no stock record. Preserve their existing
+            // behavior, but never use a sale snapshot for stock-backed lines.
+            return detail == null ? unavailableCost() : acquisitionCostForDetail(detail);
+        }
+        return salesBookCostForDisco(detail.getDisco());
+    }
+
+    private AcquisitionCostResolution salesBookCostForDisco(Disco disco) {
+        if (disco == null || catalogPricingService == null) {
+            return unavailableCost();
+        }
+        BigDecimal realCostUyu = catalogPricingService.realCostUyuForStock(disco);
+        if (realCostUyu == null) {
+            return unavailableCost();
+        }
+        return new AcquisitionCostResolution(
+                cost(realCostUyu), realCostUyu, "UYU", null, "STOCK_REAL_COST_UYU");
     }
 
     private ProfitItemResult calculateItem(
@@ -334,54 +382,6 @@ public class ProfitCalculationService {
         }
         return costMoney(sale.getCostoDisco().divide(
                 BigDecimal.valueOf(quantityOf(detail)), COST_SCALE, RoundingMode.HALF_UP));
-    }
-
-    private List<BigDecimal> allocateActualLineAmounts(Venta sale, List<DetalleVenta> details) {
-        List<BigDecimal> originalAmounts = details.stream()
-                .map(detail -> nvl(detail.getPrecioUnitario()).multiply(BigDecimal.valueOf(quantityOf(detail))))
-                .toList();
-        BigDecimal originalTotal = originalAmounts.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal finalTotal = finalSaleAmount(sale, originalTotal);
-
-        if (originalAmounts.size() == 1) {
-            return List.of(money(finalTotal));
-        }
-
-        BigDecimal baseTotal = originalAmounts.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (baseTotal.compareTo(BigDecimal.ZERO) == 0) {
-            List<BigDecimal> allocated = new ArrayList<>(originalAmounts.size());
-            for (int i = 0; i < originalAmounts.size() - 1; i++) allocated.add(ZERO);
-            allocated.add(money(finalTotal));
-            return allocated;
-        }
-
-        List<BigDecimal> allocated = new ArrayList<>(originalAmounts.size());
-        BigDecimal allocatedBeforeLast = BigDecimal.ZERO;
-        for (int i = 0; i < originalAmounts.size(); i++) {
-            BigDecimal amount;
-            if (i == originalAmounts.size() - 1) {
-                amount = money(finalTotal.subtract(allocatedBeforeLast));
-            } else {
-                amount = money(finalTotal.multiply(originalAmounts.get(i))
-                        .divide(baseTotal, 12, RoundingMode.HALF_UP));
-                allocatedBeforeLast = allocatedBeforeLast.add(amount);
-            }
-            allocated.add(amount);
-        }
-        return allocated;
-    }
-
-    private BigDecimal finalSaleAmount(Venta sale, BigDecimal originalTotal) {
-        if (sale != null && sale.getTotalFinal() != null) {
-            return money(sale.getTotalFinal());
-        }
-        if (sale != null && sale.getTotal() != null) {
-            return money(sale.getTotal());
-        }
-        BigDecimal discount = sale != null ? nvl(sale.getDescuentoPorcentaje()) : BigDecimal.ZERO;
-        BigDecimal factor = ONE_HUNDRED.subtract(discount)
-                .divide(ONE_HUNDRED, 12, RoundingMode.HALF_UP);
-        return money(originalTotal.multiply(factor));
     }
 
     private BigDecimal actualLegacySaleAmount(Venta sale) {

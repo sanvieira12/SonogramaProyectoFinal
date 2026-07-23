@@ -25,6 +25,7 @@ class ProfitCalculationServiceTest {
     private VentaRepository ventaRepository;
     private com.sonograma.repository.PedidoRepository pedidoRepository;
     private com.sonograma.repository.PedidoItemRepository pedidoItemRepository;
+    private CatalogPricingService catalogPricingService;
     private ProfitCalculationService service;
 
     @BeforeEach
@@ -32,7 +33,8 @@ class ProfitCalculationServiceTest {
         ventaRepository = mock(VentaRepository.class);
         pedidoRepository = mock(com.sonograma.repository.PedidoRepository.class);
         pedidoItemRepository = mock(com.sonograma.repository.PedidoItemRepository.class);
-        service = new ProfitCalculationService(ventaRepository, pedidoRepository, pedidoItemRepository);
+        catalogPricingService = mock(CatalogPricingService.class);
+        service = new ProfitCalculationService(ventaRepository, pedidoRepository, pedidoItemRepository, catalogPricingService);
     }
 
     @Test
@@ -85,7 +87,7 @@ class ProfitCalculationServiceTest {
     }
 
     @Test
-    void asignaDescuentoProporcionalmenteYConservaElTotal() {
+    void usaElPrecioUnitarioDeCadaItemSinRepartirElTotalDeLaVenta() {
         Venta sale = sale("2700", "10",
                 detail("1000", "400", 1),
                 detail("2000", "600", 1));
@@ -93,11 +95,58 @@ class ProfitCalculationServiceTest {
         ProfitResult result = service.netProfitForSale(sale);
 
         assertThat(result.items()).extracting(ProfitItemResult::actualSaleAmount)
-                .containsExactly(new BigDecimal("900.00"), new BigDecimal("1800.00"));
+                .containsExactly(new BigDecimal("1000.00"), new BigDecimal("2000.00"));
         assertThat(result.items()).extracting(ProfitItemResult::netProfit)
-                .containsExactly(new BigDecimal("500.00"), new BigDecimal("1200.00"));
+                .containsExactly(new BigDecimal("600.00"), new BigDecimal("1400.00"));
         assertThat(result.items().stream().map(ProfitItemResult::actualSaleAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("2700.00");
+                .reduce(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("3000.00");
+    }
+
+    @Test
+    void salesBookUsesSaleItemPriceAndStockRealCostInsteadOfSnapshotsOrCatalogPrice() {
+        Disco disco = Disco.builder()
+                .idDisco(99L)
+                .costo(new BigDecimal("10.49"))
+                .precioVenta(new BigDecimal("9999"))
+                .build();
+        DetalleVenta detail = detailWithDisco("1266", "524.5", disco);
+        detail.setCantidad(1);
+        Venta sale = sale("1266", null, detail);
+        when(catalogPricingService.realCostUyuForStock(disco)).thenReturn(new BigDecimal("791.505000"));
+
+        ProfitItemResult result = service.netProfitForSale(sale).items().get(0);
+
+        assertThat(result.actualSaleAmount()).isEqualByComparingTo("1266.00");
+        assertThat(result.acquisitionCost()).isEqualByComparingTo("791.505000");
+        assertThat(result.netProfit()).isEqualByComparingTo("474.50");
+        assertThat(result.costSource()).isEqualTo("STOCK_REAL_COST_UYU");
+    }
+
+    @Test
+    void calculatesAllSixItemsWithTheSameSalesBookFormula() {
+        long[] stockIds = {627L, 581L, 543L, 527L, 635L, 565L};
+        String[] salePrices = {"1346", "1266", "1306", "1251", "1346", "1385"};
+        String[] realCosts = {"841.005", "791.505", "816.255", "781.605", "841.005", "865.755"};
+        List<DetalleVenta> details = new java.util.ArrayList<>();
+        for (int index = 0; index < stockIds.length; index++) {
+            Disco stock = Disco.builder().idDisco(stockIds[index]).precioVenta(new BigDecimal("9999")).build();
+            when(catalogPricingService.realCostUyuForStock(stock)).thenReturn(new BigDecimal(realCosts[index]));
+            details.add(detailWithDisco(salePrices[index], "1", stock));
+        }
+
+        ProfitResult result = service.netProfitForSale(sale("7900", null,
+                details.toArray(new DetalleVenta[0])));
+
+        assertThat(result.items()).extracting(ProfitItemResult::actualSaleAmount)
+                .containsExactly(new BigDecimal("1346.00"), new BigDecimal("1266.00"),
+                        new BigDecimal("1306.00"), new BigDecimal("1251.00"),
+                        new BigDecimal("1346.00"), new BigDecimal("1385.00"));
+        assertThat(result.items()).extracting(ProfitItemResult::netProfit)
+                .containsExactly(new BigDecimal("505.00"), new BigDecimal("474.50"),
+                        new BigDecimal("489.75"), new BigDecimal("469.40"),
+                        new BigDecimal("505.00"), new BigDecimal("519.25"));
+        assertThat(result.items()).allMatch(item -> "STOCK_REAL_COST_UYU".equals(item.costSource()));
+        assertThat(result.netProfit()).isEqualByComparingTo("2962.90");
     }
 
     @Test
@@ -110,8 +159,8 @@ class ProfitCalculationServiceTest {
         ProfitResult result = service.netProfitForSale(sale);
 
         assertThat(result.items()).extracting(ProfitItemResult::actualSaleAmount)
-                .containsExactly(new BigDecimal("0.33"), new BigDecimal("0.33"), new BigDecimal("0.34"));
-        assertThat(result.netProfit()).isEqualByComparingTo("1.00");
+                .containsExactly(new BigDecimal("1.00"), new BigDecimal("1.00"), new BigDecimal("1.00"));
+        assertThat(result.netProfit()).isEqualByComparingTo("3.00");
     }
 
     @Test
@@ -146,15 +195,18 @@ class ProfitCalculationServiceTest {
                 detailWithDisco("1290", "10.79", second),
                 detailWithDisco("1409", "12.29", third));
 
-        ProfitResult result = service.netProfitForSale(sale);
+        List<ProfitItemResult> items = sale.getDetalles().stream()
+                .map(service::netProfitForSoldItem)
+                .toList();
 
-        assertThat(result.items()).extracting(ProfitItemResult::acquisitionCost)
+        assertThat(items).extracting(ProfitItemResult::acquisitionCost)
                 .containsExactly(new BigDecimal("474.500000"), new BigDecimal("539.500000"), new BigDecimal("614.500000"));
-        assertThat(result.items()).extracting(ProfitItemResult::netProfit)
+        assertThat(items).extracting(ProfitItemResult::netProfit)
                 .containsExactly(new BigDecimal("725.50"), new BigDecimal("750.50"), new BigDecimal("794.50"));
-        assertThat(result.netProfit()).isEqualByComparingTo("2270.50");
-        assertThat(result.items().get(0).originalCostCurrency()).isEqualTo("EUR");
-        assertThat(result.items().get(0).costSource()).isEqualTo("HISTORICAL_PURCHASE_LANDED_COST");
+        assertThat(items.stream().map(ProfitItemResult::netProfit)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("2270.50");
+        assertThat(items.get(0).originalCostCurrency()).isEqualTo("EUR");
+        assertThat(items.get(0).costSource()).isEqualTo("HISTORICAL_PURCHASE_LANDED_COST");
     }
 
     @Test

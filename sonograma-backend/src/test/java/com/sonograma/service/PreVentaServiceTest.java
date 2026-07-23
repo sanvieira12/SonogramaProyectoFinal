@@ -30,7 +30,8 @@ class PreVentaServiceTest {
         service = new PreVentaService(preVentas, clientes, discos, ventas, detalles,
                 new ProfitCalculationService(ventas,
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
-                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class)));
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class),
+                        org.mockito.Mockito.mock(CatalogPricingService.class)));
         cliente = new Cliente(); cliente.setIdCliente(3L); cliente.setNombre("Ana"); cliente.setApellido("Pérez"); cliente.setActivo(true);
         when(clientes.findById(3L)).thenReturn(Optional.of(cliente));
         when(preVentas.save(any())).thenAnswer(i -> {

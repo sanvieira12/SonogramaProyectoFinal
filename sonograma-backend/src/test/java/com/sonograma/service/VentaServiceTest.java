@@ -76,7 +76,8 @@ class VentaServiceTest {
                 new CostosVentaService(new ProfitCalculationService(
                         org.mockito.Mockito.mock(VentaRepository.class),
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
-                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class))),
+                        org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class),
+                        org.mockito.Mockito.mock(CatalogPricingService.class))),
                 profitCalculationService,
                 discoQrCopyService,
                 discoEstadoService,

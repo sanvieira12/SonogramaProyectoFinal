@@ -21,7 +21,8 @@ class ExcelExportServiceTest {
         ExcelExportService service = new ExcelExportService(new ProfitCalculationService(
                 mock(com.sonograma.repository.VentaRepository.class),
                 mock(com.sonograma.repository.PedidoRepository.class),
-                mock(com.sonograma.repository.PedidoItemRepository.class)));
+                mock(com.sonograma.repository.PedidoItemRepository.class),
+                mock(CatalogPricingService.class)));
         Cliente cliente = new Cliente();
         cliente.setNombre("Cliente");
 
@@ -47,7 +48,8 @@ class ExcelExportServiceTest {
         ExcelExportService service = new ExcelExportService(new ProfitCalculationService(
                 mock(com.sonograma.repository.VentaRepository.class),
                 mock(com.sonograma.repository.PedidoRepository.class),
-                mock(com.sonograma.repository.PedidoItemRepository.class)));
+                mock(com.sonograma.repository.PedidoItemRepository.class),
+                mock(CatalogPricingService.class)));
         VentaResponseDTO venta = VentaResponseDTO.builder()
                 .tipoMovimiento("VENTA")
                 .descripcionMovimiento("Venta")

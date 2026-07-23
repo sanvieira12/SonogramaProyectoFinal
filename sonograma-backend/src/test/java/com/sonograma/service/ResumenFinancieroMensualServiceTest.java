@@ -39,7 +39,8 @@ class ResumenFinancieroMensualServiceTest {
                 ventaRepository, pagoRepository, gastoRepository,
                 new ProfitCalculationService(ventaRepository,
                         mock(com.sonograma.repository.PedidoRepository.class),
-                        mock(com.sonograma.repository.PedidoItemRepository.class)), new IngresoLibroCalculator());
+                        mock(com.sonograma.repository.PedidoItemRepository.class),
+                        mock(CatalogPricingService.class)), new IngresoLibroCalculator());
         when(ventaRepository.findAllForProfitPeriod(any(), any())).thenReturn(List.of(
                 sale("2026-06-10T10:00:00", "1000", "500", "400", 1, EstadoPago.PARCIAL),
                 sale("2026-06-12T10:00:00", "500", null, null, 1, EstadoPago.PENDIENTE)));
