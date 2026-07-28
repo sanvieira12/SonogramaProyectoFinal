@@ -37,6 +37,13 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(LocalDateTime.now(), 422, ex.getMessage(), request.getRequestURI()));
     }
 
+    @ExceptionHandler(ConflictoNegocioException.class)
+    public ResponseEntity<ErrorResponse> handleConflicto(
+            ConflictoNegocioException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(LocalDateTime.now(), 409, ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidacion(
             MethodArgumentNotValidException ex, HttpServletRequest request) {

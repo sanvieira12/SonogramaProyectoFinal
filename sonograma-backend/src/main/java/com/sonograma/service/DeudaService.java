@@ -6,16 +6,22 @@ import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.dto.DetalleVentaResponseDTO;
 import com.sonograma.dto.PagoDeudaDTO;
 import com.sonograma.entity.Cliente;
+import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Deuda;
+import com.sonograma.entity.Disco;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoVenta;
 import com.sonograma.enums.EstadoPago;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.ClienteRepository;
+import com.sonograma.repository.DetalleVentaRepository;
 import com.sonograma.repository.DeudaRepository;
+import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.PagoDeudaRepository;
+import com.sonograma.repository.VentaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +45,12 @@ public class DeudaService {
 
     private final DeudaRepository deudaRepository;
     private final ClienteRepository clienteRepository;
+    private final DetalleVentaRepository detalleVentaRepository;
     private final PagoDeudaRepository pagoDeudaRepository;
+    private final VentaRepository ventaRepository;
+    private final DiscoRepository discoRepository;
+    private final DiscoQrCopyService discoQrCopyService;
+    private final DiscoEstadoService discoEstadoService;
 
     @Transactional(readOnly = true)
     public List<DeudaConsolidadaResponseDTO> obtenerPendientes(String q) {
@@ -157,13 +168,137 @@ public class DeudaService {
         deudaRepository.save(deuda);
     }
 
+    /**
+     * Permanently removes a debt and reverses the inventory transaction that
+     * created it. All changes run in the enclosing transaction so a conflict
+     * or persistence failure rolls the operation back as one unit.
+     */
     public void eliminar(Long idDeuda) {
-        Deuda deuda = deudaRepository.findById(idDeuda)
+        Deuda deuda = deudaRepository.findByIdForUpdate(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
-        deuda.setActiva(false);
-        deuda.setUpdatedAt(LocalDateTime.now());
-        deudaRepository.save(deuda);
+
+        Venta venta = deuda.getVenta();
+        if (venta != null) {
+            validarVentaEliminable(venta, deuda);
+            restaurarStockVenta(venta);
+            venta.setEstado(EstadoVenta.CANCELADA);
+            venta.setMontoDeuda(BigDecimal.ZERO);
+            venta.setMontoPagado(BigDecimal.ZERO);
+            venta.setEstadoPago(EstadoPago.PENDIENTE);
+            ventaRepository.save(venta);
+        }
+
+        // Payment rows are owned by this debt. They cannot be retained after a
+        // hard delete because their FK is non-nullable and reports use them as
+        // income movements. Unrelated payments are never touched.
+        List<PagoDeuda> pagos = pagoDeudaRepository
+                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda);
+        if (pagos != null && !pagos.isEmpty()) {
+            pagoDeudaRepository.deleteAll(pagos);
+            pagoDeudaRepository.flush();
+        }
+
+        deudaRepository.delete(deuda);
+        deudaRepository.flush();
+    }
+
+    private void validarVentaEliminable(Venta venta, Deuda deuda) {
+        if (venta.getEstado() == EstadoVenta.CANCELADA) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar la deuda porque la venta ya fue cancelada.");
+        }
+
+        BigDecimal deudaVenta = Objects.requireNonNullElse(venta.getMontoDeuda(), BigDecimal.ZERO);
+        boolean ventaImpaga = venta.getEstadoPago() != EstadoPago.PAGADO
+                || deudaVenta.compareTo(BigDecimal.ZERO) > 0
+                || Objects.requireNonNullElse(deuda.getMontoPendiente(), BigDecimal.ZERO)
+                    .compareTo(BigDecimal.ZERO) > 0;
+        if (!ventaImpaga) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar la deuda porque la venta ya está completamente paga.");
+        }
+    }
+
+    private void restaurarStockVenta(Venta venta) {
+        List<DetalleVenta> detalles = venta.getDetalles();
+        if (detalles != null && !detalles.isEmpty()) {
+            for (DetalleVenta detalle : detalles) {
+                if (detalle.getDisco() == null) continue;
+                restaurarStockDetalle(venta, detalle);
+            }
+            return;
+        }
+
+        if (venta.getDisco() != null) {
+            if (discoQrCopyService.hasCopyInventory(venta.getDisco().getIdDisco())) {
+                throw new ConflictoNegocioException(
+                        "No se puede restaurar el stock con seguridad: la venta no identifica la copia exacta.");
+            }
+            restaurarStockLegacy(venta.getDisco(), 1);
+        }
+    }
+
+    private void restaurarStockDetalle(Venta venta, DetalleVenta detalle) {
+        Disco disco = detalle.getDisco();
+        if (discoQrCopyService.hasCopyInventory(disco.getIdDisco())) {
+            validarCopiasNoUsadasEnOtraVenta(venta, detalle);
+            discoQrCopyService.restoreCopiesForDebt(disco, detalle.getCopyIdsSnapshot());
+            discoEstadoService.aplicar(disco);
+        } else {
+            restaurarStockLegacy(disco, cantidadDetalle(detalle));
+        }
+        discoRepository.save(disco);
+    }
+
+    private void validarCopiasNoUsadasEnOtraVenta(Venta venta, DetalleVenta detalle) {
+        List<Long> copyIds = parseCopyIds(detalle.getCopyIdsSnapshot());
+        if (copyIds.isEmpty()) {
+            // restoreCopiesForDebt will return the user-facing conflict for a
+            // missing snapshot; do not query every sale in that case.
+            return;
+        }
+        List<DetalleVenta> detallesExistentes = Objects.requireNonNullElse(
+                detalleVentaRepository.findAllWithCopyIds(), List.of());
+        boolean reused = detallesExistentes.stream()
+                .filter(otro -> otro.getIdDetalle() == null
+                        || !Objects.equals(otro.getIdDetalle(), detalle.getIdDetalle()))
+                .anyMatch(otro -> {
+                    List<Long> otrosIds = parseCopyIds(otro.getCopyIdsSnapshot());
+                    return otrosIds.stream().anyMatch(copyIds::contains)
+                            && (otro.getVenta() == null
+                                || !Objects.equals(otro.getVenta().getIdVenta(), venta.getIdVenta())
+                                || !Objects.equals(otro.getIdDetalle(), detalle.getIdDetalle()));
+                });
+        if (reused) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar la deuda porque uno de los discos pertenece a otra venta.");
+        }
+    }
+
+    private List<Long> parseCopyIds(String snapshot) {
+        if (snapshot == null || snapshot.isBlank()) return List.of();
+        try {
+            return Arrays.stream(snapshot.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .map(Long::valueOf)
+                    .distinct()
+                    .toList();
+        } catch (NumberFormatException ex) {
+            return List.of();
+        }
+    }
+
+    private void restaurarStockLegacy(Disco disco, int cantidad) {
+        int disponibles = Objects.requireNonNullElse(disco.getCantidadCopias(), 0);
+        disco.setCantidadCopias(disponibles + Math.max(1, cantidad));
+        disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
+        discoRepository.save(disco);
+    }
+
+    private int cantidadDetalle(DetalleVenta detalle) {
+        return detalle.getCantidad() == null || detalle.getCantidad() < 1 ? 1 : detalle.getCantidad();
     }
 
     public DeudaResponseDTO registrarPago(Long idDeuda, BigDecimal monto, String notas) {

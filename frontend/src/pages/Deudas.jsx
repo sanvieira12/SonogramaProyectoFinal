@@ -274,6 +274,7 @@ export default function Deudas() {
   const [deudaEliminar, setDeudaEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   const cargar = useCallback(async (query = search, focusMovementId = null) => {
     setLoading(true)
@@ -321,14 +322,17 @@ export default function Deudas() {
   }
 
   async function eliminarDeuda() {
-    if (!deudaEliminar) return
+    if (!deudaEliminar || eliminando) return
     setEliminando(true)
     setError('')
+    setSuccess('')
     try {
       await api.deudas.eliminar(deudaEliminar.idDeuda)
       setDeudaEliminar(null)
       setPanelDeuda(null)
       await cargar(search)
+      setSuccess('Deuda eliminada. Los discos asociados volvieron al stock.')
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     } catch (e) {
       setError(e.message || 'No se pudo eliminar la deuda')
     } finally {
@@ -346,7 +350,8 @@ export default function Deudas() {
         <button onClick={() => { setCreating(true); setPanelDeuda(null) }} className="btn-primary text-sm">Nueva deuda</button>
       </div>
 
-      {error && <p className="text-sm text-red-500 dark:text-white bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">{error}</p>}
+      {error && <p role="alert" className="text-sm text-red-500 dark:text-white bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">{error}</p>}
+      {success && <p role="status" className="text-sm text-emerald-600 dark:text-white bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3">{success}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
@@ -422,7 +427,15 @@ export default function Deudas() {
           onDelete={setDeudaEliminar}
         />
       )}
-      {deudaEliminar && <ConfirmModal titulo="Eliminar movimiento" mensaje={`¿Seguro que querés ocultar este movimiento de ${deudaEliminar.nombreCliente || 'este deudor'}? No se borrarán pagos ni ventas relacionadas.`} onConfirmar={eliminarDeuda} onCancelar={() => setDeudaEliminar(null)} cargando={eliminando} />}
+      {deudaEliminar && <ConfirmModal
+        titulo="Eliminar deuda"
+        mensaje="¿Seguro que querés eliminar esta deuda? La deuda desaparecerá completamente del sistema y los discos asociados volverán a estar disponibles en stock."
+        confirmarTexto="Eliminar deuda"
+        error={error}
+        onConfirmar={eliminarDeuda}
+        onCancelar={() => { if (!eliminando) setDeudaEliminar(null) }}
+        cargando={eliminando}
+      />}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import com.sonograma.dto.DiscoQrCopyDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.DiscoQrCopyRepository;
@@ -112,6 +113,10 @@ public class DiscoQrCopyService {
         return repository.findByIdDiscoOrderByCopyNumber(discoId).size();
     }
 
+    public boolean hasCopyInventory(Long discoId) {
+        return !repository.findByIdDiscoOrderByCopyNumber(discoId).isEmpty();
+    }
+
     @Transactional(readOnly = true)
     public int soldCopies(Long discoId) {
         return (int) repository.countByIdDiscoAndEstado(discoId, EstadoCopiaDisco.VENDIDO);
@@ -161,6 +166,49 @@ public class DiscoQrCopyService {
             return;
         }
         List<DiscoQrCopy> copies = repository.findAllById(ids);
+        copies.forEach(copy -> copy.setEstado(EstadoCopiaDisco.DISPONIBLE));
+        repository.saveAll(copies);
+    }
+
+    /**
+     * Restores only the exact copies captured by a sale item. This is deliberately
+     * stricter than restoreCopies because debt deletion must never free a copy
+     * belonging to another transaction.
+     */
+    public void restoreCopiesForDebt(Disco disco, String copyIdsSnapshot) {
+        if (copyIdsSnapshot == null || copyIdsSnapshot.isBlank()) {
+            throw new ConflictoNegocioException(
+                "No se puede restaurar el stock con seguridad: la venta no tiene copias identificadas.");
+        }
+
+        List<Long> ids;
+        try {
+            ids = java.util.Arrays.stream(copyIdsSnapshot.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(Long::valueOf)
+                .toList();
+        } catch (NumberFormatException ex) {
+            throw new ConflictoNegocioException(
+                "No se puede restaurar el stock porque la venta tiene copias inválidas.");
+        }
+
+        if (ids.isEmpty() || ids.stream().distinct().count() != ids.size()) {
+            throw new ConflictoNegocioException(
+                "No se puede restaurar el stock porque la venta tiene copias inválidas.");
+        }
+
+        List<DiscoQrCopy> copies = repository.findAllByIdForUpdate(ids);
+        if (copies.size() != ids.size()
+            || copies.stream().anyMatch(copy -> !java.util.Objects.equals(copy.getIdDisco(), disco.getIdDisco()))) {
+            throw new ConflictoNegocioException(
+                "No se puede restaurar el stock porque una copia ya no pertenece a este disco.");
+        }
+        if (copies.stream().anyMatch(copy -> copy.getEstado() != EstadoCopiaDisco.VENDIDO)) {
+            throw new ConflictoNegocioException(
+                "No se puede eliminar la deuda porque uno de los discos tiene otro estado de stock.");
+        }
+
         copies.forEach(copy -> copy.setEstado(EstadoCopiaDisco.DISPONIBLE));
         repository.saveAll(copies);
     }

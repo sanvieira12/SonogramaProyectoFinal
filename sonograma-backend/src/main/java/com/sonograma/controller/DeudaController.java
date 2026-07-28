@@ -66,6 +66,7 @@ public class DeudaController {
     }
 
     @DeleteMapping("/{idDeuda}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
     public ResponseEntity<Void> eliminar(@PathVariable Long idDeuda) {
         deudaService.eliminar(idDeuda);
         return ResponseEntity.noContent().build();

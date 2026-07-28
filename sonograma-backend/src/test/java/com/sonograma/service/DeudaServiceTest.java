@@ -4,12 +4,20 @@ import com.sonograma.entity.Cliente;
 import com.sonograma.entity.Deuda;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
+import com.sonograma.entity.DetalleVenta;
+import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.dto.PagoDeudaDTO;
 import com.sonograma.enums.EstadoPago;
+import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.EstadoVenta;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.PagoDeudaRepository;
+import com.sonograma.repository.VentaRepository;
+import com.sonograma.repository.DiscoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,12 +41,89 @@ class DeudaServiceTest {
 
     @Mock DeudaRepository deudaRepository;
     @Mock ClienteRepository clienteRepository;
+    @Mock com.sonograma.repository.DetalleVentaRepository detalleVentaRepository;
     @Mock PagoDeudaRepository pagoDeudaRepository;
+    @Mock VentaRepository ventaRepository;
+    @Mock DiscoRepository discoRepository;
+    @Mock DiscoQrCopyService discoQrCopyService;
+    @Mock DiscoEstadoService discoEstadoService;
     private DeudaService service;
 
     @BeforeEach
     void setUp() {
-        service = new DeudaService(deudaRepository, clienteRepository, pagoDeudaRepository);
+        service = new DeudaService(
+                deudaRepository, clienteRepository, detalleVentaRepository, pagoDeudaRepository, ventaRepository,
+                discoRepository, discoQrCopyService, discoEstadoService);
+    }
+
+    @Test
+    void eliminaDeudaDeVentaRestauraSoloLasCopiasExactasYEliminaSusPagos() {
+        Disco disco = Disco.builder().idDisco(10L).cantidadCopias(0).estado(EstadoDisco.SIN_STOCK).build();
+        DetalleVenta detalle = DetalleVenta.builder().idDetalle(20L).disco(disco).cantidad(2)
+                .copyIdsSnapshot("101,102").build();
+        Venta venta = Venta.builder().idVenta(30L).estado(EstadoVenta.COMPLETADA)
+                .estadoPago(EstadoPago.PARCIAL).montoDeuda(new BigDecimal("500"))
+                .detalles(new ArrayList<>(List.of(detalle))).build();
+        Deuda deuda = Deuda.builder().idDeuda(40L).activa(true).venta(venta)
+                .montoTotal(new BigDecimal("2000")).montoPendiente(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(50L).deuda(deuda)
+                .monto(new BigDecimal("1500")).build();
+
+        when(deudaRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(40L))
+                .thenReturn(List.of(pago));
+        when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
+
+        service.eliminar(40L);
+
+        verify(discoQrCopyService).restoreCopiesForDebt(disco, "101,102");
+        verify(discoEstadoService).aplicar(disco);
+        verify(pagoDeudaRepository).deleteAll(List.of(pago));
+        verify(pagoDeudaRepository).flush();
+        verify(ventaRepository).save(venta);
+        verify(deudaRepository).delete(deuda);
+        verify(deudaRepository).flush();
+        assertThat(venta.getEstado()).isEqualTo(EstadoVenta.CANCELADA);
+        assertThat(venta.getMontoDeuda()).isZero();
+    }
+
+    @Test
+    void eliminaDeudaManualSinDiscosSinTocarOtrosPagos() {
+        Deuda deuda = Deuda.builder().idDeuda(41L).activa(true).montoTotal(new BigDecimal("100"))
+                .montoPendiente(new BigDecimal("100")).estadoPago(EstadoPago.PENDIENTE).build();
+        when(deudaRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(41L))
+                .thenReturn(List.of());
+
+        service.eliminar(41L);
+
+        verify(deudaRepository).delete(deuda);
+        verify(pagoDeudaRepository, org.mockito.Mockito.never()).deleteAll(any());
+        org.mockito.Mockito.verifyNoInteractions(ventaRepository, discoRepository, discoQrCopyService, discoEstadoService);
+    }
+
+    @Test
+    void noEliminaUnaVentaCompletamentePaga() {
+        Venta venta = Venta.builder().estado(EstadoVenta.COMPLETADA)
+                .estadoPago(EstadoPago.PAGADO).montoDeuda(BigDecimal.ZERO).build();
+        Deuda deuda = Deuda.builder().idDeuda(42L).activa(true).venta(venta)
+                .montoPendiente(BigDecimal.ZERO).build();
+        when(deudaRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(deuda));
+
+        assertThatThrownBy(() -> service.eliminar(42L))
+                .isInstanceOf(com.sonograma.exception.ConflictoNegocioException.class);
+        verify(deudaRepository, org.mockito.Mockito.never()).delete(any());
+        org.mockito.Mockito.verifyNoInteractions(discoQrCopyService, pagoDeudaRepository, ventaRepository);
+    }
+
+    @Test
+    void eliminarDeudaInexistenteDevuelveRecursoNoEncontrado() {
+        when(deudaRepository.findByIdForUpdate(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.eliminar(404L))
+                .isInstanceOf(RecursoNoEncontradoException.class);
+        verify(deudaRepository, org.mockito.Mockito.never()).delete(any());
     }
 
     @Test

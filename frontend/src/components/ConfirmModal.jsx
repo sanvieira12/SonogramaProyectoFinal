@@ -1,4 +1,4 @@
-export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando }) {
+export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, confirmarTexto = 'Confirmar', error }) {
   return (
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
@@ -10,6 +10,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
       >
         <h3 className="text-slate-900 dark:text-white font-bold text-base mb-2">{titulo}</h3>
         <p className="text-slate-500 dark:text-white/70 text-sm mb-6">{mensaje}</p>
+        {error && <p role="alert" className="text-red-600 dark:text-red-300 text-sm mb-4">{error}</p>}
         <div className="flex gap-3">
           <button
             onClick={onCancelar}
@@ -23,7 +24,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
             disabled={cargando}
             className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all duration-200 active:scale-95"
           >
-            {cargando ? 'Eliminando...' : 'Confirmar'}
+            {cargando ? 'Eliminando...' : confirmarTexto}
           </button>
         </div>
       </div>

@@ -2,6 +2,8 @@ package com.sonograma.service;
 
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,5 +82,32 @@ class DiscoQrCopyServiceTest {
         removedCaptor.getValue().forEach(removed::add);
         assertEquals(1, removed.size());
         assertEquals(2L, removed.get(0).getId());
+    }
+
+    @Test
+    void restoreCopiesForDebtOnlyRestoresExactSoldCopies() {
+        Disco disco = Disco.builder().idDisco(8L).build();
+        List<DiscoQrCopy> copies = List.of(
+            DiscoQrCopy.builder().id(11L).idDisco(8L).estado(EstadoCopiaDisco.VENDIDO).build(),
+            DiscoQrCopy.builder().id(12L).idDisco(8L).estado(EstadoCopiaDisco.VENDIDO).build()
+        );
+        when(repository.findAllByIdForUpdate(List.of(11L, 12L))).thenReturn(copies);
+
+        service.restoreCopiesForDebt(disco, "11,12");
+
+        assertTrue(copies.stream().allMatch(copy -> copy.getEstado() == EstadoCopiaDisco.DISPONIBLE));
+        verify(repository).saveAll(copies);
+    }
+
+    @Test
+    void restoreCopiesForDebtRejectsCopiesInAnotherState() {
+        Disco disco = Disco.builder().idDisco(8L).build();
+        DiscoQrCopy copy = DiscoQrCopy.builder().id(11L).idDisco(8L)
+            .estado(EstadoCopiaDisco.DISPONIBLE).build();
+        when(repository.findAllByIdForUpdate(List.of(11L))).thenReturn(List.of(copy));
+
+        assertThrows(ConflictoNegocioException.class,
+            () -> service.restoreCopiesForDebt(disco, "11"));
+        verify(repository, never()).saveAll(any());
     }
 }
