@@ -214,12 +214,15 @@ public class CatalogPricingService {
 
         BigDecimal quantityFactor = BigDecimal.valueOf(normalizedQuantity);
         BigDecimal lineTotal = unitPriceEur.multiply(quantityFactor);
+        // The configured extra is a per-copy cost (it is selected by record type),
+        // so keep its line total separate from the unit cost calculation.
         BigDecimal extraLineCostEur = extra.multiply(quantityFactor);
         BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur);
-        BigDecimal realLineCostUyu = realLineCostEur.multiply(settings.getEurUyuRate());
-        BigDecimal finalPriceUyu = unitPriceEur.add(extra).multiply(settings.getEurUyuRate()).multiply(markup);
+        BigDecimal realUnitCostEur = realLineCostEur.divide(quantityFactor, MathContext.DECIMAL128);
+        BigDecimal realUnitCostUyu = realUnitCostEur.multiply(settings.getEurUyuRate());
+        BigDecimal finalPriceUyu = realUnitCostUyu.multiply(markup);
 
-        return new PricingResult(recordType, lineTotal, extraLineCostEur, realLineCostEur, realLineCostUyu, markup, finalPriceUyu);
+        return new PricingResult(recordType, lineTotal, extraLineCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
     }
 
     public RecordType detectRecordType(String format) {

@@ -105,6 +105,28 @@ class CatalogPricingServiceTest {
     }
 
     @Test
+    void calculatesUnitCostAndSalePriceForEveryCopyWhenQuantityIsGreaterThanOne() {
+        CatalogPricingService.PricingResult result = service.calculate(
+            new BigDecimal("11.49"), 2, "LP", pricingFrom(new PricingSettingsUpdateDTO(
+                new BigDecimal("49.5"),
+                new BigDecimal("5.5"),
+                TEST_DOUBLE_EXTRA,
+                TEST_MULTI_EXTRA,
+                TEST_SINGLE_MARKUP,
+                TEST_DOUBLE_MARKUP,
+                TEST_MULTI_MARKUP,
+                PricingRoundingRule.NONE
+            ))
+        );
+
+        assertEquals(new BigDecimal("22.98"), result.unitLineTotalEur());
+        assertEquals(new BigDecimal("11.0"), result.extraCostEur());
+        assertEquals(new BigDecimal("16.99"), result.realUnitCostEur());
+        assertEquals(new BigDecimal("841.005"), result.realUnitCostUyu());
+        assertEquals(new BigDecimal("1286.73765"), result.finalPriceUyu());
+    }
+
+    @Test
     void keepsManualPriceWhenApplyingAutomaticScope() {
         Disco manual = disco(1L, "Manual", new BigDecimal("999"), PricingMode.MANUAL, new BigDecimal("2.1000"));
         when(discoRepository.findAll()).thenReturn(List.of(manual));
