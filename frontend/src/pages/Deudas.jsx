@@ -53,7 +53,7 @@ function buildForm(deuda) {
   }
 }
 
-function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
+function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, deleting }) {
   const [mode, setMode] = useState(deuda?.idDeuda ? 'view' : 'edit')
   const [movimientoId, setMovimientoId] = useState(() => deuda?.movimientos?.[0]?.idDeuda || deuda?.idDeuda)
   const [form, setForm] = useState(() => buildForm(deuda?.movimientos?.[0] || deuda))
@@ -222,11 +222,23 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
               <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Notas</label>
               <textarea className="input w-full min-h-20 resize-y" value={form.notas} onChange={e => set('notas', e.target.value)} />
             </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancelar</button>
-              <button type="submit" disabled={saving || !form.montoTotal || (!form.idCliente && !form.nombreDeudorManual.trim())} className="btn-primary text-sm disabled:opacity-50">
-                {saving ? 'Guardando…' : 'Guardar deuda'}
-              </button>
+            <div className="border-t border-slate-100 dark:border-stone-800 pt-4 space-y-4">
+              {deuda?.idDeuda && movimiento && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(movimiento)}
+                  disabled={saving || deleting}
+                  className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+                >
+                  Eliminar
+                </button>
+              )}
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancelar</button>
+                <button type="submit" disabled={saving || deleting || !form.montoTotal || (!form.idCliente && !form.nombreDeudorManual.trim())} className="btn-primary text-sm disabled:opacity-50">
+                  {saving ? 'Guardando…' : 'Guardar deuda'}
+                </button>
+              </div>
             </div>
           </form>
         ) : (
@@ -245,7 +257,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete }) {
                 <div key={m.idDeuda} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div><p className="text-sm font-semibold text-slate-800 dark:text-white">Movimiento #{m.idDeuda}</p><p className="text-xs text-slate-400 dark:text-white/60">{fmtDate(m.fechaDeuda || m.fechaVenta)} · {m.numeroRecibo ? `Boleta ${m.numeroRecibo}` : 'Sin número de boleta'}</p></div>
-                    <div className="flex items-center gap-3">{m.estadoPago !== 'PAGADO' && <button type="button" onClick={() => { setMovimientoId(m.idDeuda); setPayment({ monto: '', notas: '', numeroRecibo: '', idempotencyKey: nuevoIdempotencyKey() }) }} className="text-xs text-emerald-700 dark:text-white hover:underline font-medium">Pago</button>}<button type="button" onClick={() => onDelete(m)} className="text-xs text-red-600 dark:text-white hover:underline font-medium">Eliminar</button></div>
+                    <div className="flex items-center gap-3">{m.estadoPago !== 'PAGADO' && <button type="button" onClick={() => { setMovimientoId(m.idDeuda); setPayment({ monto: '', notas: '', numeroRecibo: '', idempotencyKey: nuevoIdempotencyKey() }) }} className="text-xs text-emerald-700 dark:text-white hover:underline font-medium">Pago</button>}</div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-xs text-slate-400 dark:text-white/60">Original</p><p className="font-semibold text-slate-900 dark:text-white">{fmt(m.montoTotal)}</p></div><div><p className="text-xs text-slate-400 dark:text-white/60">Pagado</p><p className="font-semibold text-slate-900 dark:text-white">{fmt(m.montoPagado)}</p></div><div><p className="text-xs text-slate-400 dark:text-white/60">Restante</p><p className="font-semibold text-red-600 dark:text-white">{fmt(m.montoPendiente)}</p></div></div>
                   {m.detalles?.length > 0 && <div className="space-y-2"><p className="text-xs font-semibold text-slate-500 dark:text-white/70 uppercase tracking-wider">Discos vendidos</p>{m.detalles.map((detalle, index) => <div key={detalle.idDetalle || detalle.idDisco || index} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 flex items-center gap-3">{detalle.imagenUrl && <img src={resolveApiUrl(detalle.imagenUrl)} alt={detalle.album || 'Portada del disco'} className="w-14 h-14 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />}<div className="min-w-0"><p className="text-sm font-medium text-slate-800 dark:text-white">{detalle.manualItem ? detalle.descripcion : `${detalle.artista} — ${detalle.album}`}</p><p className="text-xs text-slate-400 dark:text-white/60">{detalle.codigoInterno || 'Sin código'} · Cant. {detalle.cantidad || 1} · {fmt(detalle.precioUnitario)}</p></div></div>)}</div>}
@@ -301,7 +313,8 @@ export default function Deudas() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => cargar(''), 0)
-    function refreshFromFinancialChange() {
+    function refreshFromFinancialChange(event) {
+      if (event.detail?.source === 'deudas') return
       cargar()
     }
     window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, refreshFromFinancialChange)
@@ -332,9 +345,9 @@ export default function Deudas() {
       setPanelDeuda(null)
       await cargar(search)
       setSuccess('Deuda eliminada. Los discos asociados volvieron al stock.')
-      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
-    } catch (e) {
-      setError(e.message || 'No se pudo eliminar la deuda')
+      window.dispatchEvent(new CustomEvent(FINANCIAL_DATA_CHANGED_EVENT, { detail: { source: 'deudas' } }))
+    } catch {
+      setError('No se pudo eliminar la deuda. No se realizó ningún cambio.')
     } finally {
       setEliminando(false)
     }
@@ -424,12 +437,13 @@ export default function Deudas() {
           onClose={() => { setPanelDeuda(null); setCreating(false) }}
           onSaved={upsert}
           onPaid={upsert}
-          onDelete={setDeudaEliminar}
+          onDelete={(movimiento) => { setError(''); setDeudaEliminar(movimiento) }}
+          deleting={eliminando}
         />
       )}
       {deudaEliminar && <ConfirmModal
         titulo="Eliminar deuda"
-        mensaje="¿Seguro que querés eliminar esta deuda? La deuda desaparecerá completamente del sistema y los discos asociados volverán a estar disponibles en stock."
+        mensaje="¿Seguro que querés eliminar esta deuda? Esta acción no se puede deshacer. La deuda desaparecerá completamente del sistema y los discos asociados volverán a estar disponibles en stock."
         confirmarTexto="Eliminar deuda"
         error={error}
         onConfirmar={eliminarDeuda}

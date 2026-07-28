@@ -33,6 +33,14 @@ public interface PagoDeudaRepository extends JpaRepository<PagoDeuda, Long> {
         """)
     List<PagoDeuda> findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(@Param("idDeuda") Long idDeuda);
 
+    /** Includes reversed rows so a hard-deleted debt cannot leave FK orphans. */
+    @Query("""
+        SELECT p FROM PagoDeuda p
+        WHERE p.deuda.idDeuda = :idDeuda
+        ORDER BY p.fechaPago DESC, p.createdAt DESC
+        """)
+    List<PagoDeuda> findAllByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(@Param("idDeuda") Long idDeuda);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PagoDeuda p WHERE p.idPagoDeuda = :idPagoDeuda")
     Optional<PagoDeuda> findByIdPagoDeudaForUpdate(@Param("idPagoDeuda") Long idPagoDeuda);

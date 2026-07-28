@@ -5,7 +5,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import Paginacion from '../components/Paginacion'
 import CompactPlayer from '../components/CompactPlayer'
 import { stopAllPreviews } from '../components/audioPreviewPlayback'
-import { api, resolveApiUrl } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { downloadBlob } from '../utils/downloadBlob'
 
 const FILTROS = ['TODOS', 'DISPONIBLE', 'RESERVADO', 'VENDIDO', 'SIN_STOCK']
@@ -577,7 +577,11 @@ export default function DiscosCatalogo() {
   const [sortDirection, setSortDirection] = useState('desc')
   const debounceRef = useRef(null)
 
-  useEffect(() => { cargarTodos() }, [])
+  useEffect(() => {
+    cargarTodos()
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
+    return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
+  }, [])
 
   async function cargarTodos() {
     setLoading(true)

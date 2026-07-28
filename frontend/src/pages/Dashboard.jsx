@@ -54,11 +54,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     let cancelado = false
-    api.discos.todos()
-      .then(data => { if (!cancelado) setDiscos(data) })
-      .catch(() => { if (!cancelado) setDiscos([]) })
-      .finally(() => { if (!cancelado) setLoading(false) })
-    return () => { cancelado = true }
+    function cargarDiscos() {
+      api.discos.todos()
+        .then(data => { if (!cancelado) setDiscos(data) })
+        .catch(() => { if (!cancelado) setDiscos([]) })
+        .finally(() => { if (!cancelado) setLoading(false) })
+    }
+    cargarDiscos()
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarDiscos)
+    return () => {
+      cancelado = true
+      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarDiscos)
+    }
   }, [])
 
   useEffect(() => {

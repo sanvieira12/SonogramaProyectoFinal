@@ -192,8 +192,10 @@ public class DeudaService {
         // Payment rows are owned by this debt. They cannot be retained after a
         // hard delete because their FK is non-nullable and reports use them as
         // income movements. Unrelated payments are never touched.
+        // Load every payment row, including already reversed rows. The debt is
+        // hard-deleted, so none of its non-nullable FK children may remain.
         List<PagoDeuda> pagos = pagoDeudaRepository
-                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda);
+                .findAllByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(idDeuda);
         if (pagos != null && !pagos.isEmpty()) {
             pagoDeudaRepository.deleteAll(pagos);
             pagoDeudaRepository.flush();

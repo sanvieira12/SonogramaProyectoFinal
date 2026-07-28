@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 import Paginacion from '../components/Paginacion'
 
 const DEPARTAMENTOS_UY = [
@@ -509,6 +509,24 @@ export default function Clientes() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    async function refreshFinancialData() {
+      try {
+        const [vs, ds] = await Promise.all([api.ventas.todas(), api.deudas.listar()])
+        setVentas(vs)
+        setDeudas(ds)
+        if (clienteDetalle?.idCliente) {
+          const detalle = await api.clientes.detalle(clienteDetalle.idCliente)
+          setDetalleCliente(detalle)
+        }
+      } catch {
+        // Keep the current customer screen intact if a background refresh fails.
+      }
+    }
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, refreshFinancialData)
+    return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, refreshFinancialData)
+  }, [clienteDetalle?.idCliente])
 
   const ventasPorCliente = useMemo(() => {
     const map = {}

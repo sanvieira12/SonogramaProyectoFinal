@@ -59,12 +59,15 @@ describe('Deudas deletion flow', () => {
     render(<Deudas />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    expect(screen.getByRole('button', { name: 'Eliminar' })).toHaveClass('bg-red-600')
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
 
     expect(screen.getByRole('heading', { name: 'Eliminar deuda' })).toBeInTheDocument()
+    expect(screen.getByText(/Esta acción no se puede deshacer/i)).toBeInTheDocument()
     expect(screen.getByText(/los discos asociados volverán a estar disponibles en stock/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancelar' }).at(-1))
     expect(api.deudas.eliminar).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
@@ -76,14 +79,33 @@ describe('Deudas deletion flow', () => {
   })
 
   it('mantiene visible la deuda si el backend rechaza la operación', async () => {
-    api.deudas.eliminar.mockRejectedValue(new Error('No se pudo eliminar la deuda'))
+    api.deudas.eliminar.mockRejectedValue(new Error('conflicto interno'))
     render(<Deudas />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar deuda' }))
 
-    await waitFor(() => expect(screen.getAllByRole('alert')[0]).toHaveTextContent('No se pudo eliminar la deuda'))
+    await waitFor(() => expect(screen.getAllByRole('alert')[0]).toHaveTextContent('No se pudo eliminar la deuda. No se realizó ningún cambio.'))
     expect(screen.getAllByText('Ana Pérez').length).toBeGreaterThan(0)
+  })
+
+  it('prevents a second confirmation while deletion is processing', async () => {
+    let resolveDelete
+    api.deudas.eliminar.mockImplementation(() => new Promise(resolve => { resolveDelete = resolve }))
+    render(<Deudas />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
+    const confirm = screen.getByRole('button', { name: 'Eliminar deuda' })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+
+    expect(api.deudas.eliminar).toHaveBeenCalledTimes(1)
+    expect(confirm).toBeDisabled()
+    resolveDelete()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

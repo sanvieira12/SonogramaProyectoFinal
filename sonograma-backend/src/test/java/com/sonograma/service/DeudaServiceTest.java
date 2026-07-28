@@ -69,17 +69,19 @@ class DeudaServiceTest {
                 .estadoPago(EstadoPago.PARCIAL).build();
         PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(50L).deuda(deuda)
                 .monto(new BigDecimal("1500")).build();
+        PagoDeuda pagoAnulado = PagoDeuda.builder().idPagoDeuda(51L).deuda(deuda)
+                .monto(new BigDecimal("100")).anulado(true).build();
 
         when(deudaRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(40L))
-                .thenReturn(List.of(pago));
+        when(pagoDeudaRepository.findAllByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(40L))
+                .thenReturn(List.of(pago, pagoAnulado));
         when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
 
         service.eliminar(40L);
 
         verify(discoQrCopyService).restoreCopiesForDebt(disco, "101,102");
         verify(discoEstadoService).aplicar(disco);
-        verify(pagoDeudaRepository).deleteAll(List.of(pago));
+        verify(pagoDeudaRepository).deleteAll(List.of(pago, pagoAnulado));
         verify(pagoDeudaRepository).flush();
         verify(ventaRepository).save(venta);
         verify(deudaRepository).delete(deuda);
@@ -93,7 +95,7 @@ class DeudaServiceTest {
         Deuda deuda = Deuda.builder().idDeuda(41L).activa(true).montoTotal(new BigDecimal("100"))
                 .montoPendiente(new BigDecimal("100")).estadoPago(EstadoPago.PENDIENTE).build();
         when(deudaRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(deuda));
-        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(41L))
+        when(pagoDeudaRepository.findAllByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(41L))
                 .thenReturn(List.of());
 
         service.eliminar(41L);
