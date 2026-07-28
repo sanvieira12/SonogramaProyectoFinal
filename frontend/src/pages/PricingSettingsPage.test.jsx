@@ -403,6 +403,30 @@ describe('PricingSettingsPage', () => {
     expect(screen.queryByText('2.820')).not.toBeInTheDocument()
   })
 
+  it('muestra el costo extra unitario para una línea con varias copias', async () => {
+    api.pricing.preview.mockResolvedValue({
+      rows: [{
+        ...rows[0],
+        quantity: 4,
+        unitPriceEur: 12.29,
+        unitLineTotalEur: 49.16,
+        extraCostEur: 5.5,
+        realCostEur: 17.79,
+        realCostUyu: 880.605,
+      }],
+    })
+
+    renderPage()
+
+    await screen.findByText('1 resultado')
+    const row = screen.getByText('Artista 1').closest('tr')
+    const cells = within(row).getAllByRole('cell')
+
+    expect(cells[13]).toHaveTextContent('5,5')
+    expect(cells[14]).toHaveTextContent('17,79')
+    expect(cells[15]).toHaveTextContent('880,605')
+  })
+
   it('formatea para mostrar sin alterar el valor usado en el guardado', async () => {
     renderPage()
 

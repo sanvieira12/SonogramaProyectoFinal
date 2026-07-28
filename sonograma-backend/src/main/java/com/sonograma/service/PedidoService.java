@@ -293,7 +293,7 @@ public class PedidoService {
 
     private void calcularItem(PedidoItem item) {
         CatalogPricingService.PricingResult result =
-            catalogPricingService.calculate(item.getPrecioUnitarioEur(), item.getFormato());
+            catalogPricingService.calculate(item.getPrecioUnitarioEur(), item.getCantidad(), item.getFormato());
         if (result == null) return;
         item.setExtraCostoEur(result.extraCostEur());
         item.setCostoRealEur(result.realUnitCostEur());

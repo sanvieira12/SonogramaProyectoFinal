@@ -125,7 +125,9 @@ public class VinylFutureImportService {
                 DiscoRequestDTO req = mapearARequest(preview);
                 if (req.getPrecioVenta() == null && req.getCosto() != null) {
                     CatalogPricingService.PricingResult pricing =
-                        catalogPricingService.calculate(req.getCosto(), preview.getFormato());
+                        catalogPricingService.calculate(
+                            req.getCosto(), preview.getCantidadCopias(), preview.getFormato()
+                        );
                     if (pricing != null) req.setPrecioVenta(pricing.finalPriceUyu());
                     req.setPricingMode(PricingMode.AUTO);
                 } else if (req.getPrecioVenta() != null) {

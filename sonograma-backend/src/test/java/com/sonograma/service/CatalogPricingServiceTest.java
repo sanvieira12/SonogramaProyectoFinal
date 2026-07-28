@@ -26,12 +26,17 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -120,10 +125,97 @@ class CatalogPricingServiceTest {
         );
 
         assertEquals(new BigDecimal("22.98"), result.unitLineTotalEur());
-        assertEquals(new BigDecimal("11.0"), result.extraCostEur());
+        assertEquals(new BigDecimal("11.0"), result.totalLineExtraCostEur());
+        assertEquals(new BigDecimal("5.5"), result.extraCostEur());
         assertEquals(new BigDecimal("16.99"), result.realUnitCostEur());
         assertEquals(new BigDecimal("841.005"), result.realUnitCostUyu());
         assertEquals(new BigDecimal("1286.73765"), result.finalPriceUyu());
+    }
+
+    @Test
+    void distributesScreenshotLineExtraCostPerCopyWithoutDividingRealCostTwice() {
+        CatalogPricingService.PricingResult result = service.calculate(
+            new BigDecimal("12.29"), 4, "LP", pricingFrom(new PricingSettingsUpdateDTO(
+                new BigDecimal("49.5"),
+                new BigDecimal("5.5"),
+                TEST_DOUBLE_EXTRA,
+                TEST_MULTI_EXTRA,
+                TEST_SINGLE_MARKUP,
+                TEST_DOUBLE_MARKUP,
+                TEST_MULTI_MARKUP,
+                PricingRoundingRule.NONE
+            ))
+        );
+
+        assertEquals(new BigDecimal("22.0"), result.totalLineExtraCostEur());
+        assertEquals(new BigDecimal("5.5"), result.extraCostEur());
+        assertEquals(new BigDecimal("17.79"), result.realUnitCostEur());
+        assertEquals(new BigDecimal("880.605"), result.realUnitCostUyu());
+        assertEquals(new BigDecimal("1347.32565"), result.finalPriceUyu());
+    }
+
+    @Test
+    void preservesDecimalUnitExtraCostWhenQuantityIsGreaterThanOne() {
+        CatalogPricingService.PricingResult result = service.calculate(
+            new BigDecimal("10.1234"), 3, "LP", pricingFrom(new PricingSettingsUpdateDTO(
+                TEST_RATE,
+                TEST_SINGLE_EXTRA,
+                TEST_DOUBLE_EXTRA,
+                TEST_MULTI_EXTRA,
+                TEST_SINGLE_MARKUP,
+                TEST_DOUBLE_MARKUP,
+                TEST_MULTI_MARKUP,
+                PricingRoundingRule.NONE
+            ))
+        );
+
+        assertEquals(new BigDecimal("15.3768"), result.totalLineExtraCostEur());
+        assertEquals(new BigDecimal("5.1256"), result.extraCostEur());
+        assertEquals(new BigDecimal("15.2490"), result.realUnitCostEur());
+    }
+
+    @Test
+    void keepsLineExtraCostUnchangedWhenQuantityIsOne() {
+        CatalogPricingService.PricingResult result = service.calculate(
+            new BigDecimal("12.29"), 1, "LP", pricingFrom(new PricingSettingsUpdateDTO(
+                new BigDecimal("49.5"),
+                new BigDecimal("5.5"),
+                TEST_DOUBLE_EXTRA,
+                TEST_MULTI_EXTRA,
+                TEST_SINGLE_MARKUP,
+                TEST_DOUBLE_MARKUP,
+                TEST_MULTI_MARKUP,
+                PricingRoundingRule.NONE
+            ))
+        );
+
+        assertEquals(new BigDecimal("5.5"), result.totalLineExtraCostEur());
+        assertEquals(new BigDecimal("5.5"), result.extraCostEur());
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidQuantitiesUseSafeFallback")
+    void usesOneCopyAsSafeFallbackForNullZeroOrInvalidQuantity(Integer quantity) {
+        CatalogPricingService.PricingResult result = service.calculate(
+            new BigDecimal("12.29"), quantity, "LP", pricingFrom(new PricingSettingsUpdateDTO(
+                new BigDecimal("49.5"),
+                new BigDecimal("5.5"),
+                TEST_DOUBLE_EXTRA,
+                TEST_MULTI_EXTRA,
+                TEST_SINGLE_MARKUP,
+                TEST_DOUBLE_MARKUP,
+                TEST_MULTI_MARKUP,
+                PricingRoundingRule.NONE
+            ))
+        );
+
+        assertEquals(new BigDecimal("5.5"), result.totalLineExtraCostEur());
+        assertEquals(new BigDecimal("5.5"), result.extraCostEur());
+        assertEquals(new BigDecimal("17.79"), result.realUnitCostEur());
+    }
+
+    private static Stream<Arguments> invalidQuantitiesUseSafeFallback() {
+        return Stream.of(arguments((Integer) null), arguments(0), arguments(-2));
     }
 
     @Test

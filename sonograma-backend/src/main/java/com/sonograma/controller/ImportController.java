@@ -441,7 +441,8 @@ public class ImportController {
         java.math.BigDecimal cost = item.precioUnitario() != null
             ? item.precioUnitario()
             : (page != null ? page.purchasePrice() : null);
-        CatalogPricingService.PricingResult pricing = catalogPricingService.calculate(cost, format);
+        CatalogPricingService.PricingResult pricing =
+            catalogPricingService.calculate(cost, item.cantidad(), format);
 
         Disco disco = new Disco();
         disco.setArtista(page != null ? firstNonBlank(page.artist(), item.artista()) : item.artista());
@@ -542,7 +543,8 @@ public class ImportController {
         disco.setNumeroFacturaCompra(invoice.numeroFactura());
         disco.setFechaFacturaCompra(invoice.fechaFactura());
         if (disco.getPrecioVenta() == null && cost != null) {
-            CatalogPricingService.PricingResult pricing = catalogPricingService.calculate(cost, format);
+            CatalogPricingService.PricingResult pricing =
+                catalogPricingService.calculate(cost, item.cantidad(), format);
             disco.setPrecioVenta(pricing != null ? pricing.finalPriceUyu() : null);
             disco.setPricingMode(PricingMode.AUTO);
         }

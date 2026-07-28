@@ -216,13 +216,22 @@ public class CatalogPricingService {
         BigDecimal lineTotal = unitPriceEur.multiply(quantityFactor);
         // The configured extra is a per-copy cost (it is selected by record type),
         // so keep its line total separate from the unit cost calculation.
-        BigDecimal extraLineCostEur = extra.multiply(quantityFactor);
-        BigDecimal realLineCostEur = lineTotal.add(extraLineCostEur);
-        BigDecimal realUnitCostEur = realLineCostEur.divide(quantityFactor, MathContext.DECIMAL128);
+        BigDecimal totalLineExtraCostEur = extra.multiply(quantityFactor);
+        BigDecimal unitExtraCostEur = calculateUnitExtraCostEur(totalLineExtraCostEur, normalizedQuantity);
+        BigDecimal realUnitCostEur = unitPriceEur.add(unitExtraCostEur);
         BigDecimal realUnitCostUyu = realUnitCostEur.multiply(settings.getEurUyuRate());
         BigDecimal finalPriceUyu = realUnitCostUyu.multiply(markup);
 
-        return new PricingResult(recordType, lineTotal, extraLineCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
+        return new PricingResult(
+            recordType,
+            lineTotal,
+            totalLineExtraCostEur,
+            unitExtraCostEur,
+            realUnitCostEur,
+            realUnitCostUyu,
+            markup,
+            finalPriceUyu
+        );
     }
 
     public RecordType detectRecordType(String format) {
@@ -441,7 +450,19 @@ public class CatalogPricingService {
         return pedidosByInvoice.get(invoiceNumber);
     }
 
-    private int normalizeQuantity(Integer quantity) {
+    /**
+     * Distributes a purchase-line extra cost across its physical copies without
+     * rounding before the rest of the pricing calculation is complete.
+     */
+    public static BigDecimal calculateUnitExtraCostEur(BigDecimal totalLineExtraCostEur, Integer quantity) {
+        if (totalLineExtraCostEur == null) {
+            return null;
+        }
+        int normalizedQuantity = normalizeQuantity(quantity);
+        return totalLineExtraCostEur.divide(BigDecimal.valueOf(normalizedQuantity), MathContext.DECIMAL128);
+    }
+
+    private static int normalizeQuantity(Integer quantity) {
         return quantity != null && quantity > 0 ? quantity : 1;
     }
 
@@ -533,6 +554,7 @@ public class CatalogPricingService {
     public record PricingResult(
         RecordType recordType,
         BigDecimal unitLineTotalEur,
+        BigDecimal totalLineExtraCostEur,
         BigDecimal extraCostEur,
         BigDecimal realUnitCostEur,
         BigDecimal realUnitCostUyu,
@@ -546,7 +568,7 @@ public class CatalogPricingService {
             BigDecimal markup,
             BigDecimal finalPriceUyu
         ) {
-            this(RecordType.SINGLE, null, extraCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
+            this(RecordType.SINGLE, null, extraCostEur, extraCostEur, realUnitCostEur, realUnitCostUyu, markup, finalPriceUyu);
         }
     }
 
