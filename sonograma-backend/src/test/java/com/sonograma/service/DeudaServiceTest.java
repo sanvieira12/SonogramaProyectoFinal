@@ -91,6 +91,67 @@ class DeudaServiceTest {
     }
 
     @Test
+    void noConfundeDosDetallesDeLaVentaOrigenConOtraVenta() {
+        Disco primerDisco = Disco.builder().idDisco(10L).cantidadCopias(0).estado(EstadoDisco.SIN_STOCK).build();
+        Disco segundoDisco = Disco.builder().idDisco(11L).cantidadCopias(0).estado(EstadoDisco.SIN_STOCK).build();
+        Venta venta = Venta.builder().idVenta(30L).estado(EstadoVenta.COMPLETADA)
+                .estadoPago(EstadoPago.PARCIAL).montoDeuda(new BigDecimal("500"))
+                .build();
+        DetalleVenta primerDetalle = DetalleVenta.builder().idDetalle(20L).venta(venta).disco(primerDisco)
+                .cantidad(1).copyIdsSnapshot("101").build();
+        DetalleVenta segundoDetalle = DetalleVenta.builder().idDetalle(21L).venta(venta).disco(segundoDisco)
+                .cantidad(1).copyIdsSnapshot("102").build();
+        venta.setDetalles(new ArrayList<>(List.of(primerDetalle, segundoDetalle)));
+        Deuda deuda = Deuda.builder().idDeuda(40L).activa(true).venta(venta)
+                .montoTotal(new BigDecimal("2000")).montoPendiente(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+
+        when(deudaRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findAllByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(40L))
+                .thenReturn(List.of());
+        when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
+        when(discoQrCopyService.hasCopyInventory(11L)).thenReturn(true);
+        when(detalleVentaRepository.findAllWithCopyIdsFromActiveSales(EstadoVenta.CANCELADA))
+                .thenReturn(List.of(primerDetalle, segundoDetalle));
+
+        service.eliminar(40L);
+
+        verify(discoQrCopyService).restoreCopiesForDebt(primerDisco, "101");
+        verify(discoQrCopyService).restoreCopiesForDebt(segundoDisco, "102");
+        verify(deudaRepository).delete(deuda);
+    }
+
+    @Test
+    void bloqueaSoloCuandoLaCopiaTambienPerteneceAUnaVentaDistinta() {
+        Disco disco = Disco.builder().idDisco(10L).cantidadCopias(0).estado(EstadoDisco.SIN_STOCK).build();
+        Venta ventaOrigen = Venta.builder().idVenta(30L).estado(EstadoVenta.COMPLETADA)
+                .estadoPago(EstadoPago.PARCIAL).montoDeuda(new BigDecimal("500")).build();
+        DetalleVenta detalleOrigen = DetalleVenta.builder().idDetalle(20L).venta(ventaOrigen).disco(disco)
+                .cantidad(1).copyIdsSnapshot("101").build();
+        ventaOrigen.setDetalles(new ArrayList<>(List.of(detalleOrigen)));
+
+        Venta otraVenta = Venta.builder().idVenta(31L).estado(EstadoVenta.COMPLETADA)
+                .estadoPago(EstadoPago.PAGADO).montoDeuda(BigDecimal.ZERO).build();
+        DetalleVenta detalleOtraVenta = DetalleVenta.builder().idDetalle(21L).venta(otraVenta).disco(disco)
+                .cantidad(1).copyIdsSnapshot("101").build();
+        Deuda deuda = Deuda.builder().idDeuda(40L).activa(true).venta(ventaOrigen)
+                .montoTotal(new BigDecimal("2000")).montoPendiente(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+
+        when(deudaRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(deuda));
+        when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
+        when(detalleVentaRepository.findAllWithCopyIdsFromActiveSales(EstadoVenta.CANCELADA))
+                .thenReturn(List.of(detalleOrigen, detalleOtraVenta));
+
+        assertThatThrownBy(() -> service.eliminar(40L))
+                .isInstanceOf(com.sonograma.exception.ConflictoNegocioException.class)
+                .hasMessage("No se puede eliminar la deuda porque uno de los discos pertenece a otra venta.");
+
+        verify(deudaRepository, org.mockito.Mockito.never()).delete(any());
+        org.mockito.Mockito.verifyNoInteractions(pagoDeudaRepository, ventaRepository);
+    }
+
+    @Test
     void eliminaDeudaManualSinDiscosSinTocarOtrosPagos() {
         Deuda deuda = Deuda.builder().idDeuda(41L).activa(true).montoTotal(new BigDecimal("100"))
                 .montoPendiente(new BigDecimal("100")).estadoPago(EstadoPago.PENDIENTE).build();

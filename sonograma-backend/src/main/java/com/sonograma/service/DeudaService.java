@@ -261,16 +261,18 @@ public class DeudaService {
             return;
         }
         List<DetalleVenta> detallesExistentes = Objects.requireNonNullElse(
-                detalleVentaRepository.findAllWithCopyIds(), List.of());
+                detalleVentaRepository.findAllWithCopyIdsFromActiveSales(EstadoVenta.CANCELADA), List.of());
         boolean reused = detallesExistentes.stream()
                 .filter(otro -> otro.getIdDetalle() == null
                         || !Objects.equals(otro.getIdDetalle(), detalle.getIdDetalle()))
                 .anyMatch(otro -> {
                     List<Long> otrosIds = parseCopyIds(otro.getCopyIdsSnapshot());
-                    return otrosIds.stream().anyMatch(copyIds::contains)
-                            && (otro.getVenta() == null
-                                || !Objects.equals(otro.getVenta().getIdVenta(), venta.getIdVenta())
-                                || !Objects.equals(otro.getIdDetalle(), detalle.getIdDetalle()));
+                    // A debt can contain several sale details. They all point
+                    // at the same originating sale, so a matching copy in a
+                    // sibling detail is part of this deletion, not a conflict.
+                    boolean belongsToAnotherSale = otro.getVenta() == null
+                            || !Objects.equals(otro.getVenta().getIdVenta(), venta.getIdVenta());
+                    return belongsToAnotherSale && otrosIds.stream().anyMatch(copyIds::contains);
                 });
         if (reused) {
             throw new ConflictoNegocioException(
