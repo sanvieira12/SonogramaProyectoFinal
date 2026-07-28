@@ -65,4 +65,10 @@ public class VentaRequestDTO {
 
     @Size(max = 180)
     private String sucursalDacNombre;
+
+    @Size(max = 80)
+    private String dacBranchId;
+
+    @Size(max = 255)
+    private String sucursalDacDireccion;
 }

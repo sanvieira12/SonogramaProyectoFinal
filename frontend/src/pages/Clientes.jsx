@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 import Paginacion from '../components/Paginacion'
+import DacBranchSelect from '../components/DacBranchSelect'
+import { getDacBranchId } from '../components/dacBranches'
 
 const DEPARTAMENTOS_UY = [
   '', 'Artigas', 'Canelones', 'Cerro Largo', 'Colonia', 'Durazno', 'Flores',
@@ -12,7 +14,7 @@ const DEPARTAMENTOS_UY = [
 const EMPTY_CLIENTE = {
   nombre: '', apellido: '', cedula: '', instagram: '',
   telefono: '', email: '', direccion: '', departamento: '',
-  localidad: '', sucursalDac: '', observaciones: '',
+  localidad: '', sucursalDac: '', dacBranchId: '', dacBranchName: '', dacBranchAddress: '', observaciones: '',
 }
 
 function NuevoClienteModal({ onClose, onCreado }) {
@@ -27,6 +29,21 @@ function NuevoClienteModal({ onClose, onCreado }) {
   }
 
   function stripAt(v) { return v.startsWith('@') ? v.slice(1) : v }
+
+  function cambiarDepartamento(value) {
+    if (value === form.departamento) return
+    setForm(prev => ({ ...prev, departamento: value, dacBranchId: '', dacBranchName: '', dacBranchAddress: '', sucursalDac: '' }))
+  }
+
+  function cambiarSucursal(branch) {
+    setForm(prev => ({
+      ...prev,
+      dacBranchId: getDacBranchId(branch),
+      dacBranchName: branch?.nombre || '',
+      dacBranchAddress: branch?.direccion || '',
+      sucursalDac: branch?.nombre || '',
+    }))
+  }
 
   function validar() {
     const e = {}
@@ -52,6 +69,9 @@ function NuevoClienteModal({ onClose, onCreado }) {
         departamento: form.departamento || undefined,
         localidad: form.localidad || undefined,
         sucursalDac: form.sucursalDac || undefined,
+        dacBranchId: form.dacBranchId || undefined,
+        dacBranchName: form.dacBranchName || undefined,
+        dacBranchAddress: form.dacBranchAddress || undefined,
         observaciones: form.observaciones || undefined,
       }
       const creado = await api.clientes.crear(payload)
@@ -130,7 +150,7 @@ function NuevoClienteModal({ onClose, onCreado }) {
               <div>
                 <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Departamento</label>
                 <select className="input w-full" value={form.departamento}
-                  onChange={e => set('departamento', e.target.value)}>
+                  onChange={e => cambiarDepartamento(e.target.value)}>
                   {DEPARTAMENTOS_UY.map(d => <option key={d} value={d}>{d || '— Sin especificar —'}</option>)}
                 </select>
               </div>
@@ -142,9 +162,8 @@ function NuevoClienteModal({ onClose, onCreado }) {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">DAC / Sucursal DAC</label>
-              <input className="input w-full" value={form.sucursalDac}
-                onChange={e => set('sucursalDac', e.target.value)} placeholder="Sucursal preferida" />
+              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Sucursal DAC</label>
+              <DacBranchSelect department={form.departamento} value={form.dacBranchId} onChange={cambiarSucursal} />
             </div>
 
             <div>
@@ -261,6 +280,9 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
     departamento: cliente?.departamento || '',
     localidad: cliente?.localidad || '',
     sucursalDac: cliente?.sucursalDac || '',
+    dacBranchId: cliente?.dacBranchId || '',
+    dacBranchName: cliente?.dacBranchName || '',
+    dacBranchAddress: cliente?.dacBranchAddress || '',
     observaciones: cliente?.observaciones || '',
   }))
 
@@ -278,6 +300,9 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
         departamento: cliente.departamento || '',
         localidad: cliente.localidad || '',
         sucursalDac: cliente.sucursalDac || '',
+        dacBranchId: cliente.dacBranchId || '',
+        dacBranchName: cliente.dacBranchName || '',
+        dacBranchAddress: cliente.dacBranchAddress || '',
         observaciones: cliente.observaciones || '',
       })
       setEditing(false)
@@ -291,6 +316,28 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
     setForm(prev => ({ ...prev, [field]: value }))
   }
 
+  function cambiarDepartamento(value) {
+    if (value === form.departamento) return
+    setForm(prev => ({
+      ...prev,
+      departamento: value,
+      dacBranchId: '',
+      dacBranchName: '',
+      dacBranchAddress: '',
+      sucursalDac: '',
+    }))
+  }
+
+  function cambiarSucursal(branch) {
+    setForm(prev => ({
+      ...prev,
+      dacBranchId: getDacBranchId(branch),
+      dacBranchName: branch?.nombre || '',
+      dacBranchAddress: branch?.direccion || '',
+      sucursalDac: branch?.nombre || '',
+    }))
+  }
+
   async function save(e) {
     e.preventDefault()
     setSaving(true)
@@ -298,6 +345,11 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
     setMessage('')
     try {
       const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value?.trim?.() || null]))
+      if (!form.dacBranchId) {
+        payload.dacBranchId = ''
+        payload.dacBranchName = ''
+        payload.dacBranchAddress = ''
+      }
       const saved = await api.clientes.actualizar(cliente.idCliente, payload)
       onSaved(saved)
       setEditing(false)
@@ -339,7 +391,6 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
                 ['instagramUsuario', 'Instagram'],
                 ['telefono', 'Teléfono'],
                 ['email', 'Mail'],
-                ['departamento', 'Departamento'],
                 ['localidad', 'Localidad'],
               ].map(([field, label]) => (
                 <div key={field}>
@@ -349,12 +400,18 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
               ))}
             </div>
             <div>
+              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Departamento</label>
+              <select className="input w-full" value={form.departamento || ''} onChange={e => cambiarDepartamento(e.target.value)}>
+                {DEPARTAMENTOS_UY.map(d => <option key={d} value={d}>{d || '— Sin especificar —'}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Dirección</label>
               <input className="input w-full" value={form.direccion || ''} onChange={e => set('direccion', e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">DAC / Sucursal DAC</label>
-              <input className="input w-full" value={form.sucursalDac || ''} onChange={e => set('sucursalDac', e.target.value)} />
+              <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Sucursal DAC</label>
+              <DacBranchSelect department={form.departamento} value={form.dacBranchId} onChange={cambiarSucursal} />
             </div>
             <div>
               <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Notas</label>
@@ -375,7 +432,7 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
                 ['Teléfono', cliente.telefono],
                 ['Alta', formatFecha(cliente.fechaAlta)],
                 ['Departamento', cliente.departamento || cliente.localidad],
-                ['DAC', cliente.sucursalDac],
+                ['DAC', cliente.dacBranchName || cliente.sucursalDac],
               ].map(([label, value]) => (
                 <div key={label}>
                   <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">{label}</p>
@@ -383,6 +440,12 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
                 </div>
               ))}
             </div>
+            {cliente.dacBranchAddress && (
+              <div className="text-sm">
+                <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Dirección de la sucursal DAC</p>
+                <p className="break-words text-slate-700 dark:text-stone-300">{cliente.dacBranchAddress}</p>
+              </div>
+            )}
 
             <div>
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-1">Instagram</p>
@@ -449,7 +512,9 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
                         <div key={e.idEnvio} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 text-sm">
                           <div className="text-slate-700 dark:text-stone-300">{e.direccionEnvio}</div>
                           <div className="text-xs text-slate-400 dark:text-stone-500 mt-0.5">
-                            {e.sucursalDacNombre || 'Sin sucursal'} · {e.estadoLogistico || '—'} · {money(e.costoEnvio)}
+                            {e.sucursalDacNombre || 'Sin sucursal'}
+                            {e.sucursalDacDireccion ? ' — ' + e.sucursalDacDireccion : ''}
+                            {' · '}{e.estadoLogistico || '—'} · {money(e.costoEnvio)}
                           </div>
                         </div>
                       ))}

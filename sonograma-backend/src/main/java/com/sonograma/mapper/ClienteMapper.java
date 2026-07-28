@@ -21,6 +21,9 @@ public class ClienteMapper {
                 .localidad(cliente.getLocalidad())
                 .departamento(cliente.getDepartamento())
                 .sucursalDac(cliente.getSucursalDac())
+                .dacBranchId(cliente.getDacBranchId())
+                .dacBranchName(cliente.getDacBranchName())
+                .dacBranchAddress(cliente.getDacBranchAddress())
                 .observaciones(cliente.getObservaciones())
                 .ultimaCompra(cliente.getUltimaCompra())
                 .fechaAlta(cliente.getFechaAlta())
@@ -39,6 +42,9 @@ public class ClienteMapper {
         cliente.setLocalidad(request.getLocalidad());
         cliente.setDepartamento(request.getDepartamento());
         cliente.setSucursalDac(request.getSucursalDac());
+        cliente.setDacBranchId(request.getDacBranchId());
+        cliente.setDacBranchName(request.getDacBranchName());
+        cliente.setDacBranchAddress(request.getDacBranchAddress());
         cliente.setObservaciones(request.getObservaciones());
         cliente.setUltimaCompra(request.getUltimaCompra());
         return cliente;
@@ -55,6 +61,9 @@ public class ClienteMapper {
         if (request.getLocalidad() != null) cliente.setLocalidad(request.getLocalidad());
         if (request.getDepartamento() != null) cliente.setDepartamento(request.getDepartamento());
         if (request.getSucursalDac() != null) cliente.setSucursalDac(request.getSucursalDac());
+        if (request.getDacBranchId() != null) cliente.setDacBranchId(request.getDacBranchId());
+        if (request.getDacBranchName() != null) cliente.setDacBranchName(request.getDacBranchName());
+        if (request.getDacBranchAddress() != null) cliente.setDacBranchAddress(request.getDacBranchAddress());
         if (request.getObservaciones() != null) cliente.setObservaciones(request.getObservaciones());
         if (request.getUltimaCompra() != null) cliente.setUltimaCompra(request.getUltimaCompra());
     }

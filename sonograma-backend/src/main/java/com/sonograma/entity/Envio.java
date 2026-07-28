@@ -31,8 +31,14 @@ public class Envio {
     @Column(name = "sucursal_dac_codigo")
     private String sucursalDacCodigo;
 
+    @Column(name = "dac_branch_id", length = 80)
+    private String dacBranchId;
+
     @Column(name = "sucursal_dac_nombre")
     private String sucursalDacNombre;
+
+    @Column(name = "sucursal_dac_direccion", length = 255)
+    private String sucursalDacDireccion;
 
     @Column(name = "costo_envio", precision = 10, scale = 2)
     private BigDecimal costoEnvio;

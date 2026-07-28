@@ -2,6 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, resolveApiUrl } from '../api/sonograma'
 import QRScanner from '../components/QRScanner'
+import DacBranchSelect from '../components/DacBranchSelect'
+import { getDacBranchId } from '../components/dacBranches'
 import { parseQrPayload } from '../utils/qrPayload'
 
 const DEPARTAMENTOS_FALLBACK = [
@@ -132,8 +134,10 @@ export default function NuevaVenta() {
   const [departamento, setDepartamento] = useState('')
   const [direccionEnvio, setDireccionEnvio] = useState('')
   const [sucursalesDac, setSucursalesDac] = useState([])
+  const [sucursalDacId, setSucursalDacId] = useState('')
   const [sucursalDacCodigo, setSucursalDacCodigo] = useState('')
   const [sucursalDacNombre, setSucursalDacNombre] = useState('')
+  const [sucursalDacDireccion, setSucursalDacDireccion] = useState('')
   const [cargandoSucursales, setCargandoSucursales] = useState(false)
   const [costoEnvio, setCostoEnvio] = useState('')
   const [descuentoPct, setDescuentoPct] = useState(0)
@@ -339,13 +343,14 @@ export default function NuevaVenta() {
   function cambiarTipoEntrega(valor) {
     setTipoEntrega(valor)
     if (valor !== 'ENVIO') {
-      setSucursalesDac([]); setSucursalDacCodigo(''); setSucursalDacNombre(''); setCostoEnvio('')
+      setSucursalesDac([]); setSucursalDacId(''); setSucursalDacCodigo(''); setSucursalDacNombre(''); setSucursalDacDireccion(''); setCostoEnvio('')
     } else if (departamento) setCargandoSucursales(true)
   }
 
   function cambiarDepartamento(valor) {
+    if (valor === departamento) return
     setDepartamento(valor)
-    setSucursalesDac([]); setSucursalDacCodigo(''); setSucursalDacNombre(''); setCostoEnvio('')
+    setSucursalesDac([]); setSucursalDacId(''); setSucursalDacCodigo(''); setSucursalDacNombre(''); setSucursalDacDireccion(''); setCostoEnvio('')
     setCargandoSucursales(Boolean(valor && tipoEntrega === 'ENVIO'))
   }
 
@@ -365,10 +370,23 @@ export default function NuevaVenta() {
     setClienteSeleccionado(c)
     setBusquedaCliente(''); setSugerenciasCliente([]); setMostrarSugerencias(false)
     setDireccionesCliente([]); setDireccionSeleccionadaId(''); setDireccionEnvio(''); setDireccionModo('NUEVA')
+    const branchId = c.dacBranchId || (c.sucursalDacCodigo ? 'dac-' + c.sucursalDacCodigo : '')
+    setDepartamento(c.departamento || '')
+    setSucursalDacId(branchId)
+    setSucursalDacCodigo(c.sucursalDacCodigo || (branchId.startsWith('dac-') ? branchId.slice(4) : ''))
+    setSucursalDacNombre(c.dacBranchName || c.sucursalDac || '')
+    setSucursalDacDireccion(c.dacBranchAddress || '')
     try {
       const dirs = await api.clientes.direcciones(c.idCliente)
       setDireccionesCliente(dirs)
       if (dirs.length > 0) aplicarDireccion(dirs[0])
+      if (c.departamento) {
+        setDepartamento(c.departamento)
+        setSucursalDacId(branchId)
+        setSucursalDacCodigo(c.sucursalDacCodigo || (branchId.startsWith('dac-') ? branchId.slice(4) : ''))
+        setSucursalDacNombre(c.dacBranchName || c.sucursalDac || '')
+        setSucursalDacDireccion(c.dacBranchAddress || '')
+      }
     } catch { setDireccionesCliente([]) }
   }
 
@@ -383,10 +401,12 @@ export default function NuevaVenta() {
     setDireccionModo('NUEVA'); setDireccionSeleccionadaId(''); setDireccionEnvio('')
   }
 
-  async function seleccionarSucursal(codigo) {
+  async function seleccionarSucursal(sucursal) {
+    const codigo = sucursal?.codigo || ''
+    setSucursalDacId(getDacBranchId(sucursal))
     setSucursalDacCodigo(codigo)
-    const sucursal = sucursalesDac.find(s => s.codigo === codigo)
     setSucursalDacNombre(sucursal?.nombre || '')
+    setSucursalDacDireccion(sucursal?.direccion || '')
     setCostoEnvio('')
     if (!codigo || !departamento) return
     try {
@@ -409,7 +429,7 @@ export default function NuevaVenta() {
     if (totales.base <= 0) e.total = 'Ingresá un precio de venta válido'
     if (tipoEntrega === 'ENVIO') {
       if (!departamento) e.departamento = 'Seleccioná el departamento'
-      if (sucursalesDac.length > 0 && !sucursalDacCodigo) e.sucursal = 'Seleccioná una sucursal DAC'
+      if (!sucursalDacCodigo) e.sucursal = 'Seleccioná una sucursal DAC'
     }
     const montoP = montoPagado !== '' ? Number(montoPagado) : null
     if (montoP != null && montoP > totales.totalFinal) e.montoPagado = 'El monto pagado no puede superar el total'
@@ -453,6 +473,8 @@ export default function NuevaVenta() {
           guardarNuevaDireccion: Boolean(direccionEnvio.trim()) && (direccionModo === 'NUEVA' || !direccionSeleccionadaId),
           sucursalDacCodigo: sucursalDacCodigo || null,
           sucursalDacNombre: sucursalDacNombre || null,
+          dacBranchId: sucursalDacId || null,
+          sucursalDacDireccion: sucursalDacDireccion || null,
         }),
       })
       navigate('/')
@@ -766,15 +788,16 @@ export default function NuevaVenta() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Sucursal DAC</label>
-                <select value={sucursalDacCodigo} onChange={e => seleccionarSucursal(e.target.value)} className="input"
-                  disabled={!departamento || cargandoSucursales || sucursalesDac.length === 0}>
-                  <option value="">{cargandoSucursales ? 'Cargando sucursales...' : 'Seleccioná sucursal...'}</option>
-                  {sucursalesDac.map(s => <option key={s.codigo} value={s.codigo}>{s.nombre} · {s.direccion}</option>)}
-                </select>
+                <DacBranchSelect
+                  department={departamento}
+                  value={sucursalDacId}
+                  onChange={seleccionarSucursal}
+                  disabled={cargandoSucursales}
+                  error={errores.sucursal}
+                />
                 {departamento && !cargandoSucursales && sucursalesDac.length === 0 && (
                   <p className="text-amber-600 dark:text-amber-400 text-xs mt-1">No hay sucursales DAC cargadas para este departamento.</p>
                 )}
-                {errores.sucursal && <p className="text-red-500 text-xs mt-1">{errores.sucursal}</p>}
               </div>
             </div>
           )}
@@ -868,7 +891,8 @@ export default function NuevaVenta() {
 function NuevoClienteModal({ onCerrar, onCreado }) {
   const [form, setForm] = useState({
     nombre: '', apellido: '', cedula: '', telefono: '',
-    instagramUsuario: '', email: '', direccion: '', observaciones: ''
+    instagramUsuario: '', email: '', direccion: '', departamento: '',
+    dacBranchId: '', dacBranchName: '', dacBranchAddress: '', observaciones: ''
   })
   const [error, setError] = useState('')
   const [cargando, setCargando] = useState(false)
@@ -880,7 +904,15 @@ function NuevoClienteModal({ onCerrar, onCreado }) {
     if (!form.nombre.trim()) { setError('El nombre es obligatorio'); return }
     setError('')
     setCargando(true)
-    try { onCreado(await api.clientes.crear(form)) }
+    try {
+      onCreado(await api.clientes.crear({
+        ...form,
+        sucursalDac: form.dacBranchName || null,
+        dacBranchId: form.dacBranchId || null,
+        dacBranchName: form.dacBranchName || null,
+        dacBranchAddress: form.dacBranchAddress || null,
+      }))
+    }
     catch (err) { setError(err.message) }
     finally { setCargando(false) }
   }
@@ -930,6 +962,32 @@ function NuevoClienteModal({ onCerrar, onCreado }) {
           <div>
             <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Dirección</label>
             <input value={form.direccion} onChange={e => set('direccion', e.target.value)} className="input" placeholder="Av. 18 de Julio 1234, Montevideo" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Departamento</label>
+            <select value={form.departamento} onChange={e => setForm(prev => ({
+              ...prev,
+              departamento: e.target.value,
+              dacBranchId: '',
+              dacBranchName: '',
+              dacBranchAddress: '',
+            }))} className="input">
+              <option value="">— Sin especificar —</option>
+              {DEPARTAMENTOS_FALLBACK.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Sucursal DAC</label>
+            <DacBranchSelect
+              department={form.departamento}
+              value={form.dacBranchId}
+              onChange={branch => setForm(prev => ({
+                ...prev,
+                dacBranchId: getDacBranchId(branch),
+                dacBranchName: branch?.nombre || '',
+                dacBranchAddress: branch?.direccion || '',
+              }))}
+            />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Observaciones</label>

@@ -20,6 +20,9 @@ public class ClienteDTO {
     private String localidad;
     private String departamento;
     private String sucursalDac;
+    private String dacBranchId;
+    private String dacBranchName;
+    private String dacBranchAddress;
     private String observaciones;
     private LocalDate ultimaCompra;
     private LocalDateTime fechaAlta;

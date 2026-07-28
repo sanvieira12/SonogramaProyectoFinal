@@ -44,6 +44,15 @@ public class ClienteRequest {
     @Size(max = 180)
     private String sucursalDac;
 
+    @Size(max = 80)
+    private String dacBranchId;
+
+    @Size(max = 180)
+    private String dacBranchName;
+
+    @Size(max = 255)
+    private String dacBranchAddress;
+
     private String observaciones;
 
     private java.time.LocalDate ultimaCompra;

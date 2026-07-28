@@ -14,7 +14,9 @@ public class EnvioDTO {
     private String direccionEnvio;
     private String departamento;
     private String sucursalDacCodigo;
+    private String dacBranchId;
     private String sucursalDacNombre;
+    private String sucursalDacDireccion;
     private BigDecimal costoEnvio;
     private String estadoLogistico;
     private String numeroSeguimiento;

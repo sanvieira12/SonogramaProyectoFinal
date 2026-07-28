@@ -61,6 +61,7 @@ public class ClienteService {
             }
             if (existente != null) {
                 ClienteMapper.updateFromRequest(existente, request);
+                aplicarSucursalDac(existente, request, existente.getDepartamento());
                 existente.setActivo(true);
                 Cliente cliente = clienteRepository.save(existente);
                 if (request.getDireccion() != null) {
@@ -70,6 +71,7 @@ public class ClienteService {
             }
         }
         Cliente cliente = ClienteMapper.toEntity(request);
+        aplicarSucursalDac(cliente, request, null);
         cliente.setActivo(true);
         cliente = clienteRepository.save(cliente);
         if (request.getDireccion() != null) {
@@ -187,7 +189,9 @@ public class ClienteService {
             throw new NegocioException("Ya existe un cliente con la cédula: " + request.getCedula());
         }
 
+        String departamentoAnterior = cliente.getDepartamento();
         ClienteMapper.updateFromRequest(cliente, request);
+        aplicarSucursalDac(cliente, request, departamentoAnterior);
         cliente = clienteRepository.save(cliente);
         if (request.getDireccion() != null) {
             guardarDireccion(cliente, request.getDireccion(), request.getDepartamento(), request.getSucursalDac(), false);
@@ -395,7 +399,9 @@ public class ClienteService {
                 .direccionEnvio(envio.getDireccionEnvio())
                 .departamento(envio.getDepartamento())
                 .sucursalDacCodigo(envio.getSucursalDacCodigo())
+                .dacBranchId(envio.getDacBranchId())
                 .sucursalDacNombre(envio.getSucursalDacNombre())
+                .sucursalDacDireccion(envio.getSucursalDacDireccion())
                 .costoEnvio(envio.getCostoEnvio())
                 .estadoLogistico(envio.getEstadoLogistico())
                 .numeroSeguimiento(envio.getNumeroSeguimiento())
@@ -472,6 +478,48 @@ public class ClienteService {
         request.setLocalidad(textoNulo(request.getLocalidad()));
         request.setDepartamento(textoNulo(request.getDepartamento()));
         request.setSucursalDac(textoNulo(request.getSucursalDac()));
+        request.setDacBranchId(request.getDacBranchId() == null ? null : request.getDacBranchId().trim());
+        request.setDacBranchName(textoNulo(request.getDacBranchName()));
+        request.setDacBranchAddress(textoNulo(request.getDacBranchAddress()));
+    }
+
+    private void aplicarSucursalDac(Cliente cliente, ClienteRequest request, String departamentoAnterior) {
+        String branchId = request.getDacBranchId();
+        if (branchId != null && !branchId.isBlank()) {
+            DacBranchCatalog.Branch branch = DacBranchCatalog.findById(branchId)
+                    .orElseThrow(() -> new NegocioException("La sucursal DAC seleccionada no existe"));
+            if (!DacBranchCatalog.belongsToDepartment(branch.id(), request.getDepartamento())) {
+                throw new NegocioException("La sucursal DAC no pertenece al departamento seleccionado");
+            }
+            cliente.setDacBranchId(branch.id());
+            cliente.setDacBranchName(branch.nombre());
+            cliente.setDacBranchAddress(branch.direccion());
+            // Keep the legacy field useful for exports and older clients.
+            cliente.setSucursalDac(branch.nombre());
+            return;
+        }
+
+        if (branchId != null) {
+            cliente.setDacBranchId(null);
+            cliente.setDacBranchName(null);
+            cliente.setDacBranchAddress(null);
+            cliente.setSucursalDac(null);
+            return;
+        }
+
+        boolean cambioDepartamento = request.getDepartamento() != null
+                && !DacBranchCatalog.normalizeText(request.getDepartamento())
+                .equals(DacBranchCatalog.normalizeText(departamentoAnterior));
+        if (cambioDepartamento && cliente.getDacBranchId() != null) {
+            cliente.setDacBranchId(null);
+            cliente.setDacBranchName(null);
+            cliente.setDacBranchAddress(null);
+            cliente.setSucursalDac(null);
+        }
+
+        if (request.getDacBranchName() != null || request.getDacBranchAddress() != null) {
+            throw new NegocioException("La sucursal DAC debe seleccionarse desde el catálogo oficial");
+        }
     }
 
     private boolean contiene(String valor, String query) {
@@ -479,7 +527,7 @@ public class ClienteService {
     }
 
     private String normalizar(String valor) {
-        return valor == null ? "" : valor.trim().toLowerCase(Locale.ROOT);
+        return DacBranchCatalog.normalizeText(valor);
     }
 
     private String texto(String valor, String fallback) {

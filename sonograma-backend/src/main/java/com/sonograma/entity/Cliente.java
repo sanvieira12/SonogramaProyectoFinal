@@ -48,6 +48,15 @@ public class Cliente {
     @Column(name = "sucursal_dac", length = 180)
     private String sucursalDac;
 
+    @Column(name = "dac_branch_id", length = 80)
+    private String dacBranchId;
+
+    @Column(name = "dac_branch_name", length = 180)
+    private String dacBranchName;
+
+    @Column(name = "dac_branch_address", length = 255)
+    private String dacBranchAddress;
+
     @Column(name = "observaciones")
     private String observaciones;
 

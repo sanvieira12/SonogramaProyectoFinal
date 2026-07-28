@@ -7,8 +7,10 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class SucursalDacDTO {
+    private String id;
     private String codigo;
     private String nombre;
     private String departamento;
     private String direccion;
+    private String label;
 }

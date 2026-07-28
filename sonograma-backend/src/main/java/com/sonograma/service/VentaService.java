@@ -86,6 +86,7 @@ public class VentaService {
 
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
+        DacBranchCatalog.Branch sucursalDac = validarSucursalDac(dto, entrega);
         LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : LocalDateTime.now();
         String numeroFactura = generarNumeroFactura(fechaVenta.getYear());
         String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
@@ -181,8 +182,10 @@ public class VentaService {
                     .venta(venta)
                     .direccionEnvio(direccionCompleta)
                     .departamento(dto.getDepartamento())
-                    .sucursalDacCodigo(dto.getSucursalDacCodigo())
-                    .sucursalDacNombre(dto.getSucursalDacNombre())
+                    .dacBranchId(sucursalDac.id())
+                    .sucursalDacCodigo(sucursalDac.codigo())
+                    .sucursalDacNombre(sucursalDac.nombre())
+                    .sucursalDacDireccion(sucursalDac.direccion())
                     .costoEnvio(costos.getCostoEnvio())
                     .estadoLogistico("PREPARANDO")
                     .build();
@@ -214,6 +217,7 @@ public class VentaService {
         boolean tieneDetalles = dto.getDetalles() != null && !dto.getDetalles().isEmpty();
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
+        DacBranchCatalog.Branch sucursalDac = validarSucursalDac(dto, entrega);
         LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : venta.getFechaVenta();
         String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
         MedioPago medioPago = parseMedioPago(dto.getMedioPago());
@@ -299,7 +303,7 @@ public class VentaService {
 
         deudaService.sincronizarVenta(venta, cliente, costos.getTotalFinal(), montoPagado,
                 montoDeuda, estadoPago, fechaVenta);
-        Envio envio = sincronizarEnvio(venta, cliente, dto, entrega, costos);
+        Envio envio = sincronizarEnvio(venta, cliente, dto, entrega, costos, sucursalDac);
         return mapearADTO(venta, envio);
     }
 
@@ -505,7 +509,9 @@ public class VentaService {
                     .direccionEnvio(envio.getDireccionEnvio())
                     .departamento(envio.getDepartamento())
                     .sucursalDacCodigo(envio.getSucursalDacCodigo())
+                    .dacBranchId(envio.getDacBranchId())
                     .sucursalDacNombre(envio.getSucursalDacNombre())
+                    .sucursalDacDireccion(envio.getSucursalDacDireccion())
                     .costoEnvio(envio.getCostoEnvio())
                     .estadoLogistico(envio.getEstadoLogistico())
                     .numeroSeguimiento(envio.getNumeroSeguimiento())
@@ -751,7 +757,8 @@ public class VentaService {
             Cliente cliente,
             VentaRequestDTO dto,
             TipoEntrega entrega,
-            ResultadoCostoVentaDTO costos) {
+            ResultadoCostoVentaDTO costos,
+            DacBranchCatalog.Branch sucursalDac) {
         Envio envio = envioRepository.findByVentaIdVenta(venta.getIdVenta()).orElse(null);
         if (entrega != TipoEntrega.ENVIO) {
             if (envio != null) {
@@ -769,10 +776,31 @@ public class VentaService {
         }
         envio.setDireccionEnvio(direccionCompleta);
         envio.setDepartamento(dto.getDepartamento());
-        envio.setSucursalDacCodigo(dto.getSucursalDacCodigo());
-        envio.setSucursalDacNombre(dto.getSucursalDacNombre());
+        envio.setDacBranchId(sucursalDac.id());
+        envio.setSucursalDacCodigo(sucursalDac.codigo());
+        envio.setSucursalDacNombre(sucursalDac.nombre());
+        envio.setSucursalDacDireccion(sucursalDac.direccion());
         envio.setCostoEnvio(costos.getCostoEnvio());
         return envioRepository.save(envio);
+    }
+
+    private DacBranchCatalog.Branch validarSucursalDac(VentaRequestDTO dto, TipoEntrega entrega) {
+        if (entrega != TipoEntrega.ENVIO) return null;
+        if (dto.getDepartamento() == null || dto.getDepartamento().isBlank()) {
+            throw new NegocioException("Seleccioná el departamento del envío");
+        }
+        String requestedId = firstNonBlank(dto.getDacBranchId(), dto.getSucursalDacCodigo());
+        DacBranchCatalog.Branch branch = DacBranchCatalog.findById(requestedId)
+                .orElseThrow(() -> new NegocioException("Seleccioná una sucursal DAC válida"));
+        if (!DacBranchCatalog.belongsToDepartment(branch.id(), dto.getDepartamento())) {
+            throw new NegocioException("La sucursal DAC no pertenece al departamento seleccionado");
+        }
+        return branch;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) return first.trim();
+        return second != null && !second.isBlank() ? second.trim() : null;
     }
 
     private DireccionCliente resolverDireccionCliente(Cliente cliente, VentaRequestDTO dto) {
