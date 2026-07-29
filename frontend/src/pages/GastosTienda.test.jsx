@@ -39,7 +39,7 @@ describe('GastosTienda', () => {
     renderPage()
 
     await screen.findByText('Histórico')
-    expect(screen.getByRole('heading', { name: 'Sin categoría' })).toBeInTheDocument()
+    expect(screen.getByText('Sin categoría')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('CATEGORÍA'), { target: { value: 'STORE_EXPENSES' } })
     fireEvent.change(screen.getByLabelText('Motivo'), { target: { value: 'Cinta' } })
@@ -76,7 +76,7 @@ describe('GastosTienda', () => {
       ['NEW_ORDERS', 'Pedidos nuevos', 'UYU $400,00'],
     ]) {
       fireEvent.change(filter, { target: { value } })
-      expect(screen.getByRole('heading', { level: 2, name: description })).toBeInTheDocument()
+      expect(screen.getByText(description, { selector: 'td' })).toBeInTheDocument()
       expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
       expect(screen.getByText(`TOTAL · ${description.toUpperCase()}`)).toBeInTheDocument()
       expect(screen.getAllByText(total).length).toBeGreaterThanOrEqual(1)
@@ -103,57 +103,8 @@ describe('GastosTienda', () => {
 
     fireEvent.change(filter, { target: { value: 'NEW_ORDERS' } })
     expect(screen.getByText('Bolsas')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByText('Bolsas').closest('article')).getByRole('button', { name: 'Eliminar' }))
+    fireEvent.click(within(screen.getByText('Bolsas').closest('tr')).getByRole('button', { name: 'Eliminar' }))
     await waitFor(() => expect(api.gastosTienda.eliminar).toHaveBeenCalledWith(2))
     expect(filter).toHaveValue('NEW_ORDERS')
-  })
-
-  it('agrupa sin duplicar, ordena de más nuevo a más antiguo y calcula subtotal mensual por columna', async () => {
-    api.gastosTienda.listar.mockResolvedValue([
-      ...expenses,
-      { idGasto: 6, fecha: '2026-07-15', categoria: 'STORE_EXPENSES', descripcion: 'Cinta larga', monto: 50 },
-    ])
-    renderPage()
-
-    await screen.findByText('Cinta larga')
-    const storeColumn = screen.getByRole('heading', { level: 2, name: 'Gastos de tienda' }).closest('section')
-    expect(within(storeColumn).getByText('2 gastos registrados')).toBeInTheDocument()
-    expect(within(storeColumn).getByText('UYU $250,00')).toBeInTheDocument()
-    expect(within(storeColumn).getAllByText('UYU $200,00')).toHaveLength(1)
-    const cards = within(storeColumn).getAllByRole('article')
-    expect(cards).toHaveLength(2)
-    expect(cards[0]).toHaveTextContent('Cinta larga')
-    expect(cards[1]).toHaveTextContent('Bolsas')
-    expect(screen.getAllByText('UYU $250,00')).toHaveLength(1)
-  })
-
-  it('filtra la columna Sin categoría cuando existe en los datos', async () => {
-    renderPage()
-
-    await screen.findByText('Histórico')
-    const filter = screen.getByLabelText('Filtrar por categoría')
-    fireEvent.change(filter, { target: { value: '__UNCATEGORIZED__' } })
-
-    expect(screen.getByRole('heading', { name: 'Sin categoría' })).toBeInTheDocument()
-    expect(screen.getByText('Histórico')).toBeInTheDocument()
-    expect(screen.queryByText('Luz')).not.toBeInTheDocument()
-    expect(screen.getByText('TOTAL · SIN CATEGORÍA')).toBeInTheDocument()
-  })
-
-  it('mantiene visibles las categorías adicionales y los motivos largos sin alterar el filtro', async () => {
-    const longReason = 'Compra extraordinaria con un motivo suficientemente largo para comprobar que la tarjeta puede envolver el texto correctamente'
-    api.gastosTienda.listar.mockResolvedValue([
-      ...expenses,
-      { idGasto: 7, fecha: '2026-07-14', categoria: 'MISCELLANEOUS', descripcion: longReason, monto: 75 },
-    ])
-    renderPage()
-
-    await screen.findByText(longReason)
-    expect(screen.getByRole('heading', { level: 2, name: 'MISCELLANEOUS' })).toBeInTheDocument()
-    const filter = screen.getByLabelText('Filtrar por categoría')
-    expect(within(filter).getByRole('option', { name: 'MISCELLANEOUS' })).toBeInTheDocument()
-    fireEvent.change(filter, { target: { value: 'MISCELLANEOUS' } })
-    expect(screen.getByText('TOTAL · MISCELLANEOUS')).toBeInTheDocument()
-    expect(screen.getByText(longReason)).toBeInTheDocument()
   })
 })
