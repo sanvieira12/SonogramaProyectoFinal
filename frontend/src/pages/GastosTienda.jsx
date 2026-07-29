@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/sonograma'
 import { CATEGORY_LABELS, EXPENSE_CATEGORIES } from './gastosCategorias'
 
+const UNCATEGORIZED = '__UNCATEGORIZED__'
+
 function fmtMoney(value) {
   return `UYU $${Number(value || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -12,6 +14,82 @@ function emptyForm() {
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7)
+}
+
+function categoryKey(item) {
+  return item.categoria || UNCATEGORIZED
+}
+
+function categoryLabel(category) {
+  if (category === UNCATEGORIZED) return 'Sin categoría'
+  return CATEGORY_LABELS[category] || String(category).replaceAll('_', ' ')
+}
+
+function sortNewestFirst(a, b) {
+  const dateOrder = String(b.fecha || '').localeCompare(String(a.fecha || ''))
+  if (dateOrder !== 0) return dateOrder
+  return Number(b.idGasto || 0) - Number(a.idGasto || 0)
+}
+
+function ExpenseCard({ item, onEdit, onRemove }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-stone-800 dark:bg-stone-950/40">
+      <div className="flex items-start justify-between gap-3">
+        <time dateTime={item.fecha || undefined} className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500">
+          {item.fecha || 'Sin fecha'}
+        </time>
+        <p className="shrink-0 whitespace-nowrap text-sm font-bold tabular-nums text-slate-900 dark:text-white">{fmtMoney(item.monto)}</p>
+      </div>
+      <p className="mt-3 break-words text-sm text-slate-900 dark:text-white">{item.descripcion || 'Sin motivo'}</p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <button type="button" className="btn-secondary px-2 py-1.5 text-xs" onClick={() => onEdit(item)}>Editar</button>
+        <button type="button" className="btn-secondary px-2 py-1.5 text-xs text-red-600 dark:text-red-400" onClick={() => onRemove(item.idGasto)}>Eliminar</button>
+      </div>
+    </article>
+  )
+}
+
+function ExpenseCategoryColumn({ category, items, onEdit, onRemove }) {
+  const monthlySubtotal = items
+    .filter(item => String(item.fecha || '').startsWith(currentMonth()))
+    .reduce((sum, item) => sum + Number(item.monto || 0), 0)
+
+  return (
+    <section className="card flex min-w-0 flex-col p-4" aria-labelledby={`gasto-categoria-${category}`}>
+      <header className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3 dark:border-stone-800">
+        <div className="min-w-0">
+          <h2 id={`gasto-categoria-${category}`} className="break-words text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-white">{categoryLabel(category)}</h2>
+          <p className="mt-1 text-xs text-slate-500 dark:text-stone-500">{items.length} {items.length === 1 ? 'gasto registrado' : 'gastos registrados'}</p>
+        </div>
+        <p className="shrink-0 whitespace-nowrap text-sm font-bold tabular-nums text-slate-900 dark:text-white">{fmtMoney(monthlySubtotal)}</p>
+      </header>
+      <div className="mt-3 space-y-3">
+        {items.map(item => <ExpenseCard key={item.idGasto} item={item} onEdit={onEdit} onRemove={onRemove} />)}
+      </div>
+    </section>
+  )
+}
+
+function ExpenseCategoryBoard({ groups, onEdit, onRemove }) {
+  if (groups.length === 0) {
+    return <div className="px-4 py-10 text-center text-sm text-slate-400 dark:text-stone-500">No hay gastos registrados.</div>
+  }
+
+  return (
+    <div className="overflow-x-auto overscroll-x-contain">
+      <div className="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(280px,1fr))] lg:min-w-full lg:grid-flow-col lg:grid-cols-none lg:auto-cols-[minmax(280px,1fr)]">
+        {groups.map(group => (
+          <ExpenseCategoryColumn
+            key={group.category}
+            category={group.category}
+            items={group.items}
+            onEdit={onEdit}
+            onRemove={onRemove}
+          />
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function GastosTienda() {
@@ -26,16 +104,46 @@ export default function GastosTienda() {
   }, [])
 
   const filteredItems = useMemo(
-    () => categoryFilter ? items.filter(item => item.categoria === categoryFilter) : items,
+    () => categoryFilter === UNCATEGORIZED
+      ? items.filter(item => !item.categoria)
+      : categoryFilter ? items.filter(item => item.categoria === categoryFilter) : items,
     [categoryFilter, items],
   )
+
+  const categoryOptions = useMemo(() => {
+    const options = [...EXPENSE_CATEGORIES]
+    const knownValues = new Set(options.map(category => category.value))
+    items.forEach(item => {
+      if (item.categoria && !knownValues.has(item.categoria)) {
+        options.push({ value: item.categoria, label: categoryLabel(item.categoria) })
+        knownValues.add(item.categoria)
+      }
+    })
+    if (items.some(item => !item.categoria)) options.push({ value: UNCATEGORIZED, label: 'Sin categoría' })
+    return options
+  }, [items])
+
+  const groupedItems = useMemo(() => {
+    const groups = new Map()
+    filteredItems.forEach(item => {
+      const category = categoryKey(item)
+      const group = groups.get(category)
+      if (group) group.push(item)
+      else groups.set(category, [item])
+    })
+
+    const order = new Map(categoryOptions.map((category, index) => [category.value, index]))
+    return [...groups.entries()]
+      .sort(([categoryA], [categoryB]) => (order.get(categoryA) ?? Number.MAX_SAFE_INTEGER) - (order.get(categoryB) ?? Number.MAX_SAFE_INTEGER))
+      .map(([category, categoryItems]) => ({ category, items: [...categoryItems].sort(sortNewestFirst) }))
+  }, [categoryOptions, filteredItems])
 
   const totalMes = useMemo(() => filteredItems
     .filter(item => String(item.fecha || '').startsWith(currentMonth()))
     .reduce((sum, item) => sum + Number(item.monto || 0), 0), [filteredItems])
 
   const totalLabel = categoryFilter
-    ? `TOTAL · ${(CATEGORY_LABELS[categoryFilter] || 'SIN CATEGORÍA').toUpperCase()}`
+    ? `TOTAL · ${categoryLabel(categoryFilter).toUpperCase()}`
     : 'TOTAL DEL MES'
 
   function resetForm() {
@@ -100,7 +208,7 @@ export default function GastosTienda() {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[380px_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
         <form noValidate onSubmit={submit} className="card p-5 space-y-4">
           <div>
             <label htmlFor="gasto-fecha" className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Fecha</label>
@@ -128,41 +236,15 @@ export default function GastosTienda() {
           </div>
         </form>
 
-        <div className="card overflow-hidden">
+        <div className="card min-w-0 overflow-hidden">
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-stone-800 px-4 py-3">
             <label htmlFor="gasto-filtro-categoria" className="text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider">Filtrar por categoría</label>
             <select id="gasto-filtro-categoria" className="input max-w-xs" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
               <option value="">Todas</option>
-              {EXPENSE_CATEGORIES.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
+              {categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
             </select>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed text-sm">
-              <colgroup><col className="w-[16%]" /><col className="w-[22%]" /><col className="w-[29%]" /><col className="w-[16%]" /><col className="w-[17%]" /></colgroup>
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-stone-800">
-                  {['Fecha', 'CATEGORÍA', 'Motivo', 'Monto', 'Acciones'].map(label => <th key={label} className="px-2 sm:px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500">{label}</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-                {filteredItems.map(item => (
-                  <tr key={item.idGasto}>
-                    <td className="px-2 sm:px-3 py-3 text-slate-600 dark:text-stone-400 break-words">{item.fecha}</td>
-                    <td className="px-2 sm:px-3 py-3 text-slate-600 dark:text-stone-400 break-words">{CATEGORY_LABELS[item.categoria] || 'Sin categoría'}</td>
-                    <td className="px-2 sm:px-3 py-3 text-slate-900 dark:text-white break-words">{item.descripcion}</td>
-                    <td className="px-2 sm:px-3 py-3 tabular-nums text-white break-words">{fmtMoney(item.monto)}</td>
-                    <td className="px-2 sm:px-3 py-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        <button className="btn-secondary text-xs px-2 py-1.5" onClick={() => edit(item)}>Editar</button>
-                        <button className="btn-secondary text-xs px-2 py-1.5 text-red-600 dark:text-red-400" onClick={() => remove(item.idGasto)}>Eliminar</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filteredItems.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">No hay gastos registrados.</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <ExpenseCategoryBoard groups={groupedItems} onEdit={edit} onRemove={remove} />
         </div>
       </div>
     </div>
