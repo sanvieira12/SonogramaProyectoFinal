@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/sonograma'
-import { CATEGORY_LABELS, EXPENSE_CATEGORIES } from './gastosCategorias'
-
-const UNCATEGORIZED = '__UNCATEGORIZED__'
+import { CATEGORY_LABELS, EXPENSE_CATEGORIES, normalizeExpenseCategory } from './gastosCategorias'
 
 function fmtMoney(value) {
   return `UYU $${Number(value || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -26,13 +24,13 @@ function emptyForm() {
 }
 
 function categoryLabel(category) {
-  return category ? (CATEGORY_LABELS[category] || category) : 'Sin categoría'
+  const normalizedCategory = normalizeExpenseCategory(category)
+  return normalizedCategory ? (CATEGORY_LABELS[normalizedCategory] || normalizedCategory) : 'Sin categoría'
 }
 
 function categoryFilterMatches(item, filter) {
   if (!filter) return true
-  if (filter === UNCATEGORIZED) return !item.categoria
-  return item.categoria === filter
+  return normalizeExpenseCategory(item.categoria) === filter
 }
 
 function searchMatches(item, query) {
@@ -40,10 +38,11 @@ function searchMatches(item, query) {
   if (!normalizedQuery) return true
 
   const amount = Number(item.monto || 0)
+  const normalizedCategory = normalizeExpenseCategory(item.categoria)
   const searchable = [
     item.descripcion,
-    item.categoria,
-    categoryLabel(item.categoria),
+    normalizedCategory,
+    categoryLabel(normalizedCategory),
     String(item.monto ?? ''),
     amount.toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     fmtMoney(amount),
@@ -54,7 +53,7 @@ function searchMatches(item, query) {
 
 function sortableValue(item, key) {
   if (key === 'fecha') return String(item.fecha || '')
-  if (key === 'categoria') return categoryLabel(item.categoria).toLocaleLowerCase('es-UY')
+  if (key === 'categoria') return categoryLabel(normalizeExpenseCategory(item.categoria)).toLocaleLowerCase('es-UY')
   return Number(item.monto || 0)
 }
 
@@ -104,16 +103,20 @@ export default function GastosTienda() {
   useEffect(() => {
     let cancelled = false
     api.gastosTienda.listar()
-      .then(data => { if (!cancelled) setItems(data) })
-      .catch(err => { if (!cancelled) setError(err.message || 'No se pudieron cargar los gastos secundarios.') })
+      .then(data => { if (!cancelled) setItems(data.map(item => ({ ...item, categoria: normalizeExpenseCategory(item.categoria) }))) })
+      .catch(err => { if (!cancelled) setError(err.message || 'No se pudieron cargar los gastos.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
 
+  const monthlyItems = useMemo(
+    () => items.filter(item => String(item.fecha || '').startsWith(periodo)),
+    [items, periodo],
+  )
+
   const filteredItems = useMemo(() => {
-    const visible = items.filter(item => (
-      String(item.fecha || '').startsWith(periodo)
-      && categoryFilterMatches(item, categoryFilter)
+    const visible = monthlyItems.filter(item => (
+      categoryFilterMatches(item, categoryFilter)
       && searchMatches(item, search)
     ))
 
@@ -122,22 +125,24 @@ export default function GastosTienda() {
       const comparison = compareValues(a, b, sort.key)
       return sort.direction === 'asc' ? comparison : -comparison
     })
-  }, [categoryFilter, items, periodo, search, sort])
+  }, [categoryFilter, monthlyItems, search, sort])
 
   const summary = useMemo(() => {
-    const categoryTotals = filteredItems.reduce((totals, item) => {
-      const key = item.categoria || UNCATEGORIZED
+    const categoryTotals = monthlyItems.reduce((totals, item) => {
+      const key = normalizeExpenseCategory(item.categoria)
       totals.set(key, (totals.get(key) || 0) + Number(item.monto || 0))
       return totals
     }, new Map())
 
     return {
-      total: filteredItems.reduce((total, item) => total + Number(item.monto || 0), 0),
-      categories: [...categoryTotals.entries()]
-        .sort(([first], [second]) => categoryLabel(first === UNCATEGORIZED ? '' : first).localeCompare(categoryLabel(second === UNCATEGORIZED ? '' : second), 'es-UY', { sensitivity: 'base' }))
-        .map(([key, total]) => ({ key, label: categoryLabel(key === UNCATEGORIZED ? '' : key), total })),
+      total: monthlyItems.reduce((total, item) => total + Number(item.monto || 0), 0),
+      categories: EXPENSE_CATEGORIES.map(category => ({
+        key: category.value,
+        label: category.label,
+        total: categoryTotals.get(category.value) || 0,
+      })),
     }
-  }, [filteredItems])
+  }, [monthlyItems])
 
   function resetForm() {
     setEditingId(null)
@@ -164,7 +169,7 @@ export default function GastosTienda() {
     e.preventDefault()
     setError('')
     if (!form.categoria) {
-      setError('Seleccioná una categoría para el gasto secundario.')
+      setError('Seleccioná una categoría para el gasto.')
       return
     }
     const amount = Number(form.monto)
@@ -173,17 +178,19 @@ export default function GastosTienda() {
       return
     }
     try {
-      const payload = { ...form, monto: amount }
+      const payload = { ...form, categoria: normalizeExpenseCategory(form.categoria), monto: amount }
       if (editingId) {
         const updated = await api.gastosTienda.actualizar(editingId, payload)
-        setItems(previous => previous.map(item => item.idGasto === editingId ? updated : item))
+        setItems(previous => previous.map(item => item.idGasto === editingId
+          ? { ...updated, categoria: normalizeExpenseCategory(updated.categoria) }
+          : item))
       } else {
         const created = await api.gastosTienda.crear(payload)
-        setItems(previous => [created, ...previous])
+        setItems(previous => [{ ...created, categoria: normalizeExpenseCategory(created.categoria) }, ...previous])
       }
       resetForm()
     } catch (err) {
-      setError(err.message || 'No se pudo guardar el gasto secundario.')
+      setError(err.message || 'No se pudo guardar el gasto.')
     }
   }
 
@@ -194,7 +201,7 @@ export default function GastosTienda() {
       setItems(previous => previous.filter(item => item.idGasto !== id))
       if (editingId === id) resetForm()
     } catch (err) {
-      setError(err.message || 'No se pudo eliminar el gasto secundario.')
+      setError(err.message || 'No se pudo eliminar el gasto.')
     }
   }
 
@@ -202,7 +209,7 @@ export default function GastosTienda() {
     setEditingId(item.idGasto)
     setForm({
       fecha: item.fecha || fechaInputLocal(),
-      categoria: item.categoria || '',
+      categoria: normalizeExpenseCategory(item.categoria) || '',
       descripcion: item.descripcion || '',
       monto: String(item.monto ?? ''),
     })
@@ -212,13 +219,13 @@ export default function GastosTienda() {
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Gastos secundarios</h1>
-        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Registro manual de gastos secundarios del local.</p>
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Gastos</h1>
+        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Registro manual de gastos del local.</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <div className="card p-4 text-center">
-          <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Total gastos secundarios</p>
+          <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Total gastos</p>
           <p className="text-xl font-bold mt-1 tabular-nums text-slate-900 dark:text-white">{fmtMoney(summary.total)}</p>
         </div>
         {summary.categories.map(category => (
@@ -243,7 +250,6 @@ export default function GastosTienda() {
             <label htmlFor="gasto-filtro-categoria" className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Filtrar por categoría</label>
             <select id="gasto-filtro-categoria" className="input text-sm min-w-44" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
               <option value="">Todas</option>
-              <option value={UNCATEGORIZED}>Sin categoría</option>
               {EXPENSE_CATEGORIES.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
             </select>
           </div>
@@ -276,9 +282,9 @@ export default function GastosTienda() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
                 {loading ? (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400 dark:text-stone-500">Cargando gastos secundarios…</td></tr>
+                  <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400 dark:text-stone-500">Cargando gastos…</td></tr>
                 ) : filteredItems.length === 0 ? (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400 dark:text-stone-500">No hay gastos secundarios para este período.</td></tr>
+                  <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400 dark:text-stone-500">No hay gastos para este período.</td></tr>
                 ) : filteredItems.map(item => (
                   <tr key={item.idGasto} className="align-middle hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors">
                     <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-slate-700 dark:text-stone-300">{fmtDate(item.fecha)}</td>
@@ -300,8 +306,8 @@ export default function GastosTienda() {
 
         <form noValidate onSubmit={submit} className="card p-4 sm:p-5 space-y-3.5">
           <div>
-            <h2 className="font-semibold text-slate-900 dark:text-white">{editingId ? 'Editar gasto secundario' : 'Nuevo gasto secundario'}</h2>
-            <p className="text-xs text-slate-400 dark:text-stone-500 mt-0.5">Completá los datos del gasto secundario.</p>
+            <h2 className="font-semibold text-slate-900 dark:text-white">{editingId ? 'Editar gasto' : 'Nuevo gasto'}</h2>
+            <p className="text-xs text-slate-400 dark:text-stone-500 mt-0.5">Completá los datos del gasto.</p>
           </div>
           <div>
             <label htmlFor="gasto-fecha" className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Fecha</label>

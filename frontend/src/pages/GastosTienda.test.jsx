@@ -71,20 +71,54 @@ describe('GastosTienda', () => {
 
     for (const [value, description, total] of [
       ['FIXED_EXPENSES', 'Gastos fijos', 'UYU $100,00'],
-      ['STORE_EXPENSES', 'Gastos del local', 'UYU $200,00'],
+      ['STORE_EXPENSES', 'Gastos secundarios', 'UYU $200,00'],
       ['USED_ORDERS', 'Pedidos usados', 'UYU $300,00'],
       ['NEW_ORDERS', 'Pedidos nuevos', 'UYU $400,00'],
     ]) {
       fireEvent.change(filter, { target: { value } })
       expect(screen.getByTitle(description)).toBeInTheDocument()
       expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
-      expect(screen.getByText('Total gastos secundarios')).toBeInTheDocument()
+      expect(screen.getByText('Total gastos')).toBeInTheDocument()
       expect(screen.getAllByText(total).length).toBeGreaterThanOrEqual(1)
     }
 
     fireEvent.change(filter, { target: { value: '' } })
-    expect(screen.getByText('Total gastos secundarios')).toBeInTheDocument()
+    expect(screen.getByText('Total gastos')).toBeInTheDocument()
     expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
+  })
+
+  it('mantiene cuatro tarjetas de categoría y el total mensual independiente de los filtros', async () => {
+    renderPage()
+    await screen.findByText('Luz')
+
+    expect(screen.getByText('Gastos')).toBeInTheDocument()
+    expect(screen.getAllByText('Gastos fijos').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Gastos secundarios').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Pedidos usados').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Pedidos nuevos').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('UYU $1.000,00').length).toBeGreaterThanOrEqual(1)
+
+    fireEvent.change(screen.getByLabelText('Filtrar por categoría'), { target: { value: 'NEW_ORDERS' } })
+    expect(screen.getByText('Compra nuevos')).toBeInTheDocument()
+    expect(screen.getByText('UYU $1.000,00')).toBeInTheDocument()
+  })
+
+  it('normaliza una categoría legacy en la tabla, el filtro y la edición', async () => {
+    api.gastosTienda.listar.mockResolvedValue([
+      ...expenses,
+      { idGasto: 6, fecha: '2026-07-14', categoria: 'Gastos del local', descripcion: 'Legacy', monto: 50 },
+    ])
+    renderPage()
+    await screen.findByText('Legacy')
+
+    expect(screen.getAllByText('Gastos secundarios').length).toBeGreaterThanOrEqual(1)
+    fireEvent.change(screen.getByLabelText('Filtrar por categoría'), { target: { value: 'STORE_EXPENSES' } })
+    expect(screen.getByText('Legacy')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByText('Legacy').closest('tr')).getByRole('button', { name: 'Editar' }))
+    expect(screen.getByLabelText('Categoría')).toHaveValue('STORE_EXPENSES')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(api.gastosTienda.actualizar).toHaveBeenCalledWith(6, expect.objectContaining({ categoria: 'STORE_EXPENSES' })))
   })
 
   it('precarga y actualiza la categoría conservando el filtro activo, también después de eliminar', async () => {

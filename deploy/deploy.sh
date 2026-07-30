@@ -40,6 +40,7 @@ git pull origin "$BRANCH"
 log "Commit: $(git log --oneline -1)"
 
 # Aplicar todas las migraciones pendientes antes del build (ddl-auto=validate las requiere).
+# Esto incluye la normalización idempotente de categorías legacy de gasto_tienda.
 if docker ps --format '{{.Names}}' | grep -qx sonograma-postgres; then
     for MIGRATION in "$APP_DIR"/docs/migraciones/*.sql; do
         [ -f "$MIGRATION" ] || continue
@@ -49,6 +50,13 @@ if docker ps --format '{{.Names}}' | grep -qx sonograma-postgres; then
             -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
             -d sonograma_db < "$MIGRATION" || warn "Migración $(basename "$MIGRATION") falló o ya estaba aplicada, continuando..."
     done
+
+    LEGACY_EXPENSES=$(docker exec sonograma-postgres \
+        psql -Atq \
+        -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
+        -d sonograma_db \
+        -c "SELECT COUNT(*) FROM gasto_tienda WHERE categoria IS NOT NULL AND LOWER(BTRIM(categoria)) IN ('gastos del local', 'gasto local', 'gastos de tienda');")
+    [ "$LEGACY_EXPENSES" = "0" ] || die "Quedaron $LEGACY_EXPENSES gastos con categorías legacy sin normalizar"
 fi
 
 # 3. Build frontend

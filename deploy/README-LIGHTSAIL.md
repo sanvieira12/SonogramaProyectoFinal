@@ -101,7 +101,7 @@ cd /opt/sonograma/app
 ./deploy/deploy.sh
 ```
 
-El script hace automáticamente: backup DB → git pull → build frontend → build Docker → restart → healthcheck.
+El script hace automáticamente: backup DB → git pull → aplicar migraciones SQL (incluida la normalización idempotente de categorías legacy de gastos) → build frontend → build Docker → restart → healthcheck.
 
 Para forzar una rama específica:
 ```bash

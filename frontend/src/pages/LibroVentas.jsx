@@ -479,7 +479,7 @@ export default function LibroVentas() {
             { label: 'Total ventas', value: fmt(resumen.totalVentas) },
             { label: 'Ingresos registrados', value: fmt(resumen.ingresosRegistrados) },
             { label: 'Ganancia bruta de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
-            { label: 'Gastos secundarios', value: fmt(resumen.gastos) },
+            { label: 'Gastos', value: fmt(resumen.gastos) },
             { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
           ].map(({ label, value, tone }) => (
             <div key={label} className="card p-4 text-center">
