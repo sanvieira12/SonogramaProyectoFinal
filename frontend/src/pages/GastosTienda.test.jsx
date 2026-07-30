@@ -35,13 +35,13 @@ describe('GastosTienda', () => {
     api.gastosTienda.eliminar.mockResolvedValue(null)
   })
 
-  it('carga la categoría de históricos como Sin categoría y crea con la categoría seleccionada', async () => {
+  it('muestra solo el mes seleccionado y crea con la categoría seleccionada', async () => {
     renderPage()
 
-    await screen.findByText('Histórico')
-    expect(screen.getByText('Sin categoría')).toBeInTheDocument()
+    await screen.findByText('Luz')
+    expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('CATEGORÍA'), { target: { value: 'STORE_EXPENSES' } })
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'STORE_EXPENSES' } })
     fireEvent.change(screen.getByLabelText('Motivo'), { target: { value: 'Cinta' } })
     fireEvent.change(screen.getByLabelText('Monto'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: 'Agregar gasto' }))
@@ -51,7 +51,7 @@ describe('GastosTienda', () => {
       descripcion: 'Cinta',
       monto: 50,
     })))
-    expect(screen.getByLabelText('CATEGORÍA')).toHaveValue('')
+    expect(screen.getByLabelText('Categoría')).toHaveValue('')
   })
 
   it('valida la categoría antes de enviar', async () => {
@@ -71,20 +71,20 @@ describe('GastosTienda', () => {
 
     for (const [value, description, total] of [
       ['FIXED_EXPENSES', 'Gastos fijos', 'UYU $100,00'],
-      ['STORE_EXPENSES', 'Gastos de tienda', 'UYU $200,00'],
+      ['STORE_EXPENSES', 'Gastos del local', 'UYU $200,00'],
       ['USED_ORDERS', 'Pedidos usados', 'UYU $300,00'],
       ['NEW_ORDERS', 'Pedidos nuevos', 'UYU $400,00'],
     ]) {
       fireEvent.change(filter, { target: { value } })
-      expect(screen.getByText(description, { selector: 'td' })).toBeInTheDocument()
+      expect(screen.getByTitle(description)).toBeInTheDocument()
       expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
-      expect(screen.getByText(`TOTAL · ${description.toUpperCase()}`)).toBeInTheDocument()
+      expect(screen.getByText('Total gastos secundarios')).toBeInTheDocument()
       expect(screen.getAllByText(total).length).toBeGreaterThanOrEqual(1)
     }
 
     fireEvent.change(filter, { target: { value: '' } })
-    expect(screen.getByText('TOTAL DEL MES')).toBeInTheDocument()
-    expect(screen.getByText('Histórico')).toBeInTheDocument()
+    expect(screen.getByText('Total gastos secundarios')).toBeInTheDocument()
+    expect(screen.queryByText('Histórico')).not.toBeInTheDocument()
   })
 
   it('precarga y actualiza la categoría conservando el filtro activo, también después de eliminar', async () => {
@@ -94,8 +94,8 @@ describe('GastosTienda', () => {
     fireEvent.change(filter, { target: { value: 'STORE_EXPENSES' } })
     fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
 
-    expect(screen.getByLabelText('CATEGORÍA')).toHaveValue('STORE_EXPENSES')
-    fireEvent.change(screen.getByLabelText('CATEGORÍA'), { target: { value: 'NEW_ORDERS' } })
+    expect(screen.getByLabelText('Categoría')).toHaveValue('STORE_EXPENSES')
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'NEW_ORDERS' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
     await waitFor(() => expect(api.gastosTienda.actualizar).toHaveBeenCalledWith(2, expect.objectContaining({ categoria: 'NEW_ORDERS' })))
     expect(filter).toHaveValue('STORE_EXPENSES')

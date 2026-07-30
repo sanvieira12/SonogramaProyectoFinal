@@ -1,6 +1,6 @@
 export const EXPENSE_CATEGORIES = [
   { value: 'FIXED_EXPENSES', label: 'Gastos fijos' },
-  { value: 'STORE_EXPENSES', label: 'Gastos de tienda' },
+  { value: 'STORE_EXPENSES', label: 'Gastos del local' },
   { value: 'USED_ORDERS', label: 'Pedidos usados' },
   { value: 'NEW_ORDERS', label: 'Pedidos nuevos' },
 ]
