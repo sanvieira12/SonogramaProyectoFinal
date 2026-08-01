@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
@@ -37,5 +39,13 @@ class GoogleOAuthConfiguredIntegrationTest {
                 .getQueryParams()
                 .getFirst("redirect_uri"))
                 .isEqualTo("https://tiendasonograma.com/api/login/oauth2/code/google");
+    }
+
+    @Test
+    void configuredOAuthDoesNotRedirectProtectedApiRequests() throws Exception {
+        mockMvc.perform(post("/auth/registro")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
     }
 }
