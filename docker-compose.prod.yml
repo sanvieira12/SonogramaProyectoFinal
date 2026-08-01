@@ -44,7 +44,12 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
-      SONOGRAMA_FRONTEND_BASE_URL: ${SONOGRAMA_FRONTEND_BASE_URL:-https://tudominio.com}
+      SONOGRAMA_FRONTEND_BASE_URL: ${SONOGRAMA_FRONTEND_BASE_URL:-https://tiendasonograma.com}
+      SONOGRAMA_CORS_ALLOWED_ORIGINS: ${SONOGRAMA_CORS_ALLOWED_ORIGINS:-https://tiendasonograma.com,https://www.tiendasonograma.com}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SONOGRAMA_GOOGLE_ADMIN_EMAIL: ${SONOGRAMA_GOOGLE_ADMIN_EMAIL:-sonograma.tiendadediscos@gmail.com}
+      SONOGRAMA_GOOGLE_REDIRECT_URI: ${SONOGRAMA_GOOGLE_REDIRECT_URI:-https://tiendasonograma.com/api/login/oauth2/code/google}
       DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
       DISCOGS_COVERS_DIRECTORY: /opt/sonograma/data/discogs-covers
       VINYLFUTURE_MEDIA_DIRECTORY: /opt/sonograma/data/vinylfuture-media

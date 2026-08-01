@@ -10,6 +10,8 @@ export function normalizeApiBase(value) {
 
 const BASE = normalizeApiBase(import.meta.env.VITE_API_URL)
 
+export const googleAuthorizationUrl = `${BASE}/oauth2/authorization/google`
+
 export function resolveApiUrl(path) {
   if (!path) return ''
   if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:') || path.startsWith('blob:')) {
@@ -101,6 +103,8 @@ async function readZipResponse(res, { fallbackFilename, fallbackError }) {
 export const api = {
   login: (nombreUsuario, contrasenia) =>
     request('POST', '/auth/login', { nombreUsuario, contrasenia }),
+  exchangeGoogleLogin: (code) =>
+    request('POST', '/auth/google/exchange', { code }),
   session: () => request('GET', '/auth/session'),
 
   registro: (nombreUsuario, email, contrasenia) =>

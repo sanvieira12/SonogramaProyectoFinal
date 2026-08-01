@@ -13,19 +13,21 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${sonograma.cors.allowed-origins:http://localhost:*,http://127.0.0.1:*}")
-    private String allowedOrigins;
+    private final List<String> allowedOrigins;
+
+    public CorsConfig(@Value("${sonograma.cors.allowed-origins}") String allowedOrigins) {
+        this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
+    }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        List<String> origins = Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim)
-                .filter(origin -> !origin.isEmpty())
-                .toList();
-        config.setAllowedOriginPatterns(origins);
+        config.setAllowedOrigins(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setExposedHeaders(List.of("Content-Disposition", "X-Pedido-Id"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

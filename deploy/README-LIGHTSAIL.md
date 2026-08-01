@@ -46,7 +46,12 @@ Archivo: `/etc/sonograma/sonograma.env` (permisos 600)
 | `POSTGRES_PASSWORD` | Password de PostgreSQL | `s3cr3t0_muy_largo` |
 | `JWT_SECRET` | Secreto JWT (mín. 32 chars) | `openssl rand -hex 32` |
 | `JWT_EXPIRATION` | Expiración token en ms | `86400000` (24h) |
-| `SONOGRAMA_FRONTEND_BASE_URL` | URL pública del sitio | `https://tudominio.com` |
+| `SONOGRAMA_FRONTEND_BASE_URL` | URL canónica usada en enlaces generados | `https://tiendasonograma.com` |
+| `SONOGRAMA_CORS_ALLOWED_ORIGINS` | Orígenes web permitidos, separados por comas | `https://tiendasonograma.com,https://www.tiendasonograma.com` |
+| `GOOGLE_CLIENT_ID` | Client ID del cliente OAuth Web de Google | _(secreto operativo; no commitear)_ |
+| `GOOGLE_CLIENT_SECRET` | Client secret del cliente OAuth Web de Google | _(secreto; no commitear)_ |
+| `SONOGRAMA_GOOGLE_ADMIN_EMAIL` | Única cuenta Google autorizada | `sonograma.tiendadediscos@gmail.com` |
+| `SONOGRAMA_GOOGLE_REDIRECT_URI` | Callback OAuth exacta | `https://tiendasonograma.com/api/login/oauth2/code/google` |
 | `DISCOGS_TOKEN` | Token API Discogs (opcional) | _(vacío si no se usa)_ |
 
 ---
@@ -102,6 +107,8 @@ cd /opt/sonograma/app
 ```
 
 El script hace automáticamente: backup DB → git pull → aplicar migraciones SQL (incluida la normalización idempotente de categorías legacy de gastos) → build frontend → build Docker → restart → healthcheck.
+
+Para el deploy acotado de Google OAuth, configuración de Google Cloud, pruebas y rollback sin tocar PostgreSQL, seguir [docs/GOOGLE_AUTH.md](../docs/GOOGLE_AUTH.md).
 
 Para forzar una rama específica:
 ```bash
@@ -187,7 +194,7 @@ El script pide confirmación explícita (`SI`) antes de destruir datos. Hace un 
    - Nombre: `tudominio.com` → IP estática de Lightsail
    - Nombre: `www.tudominio.com` → misma IP
 2. Actualizar `server_name` en `deploy/nginx-sonograma.conf`
-3. Actualizar `SONOGRAMA_FRONTEND_BASE_URL` en `/etc/sonograma/sonograma.env`
+3. Actualizar `SONOGRAMA_FRONTEND_BASE_URL` y `SONOGRAMA_CORS_ALLOWED_ORIGINS` en `/etc/sonograma/sonograma.env`
 4. Reiniciar nginx: `docker compose -f docker-compose.prod.yml restart nginx`
 
 ---
