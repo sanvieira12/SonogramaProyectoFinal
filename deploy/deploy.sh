@@ -64,9 +64,10 @@ fi
 step "3/7 – Build frontend React..."
 cd "$APP_DIR/frontend"
 cat > .env.production <<ENVFILE
-VITE_API_URL=${SONOGRAMA_FRONTEND_BASE_URL}/api
+VITE_API_URL=/api
 ENVFILE
-log "VITE_API_URL=${SONOGRAMA_FRONTEND_BASE_URL}/api"
+export VITE_API_URL=/api
+log "VITE_API_URL=/api (mismo origen, Nginx enruta al backend)"
 npm ci --prefer-offline 2>/dev/null || npm install
 npm run build
 log "Frontend compilado en frontend/dist"

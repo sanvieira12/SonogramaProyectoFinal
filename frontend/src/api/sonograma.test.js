@@ -16,6 +16,20 @@ describe('normalizeApiBase', () => {
     expect(normalizeApiBase('')).toBe('/api')
   })
 
+  it('sends login through the same-origin API path', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"token":"test-token"}'),
+    })
+
+    await api.login('admin', 'test-password')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/login', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
   it('envía el número de boleta opcional y la clave de idempotencia del pago', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
