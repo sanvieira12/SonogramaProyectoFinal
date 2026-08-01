@@ -39,6 +39,9 @@ else
     unset PGPASSWORD
 fi
 
+[ -s "$BACKUP_FILE" ] || die "El backup quedó vacío: $BACKUP_FILE"
+gzip -t "$BACKUP_FILE" || die "El backup no es un gzip válido: $BACKUP_FILE"
+
 BACKUP_SIZE=$(du -sh "$BACKUP_FILE" | cut -f1)
 log "Backup creado: $BACKUP_FILE ($BACKUP_SIZE)"
 

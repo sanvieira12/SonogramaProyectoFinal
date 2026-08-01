@@ -30,6 +30,21 @@ describe('normalizeApiBase', () => {
     }))
   })
 
+  it('exchanges the Google handoff code through a POST body', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"token":"test-token"}'),
+    })
+
+    await api.exchangeGoogleLogin('single-use-code')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/google/exchange', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ code: 'single-use-code' }),
+    }))
+  })
+
   it('envía el número de boleta opcional y la clave de idempotencia del pago', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

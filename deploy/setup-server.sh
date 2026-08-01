@@ -84,7 +84,14 @@ POSTGRES_PASSWORD=CAMBIAR_POR_PASSWORD_SEGURA
 JWT_SECRET=CAMBIAR_POR_SECRETO_JWT_MINIMO_32_CARACTERES
 JWT_EXPIRATION=86400000
 
-SONOGRAMA_FRONTEND_BASE_URL=https://tudominio.com
+SONOGRAMA_FRONTEND_BASE_URL=https://tiendasonograma.com
+SONOGRAMA_CORS_ALLOWED_ORIGINS=https://tiendasonograma.com,https://www.tiendasonograma.com
+
+# Google OAuth (crear un cliente Web en Google Cloud; nunca subir el secret a Git)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SONOGRAMA_GOOGLE_ADMIN_EMAIL=sonograma.tiendadediscos@gmail.com
+SONOGRAMA_GOOGLE_REDIRECT_URI=https://tiendasonograma.com/api/login/oauth2/code/google
 
 DISCOGS_TOKEN=
 COMPOSE_PROJECT_NAME=sonograma

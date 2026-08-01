@@ -9,7 +9,7 @@ Sistema web para gestión de stock, ventas y clientes de Sonograma.
 | Frontend | React + Vite + Tailwind CSS |
 | Backend | Java 21 + Spring Boot 3.2 |
 | Base de datos | PostgreSQL 16 |
-| Identidad | AWS Cognito (próximo sprint) |
+| Identidad | JWT local + Google OpenID Connect (transición) |
 
 ## Inicio rápido
 
@@ -76,3 +76,4 @@ sonograma/
 - [Arquitectura](docs/ARQUITECTURA.md)
 - [Decisiones técnicas](docs/DECISIONS.md)
 - [Diagrama ER](docs/ER_DIAGRAM.md)
+- [Google Authentication en Lightsail](docs/GOOGLE_AUTH.md)

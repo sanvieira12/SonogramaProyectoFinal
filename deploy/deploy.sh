@@ -29,7 +29,7 @@ mkdir -p /opt/sonograma/data/vinylfuture-media /opt/sonograma/data/discogs-cover
 
 # 1. Backup previo
 step "1/7 – Backup de base de datos..."
-"$APP_DIR/deploy/backup-db.sh" || warn "Backup falló, continuando con precaución..."
+"$APP_DIR/deploy/backup-db.sh" || die "Backup falló; deploy cancelado sin modificar servicios."
 
 # 2. Pull
 step "2/7 – Actualizando código ($BRANCH)..."
