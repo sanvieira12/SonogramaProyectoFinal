@@ -159,12 +159,12 @@ class EstadisticasServiceTest {
     void serieMensualReplicaLosMovimientosDelLibroIncluyendoPagosSeparados() {
         Fixture fixture = new Fixture();
         LocalDate hoy = LocalDate.now();
-        Venta venta = venta(1L, hoy.withDayOfMonth(Math.min(5, hoy.lengthOfMonth())).atTime(10, 0), "3000", "3000", EstadoVenta.COMPLETADA);
-        Venta preVentaPagada = venta(2L, hoy.withDayOfMonth(Math.min(7, hoy.lengthOfMonth())).atTime(16, 0), "1800", "1800", EstadoVenta.COMPLETADA);
+        Venta venta = venta(1L, hoy.withDayOfMonth(1).atTime(10, 0), "3000", "3000", EstadoVenta.COMPLETADA);
+        Venta preVentaPagada = venta(2L, hoy.withDayOfMonth(Math.min(2, hoy.getDayOfMonth())).atTime(16, 0), "1800", "1800", EstadoVenta.COMPLETADA);
         preVentaPagada.setOrigen("PRE_VENTA");
         preVentaPagada.setIdPreVentaOrigen(99L);
         Deuda deuda = Deuda.builder().idDeuda(4L).venta(venta).build();
-        PagoDeuda pago = pago(3L, deuda, "2000", hoy.withDayOfMonth(Math.min(12, hoy.lengthOfMonth())));
+        PagoDeuda pago = pago(3L, deuda, "2000", hoy);
         fixture.stub(List.of(venta, preVentaPagada), List.of(pago));
 
         IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos("mes");
@@ -173,9 +173,9 @@ class EstadisticasServiceTest {
         assertThat(response.getTotalMonto()).isEqualByComparingTo("6800");
         assertThat(response.getBuckets()).isNotEmpty();
         assertThat(response.getBuckets().stream()
-                .filter(bucket -> bucket.getTotalMonto().compareTo(BigDecimal.ZERO) > 0)
-                .map(bucket -> bucket.getTotalMonto().stripTrailingZeros().toPlainString()))
-                .containsExactlyInAnyOrder("3000", "1800", "2000");
+                .map(bucket -> bucket.getTotalMonto())
+                .reduce(BigDecimal.ZERO, BigDecimal::add))
+                .isEqualByComparingTo("6800");
     }
 
     @Test

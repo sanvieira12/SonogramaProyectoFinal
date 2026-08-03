@@ -122,6 +122,16 @@ public class Disco {
     @Column(name = "fecha_actualizacion")
     private LocalDateTime fechaActualizacion;
 
+    /**
+     * Permanent Catalog exclusion marker. The row is retained only when business
+     * history still references it; normal Catalog and import lookups exclude it.
+     */
+    @Column(name = "catalog_deleted_at")
+    private LocalDateTime catalogDeletedAt;
+
+    @Column(name = "catalog_deleted_by", length = 255)
+    private String catalogDeletedBy;
+
     @PrePersist
     void onPrePersist() {
         LocalDateTime ahora = LocalDateTime.now();

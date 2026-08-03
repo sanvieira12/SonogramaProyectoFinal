@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 import java.time.LocalDateTime;
@@ -21,6 +22,18 @@ public class GlobalExceptionHandler {
             RuntimeException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse(LocalDateTime.now(), 401, ex.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(
+            AccessDeniedException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse(
+                        LocalDateTime.now(),
+                        403,
+                        "No tenés permisos para realizar esta acción",
+                        request.getRequestURI()
+                ));
     }
 
     @ExceptionHandler(RecursoNoEncontradoException.class)

@@ -437,10 +437,10 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
             Editar disco
           </button>
           <button
-            onClick={() => { onDarBaja(disco); onCerrar() }}
+            onClick={() => onDarBaja(disco)}
             className="btn-secondary w-full text-red-600 dark:text-red-400"
           >
-            Dar de baja
+            Eliminar definitivamente
           </button>
         </div>
       </div>
@@ -550,7 +550,7 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr 
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
           <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary">Ver QR</button>
-          <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Dar de baja</button>
+          <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Eliminar definitivamente</button>
         </div>
       </div>
     </aside>
@@ -567,6 +567,7 @@ export default function DiscosCatalogo() {
   const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
+  const [errorEliminacion, setErrorEliminacion] = useState('')
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [hoveredDisco, setHoveredDisco] = useState(null)
   const [selectedDisco, setSelectedDisco] = useState(null)
@@ -650,17 +651,36 @@ export default function DiscosCatalogo() {
   }
 
   async function handleEliminar() {
+    if (eliminando || !discoEliminar) return
+    const idDisco = discoEliminar.idDisco
     setEliminando(true)
+    setErrorEliminacion('')
     try {
-      await discoService.eliminar(discoEliminar.idDisco)
-      setDiscos(prev => prev.filter(d => d.idDisco !== discoEliminar.idDisco))
-      setSelectedDisco(prev => prev?.idDisco === discoEliminar.idDisco ? null : prev)
+      await discoService.eliminar(idDisco)
+      setDiscos(prev => prev.filter(d => d.idDisco !== idDisco))
+      setSelectedDisco(prev => prev?.idDisco === idDisco ? null : prev)
+      setHoveredDisco(prev => prev?.idDisco === idDisco ? null : prev)
+      setSlideOverDisco(prev => prev?.idDisco === idDisco ? null : prev)
       setDiscoEliminar(null)
+      try {
+        const query = busqueda.trim()
+        const actualizados = query
+          ? await discoService.buscar(query)
+          : await discoService.getAll()
+        setDiscos(actualizados)
+      } catch (refreshError) {
+        setError(`El disco fue eliminado, pero no se pudo actualizar el catálogo: ${refreshError.message}`)
+      }
     } catch (err) {
-      alert(err.message)
+      setErrorEliminacion(err.message || 'No se pudo eliminar el disco. No se realizó ningún cambio.')
     } finally {
       setEliminando(false)
     }
+  }
+
+  function solicitarEliminacion(disco) {
+    setErrorEliminacion('')
+    setDiscoEliminar(disco)
   }
 
   async function abrirQr(disco) {
@@ -967,7 +987,7 @@ export default function DiscosCatalogo() {
         pinned={Boolean(selectedDisco)}
         onUnpin={() => setSelectedDisco(null)}
         onEditar={setDiscoForm}
-        onDarBaja={setDiscoEliminar}
+        onDarBaja={solicitarEliminacion}
         onViewQr={abrirQr}
       />
       </div>
@@ -977,7 +997,7 @@ export default function DiscosCatalogo() {
         disco={slideOverDisco}
         onCerrar={() => setSlideOverDisco(null)}
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
-        onDarBaja={d => { setDiscoEliminar(d); setSlideOverDisco(null) }}
+        onDarBaja={solicitarEliminacion}
         onViewQr={d => { abrirQr(d); setSlideOverDisco(null) }}
       />
 
@@ -1003,14 +1023,16 @@ export default function DiscosCatalogo() {
         />
       )}
 
-      {/* Confirmación de baja */}
+      {/* Confirmación de eliminación permanente */}
       {discoEliminar && (
         <ConfirmModal
-          titulo="Dar de baja disco"
-          mensaje={`¿Seguro que querés dar de baja "${discoEliminar.artista} – ${discoEliminar.album}"? El disco pasará a estado SIN_STOCK.`}
+          titulo="Eliminar disco definitivamente"
+          mensaje={`¿Seguro que querés eliminar definitivamente "${discoEliminar.artista} – ${discoEliminar.album}" del Catálogo? Esta acción no se puede deshacer. El historial de ventas y contabilidad se conservará.`}
           onConfirmar={handleEliminar}
-          onCancelar={() => setDiscoEliminar(null)}
+          onCancelar={() => { setDiscoEliminar(null); setErrorEliminacion('') }}
           cargando={eliminando}
+          confirmarTexto="Eliminar definitivamente"
+          error={errorEliminacion}
         />
       )}
     </div>

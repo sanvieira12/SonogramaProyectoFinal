@@ -14,11 +14,13 @@ vi.mock('../api/sonograma', () => ({
   },
 }))
 
+const currentPeriod = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit' })
+
 const expenses = [
-  { idGasto: 1, fecha: '2026-07-10', categoria: 'FIXED_EXPENSES', descripcion: 'Luz', monto: 100 },
-  { idGasto: 2, fecha: '2026-07-11', categoria: 'STORE_EXPENSES', descripcion: 'Bolsas', monto: 200 },
-  { idGasto: 3, fecha: '2026-07-12', categoria: 'USED_ORDERS', descripcion: 'Compra usados', monto: 300 },
-  { idGasto: 4, fecha: '2026-07-13', categoria: 'NEW_ORDERS', descripcion: 'Compra nuevos', monto: 400 },
+  { idGasto: 1, fecha: `${currentPeriod}-10`, categoria: 'FIXED_EXPENSES', descripcion: 'Luz', monto: 100 },
+  { idGasto: 2, fecha: `${currentPeriod}-11`, categoria: 'STORE_EXPENSES', descripcion: 'Bolsas', monto: 200 },
+  { idGasto: 3, fecha: `${currentPeriod}-12`, categoria: 'USED_ORDERS', descripcion: 'Compra usados', monto: 300 },
+  { idGasto: 4, fecha: `${currentPeriod}-13`, categoria: 'NEW_ORDERS', descripcion: 'Compra nuevos', monto: 400 },
   { idGasto: 5, fecha: '2025-06-01', categoria: null, descripcion: 'Histórico', monto: 500 },
 ]
 
@@ -106,7 +108,7 @@ describe('GastosTienda', () => {
   it('normaliza una categoría legacy en la tabla, el filtro y la edición', async () => {
     api.gastosTienda.listar.mockResolvedValue([
       ...expenses,
-      { idGasto: 6, fecha: '2026-07-14', categoria: 'Gastos del local', descripcion: 'Legacy', monto: 50 },
+      { idGasto: 6, fecha: `${currentPeriod}-14`, categoria: 'Gastos del local', descripcion: 'Legacy', monto: 50 },
     ])
     renderPage()
     await screen.findByText('Legacy')
