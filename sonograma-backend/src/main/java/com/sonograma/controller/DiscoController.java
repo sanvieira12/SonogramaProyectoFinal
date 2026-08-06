@@ -10,11 +10,13 @@ import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.security.Principal;
 
 @RestController
 @RequestMapping("/discos")
@@ -82,8 +84,9 @@ public class DiscoController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> eliminarDisco(@PathVariable Long id) {
-        discoService.eliminarDisco(id);
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> eliminarDisco(@PathVariable Long id, Principal principal) {
+        discoService.eliminarDisco(id, principal != null ? principal.getName() : null);
         return ResponseEntity.noContent().build();
     }
 

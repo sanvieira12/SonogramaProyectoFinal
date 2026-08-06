@@ -6,14 +6,20 @@ import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -22,6 +28,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class DiscoService {
 
     private final DiscoRepository discoRepository;
@@ -30,6 +37,7 @@ public class DiscoService {
     private final DiscoEstadoService discoEstadoService;
     private final CatalogPricingService catalogPricingService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
+    private final EntityManager entityManager;
 
     public DiscoResponseDTO crearDisco(DiscoRequestDTO request) {
         Disco disco = DiscoMapper.toEntity(request);
@@ -133,16 +141,74 @@ public class DiscoService {
         return saveWithQr(disco);
     }
 
-    public void eliminarDisco(Long id) {
-        Disco disco = discoRepository.findById(id)
+    public void eliminarDisco(Long id, String deletedBy) {
+        Disco disco = discoRepository.findByIdIncludingCatalogDeleted(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
-        if (disco.getEstado() == EstadoDisco.VENDIDO) {
-            throw new NegocioException("No se puede dar de baja un disco ya vendido");
+        if (disco.getCatalogDeletedAt() != null) {
+            throw new RecursoNoEncontradoException("Disco", id);
         }
-        disco.setEstado(EstadoDisco.SIN_STOCK);
-        disco.setCantidadCopias(0);
-        qrCopyService.synchronizeAvailableCopies(disco, 0);
-        saveWithQr(disco);
+        if (exists("SELECT COUNT(*) FROM reserva WHERE id_disco = :id AND estado = 'ACTIVA'", id)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar el disco mientras tenga una reserva activa");
+        }
+        if (exists("SELECT COUNT(*) FROM pre_venta WHERE id_disco = :id AND estado <> 'PAGADA'", id)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar el disco mientras tenga una preventa pendiente");
+        }
+
+        try {
+            detachImportReferences(id);
+            if (hasHistoricalReferences(id)) {
+                disco.setCatalogDeletedAt(LocalDateTime.now());
+                disco.setCatalogDeletedBy(normalizeDeletedBy(deletedBy));
+                discoRepository.saveAndFlush(disco);
+                log.info("Disco {} excluido permanentemente del catálogo conservando historial", id);
+                return;
+            }
+
+            execute("DELETE FROM catalog_audio_preview WHERE id_disco = :id", id);
+            execute("DELETE FROM disco_qr_copy WHERE id_disco = :id", id);
+            discoRepository.delete(disco);
+            discoRepository.flush();
+            log.info("Disco {} eliminado permanentemente del catálogo", id);
+        } catch (DataIntegrityViolationException ex) {
+            log.warn("La eliminación permanente del disco {} fue bloqueada por integridad referencial", id);
+            throw new ConflictoNegocioException(
+                    "No se pudo eliminar el disco porque todavía está vinculado a información del negocio");
+        }
+    }
+
+    private boolean hasHistoricalReferences(Long id) {
+        return exists("SELECT COUNT(*) FROM detalle_venta WHERE id_disco = :id", id)
+                || exists("SELECT COUNT(*) FROM venta WHERE id_disco = :id", id)
+                || exists("SELECT COUNT(*) FROM movimiento_stock WHERE id_disco = :id", id)
+                || exists("SELECT COUNT(*) FROM reserva WHERE id_disco = :id", id)
+                || exists("SELECT COUNT(*) FROM pre_venta WHERE id_disco = :id", id);
+    }
+
+    private void detachImportReferences(Long id) {
+        execute("UPDATE pedido_item SET id_disco = NULL WHERE id_disco = :id", id);
+        execute("UPDATE shipping_order_item SET id_disco = NULL WHERE id_disco = :id", id);
+        execute("UPDATE discogs_import_row SET imported_catalog_product_id = NULL WHERE imported_catalog_product_id = :id", id);
+    }
+
+    private boolean exists(String sql, Long id) {
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("id", id);
+        Number result = (Number) query.getSingleResult();
+        return result != null && result.longValue() > 0;
+    }
+
+    private void execute(String sql, Long id) {
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("id", id);
+        query.executeUpdate();
+    }
+
+    private String normalizeDeletedBy(String deletedBy) {
+        if (deletedBy == null || deletedBy.isBlank()) return null;
+        String normalized = deletedBy.trim();
+        return normalized.length() <= 255 ? normalized : normalized.substring(0, 255);
     }
 
     private boolean coincide(Disco disco, String query) {

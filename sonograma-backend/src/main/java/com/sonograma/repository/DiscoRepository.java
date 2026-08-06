@@ -12,28 +12,50 @@ import java.util.Optional;
 
 public interface DiscoRepository extends JpaRepository<Disco, Long> {
 
-    List<Disco> findByEstado(EstadoDisco estado);
+    @Override
+    @Query("SELECT d FROM Disco d WHERE d.catalogDeletedAt IS NULL")
+    List<Disco> findAll();
 
-    List<Disco> findByCondicion(CondicionDisco condicion);
+    @Override
+    @Query("SELECT d FROM Disco d WHERE d.idDisco = :id AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findById(@Param("id") Long id);
 
-    List<Disco> findByEstadoOrderByFechaIngresoDesc(EstadoDisco estado);
+    @Override
+    @Query("SELECT d FROM Disco d WHERE d.idDisco IN :ids AND d.catalogDeletedAt IS NULL")
+    List<Disco> findAllById(@Param("ids") Iterable<Long> ids);
 
-    Optional<Disco> findByCodigoInterno(String codigoInterno);
+    @Query("SELECT d FROM Disco d WHERE d.idDisco = :id")
+    Optional<Disco> findByIdIncludingCatalogDeleted(@Param("id") Long id);
 
-    Optional<Disco> findByCodigoInternoIgnoreCase(String codigoInterno);
+    @Query("SELECT d FROM Disco d WHERE d.estado = :estado AND d.catalogDeletedAt IS NULL")
+    List<Disco> findByEstado(@Param("estado") EstadoDisco estado);
+
+    @Query("SELECT d FROM Disco d WHERE d.condicion = :condicion AND d.catalogDeletedAt IS NULL")
+    List<Disco> findByCondicion(@Param("condicion") CondicionDisco condicion);
+
+    @Query("SELECT d FROM Disco d WHERE d.estado = :estado AND d.catalogDeletedAt IS NULL ORDER BY d.fechaIngreso DESC")
+    List<Disco> findByEstadoOrderByFechaIngresoDesc(@Param("estado") EstadoDisco estado);
+
+    @Query("SELECT d FROM Disco d WHERE d.codigoInterno = :codigoInterno AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findByCodigoInterno(@Param("codigoInterno") String codigoInterno);
+
+    @Query("SELECT d FROM Disco d WHERE LOWER(d.codigoInterno) = LOWER(:codigoInterno) AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findByCodigoInternoIgnoreCase(@Param("codigoInterno") String codigoInterno);
 
     boolean existsByNumeroFacturaCompra(String numeroFacturaCompra);
 
-    Optional<Disco> findByCodigoQr(String codigoQr);
+    @Query("SELECT d FROM Disco d WHERE d.codigoQr = :codigoQr AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findByCodigoQr(@Param("codigoQr") String codigoQr);
 
-    Optional<Disco> findByDiscogsUrl(String discogsUrl);
+    @Query("SELECT d FROM Disco d WHERE d.discogsUrl = :discogsUrl AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findByDiscogsUrl(@Param("discogsUrl") String discogsUrl);
 
-    @Query("SELECT d FROM Disco d WHERE LOWER(d.artista) = LOWER(:artista) AND LOWER(d.album) = LOWER(:album)")
+    @Query("SELECT d FROM Disco d WHERE d.catalogDeletedAt IS NULL AND LOWER(d.artista) = LOWER(:artista) AND LOWER(d.album) = LOWER(:album)")
     List<Disco> findByArtistaAndAlbumIgnoreCase(@Param("artista") String artista, @Param("album") String album);
 
-    @Query("SELECT d FROM Disco d WHERE " +
+    @Query("SELECT d FROM Disco d WHERE d.catalogDeletedAt IS NULL AND (" +
            "LOWER(d.artista) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
-           "LOWER(d.album) LIKE LOWER(CONCAT('%', :q, '%')) " +
+           "LOWER(d.album) LIKE LOWER(CONCAT('%', :q, '%'))) " +
            "ORDER BY d.artista")
     List<Disco> buscarPorArtistaOAlbum(@Param("q") String q);
 }
