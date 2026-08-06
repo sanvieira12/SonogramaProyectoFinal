@@ -224,7 +224,20 @@ Luego en `deploy/nginx-sonograma.conf`:
 docker compose -f /opt/sonograma/app/docker-compose.prod.yml restart nginx
 ```
 
-Renovación automática (certbot instala el cron automáticamente con `python3-certbot-nginx`).
+Para que la renovación automática con el modo `standalone` pueda usar el puerto 80,
+instalar los hooks versionados que detienen Nginx únicamente durante la renovación y
+lo vuelven a iniciar si estaba activo:
+
+```bash
+sudo install -m 755 deploy/certbot-renewal-pre.sh \
+    /etc/letsencrypt/renewal-hooks/pre/10-stop-sonograma-nginx
+sudo install -m 755 deploy/certbot-renewal-post.sh \
+    /etc/letsencrypt/renewal-hooks/post/90-start-sonograma-nginx
+sudo certbot renew --dry-run
+```
+
+Certbot instala su temporizador de renovación con `python3-certbot-nginx`; los hooks
+no contienen dominios, credenciales ni secretos.
 
 ---
 
