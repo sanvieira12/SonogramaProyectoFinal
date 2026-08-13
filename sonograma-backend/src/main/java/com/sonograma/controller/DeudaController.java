@@ -67,7 +67,12 @@ public class DeudaController {
 
     @DeleteMapping("/{idDeuda}")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
-    public ResponseEntity<Void> eliminar(@PathVariable Long idDeuda) {
+    public ResponseEntity<Void> eliminar(
+            @PathVariable Long idDeuda,
+            @RequestParam(required = false) String confirmacion) {
+        if (!"ELIMINAR".equals(confirmacion)) {
+            throw new NegocioException("Escribí ELIMINAR para confirmar la eliminación definitiva");
+        }
         deudaService.eliminar(idDeuda);
         return ResponseEntity.noContent().build();
     }

@@ -443,8 +443,9 @@ export default function Deudas() {
       )}
       {deudaEliminar && <ConfirmModal
         titulo="Eliminar deuda"
-        mensaje="¿Seguro que querés eliminar esta deuda? Esta acción no se puede deshacer. La deuda desaparecerá completamente del sistema y los discos asociados volverán a estar disponibles en stock."
-        confirmarTexto="Eliminar deuda"
+        mensaje="Esta operación elimina definitivamente la deuda, cancela la venta asociada y devuelve los discos al stock. Usá esta opción solamente si la deuda realmente no corresponde."
+        confirmarTexto="Eliminar definitivamente"
+        confirmacionRequerida="ELIMINAR"
         error={error}
         onConfirmar={eliminarDeuda}
         onCancelar={() => { if (!eliminando) setDeudaEliminar(null) }}

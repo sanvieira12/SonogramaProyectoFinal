@@ -64,14 +64,17 @@ describe('Deudas deletion flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
 
     expect(screen.getByRole('heading', { name: 'Eliminar deuda' })).toBeInTheDocument()
-    expect(screen.getByText(/Esta acción no se puede deshacer/i)).toBeInTheDocument()
-    expect(screen.getByText(/los discos asociados volverán a estar disponibles en stock/i)).toBeInTheDocument()
+    expect(screen.getByText(/elimina definitivamente la deuda/i)).toBeInTheDocument()
+    expect(screen.getByText(/devuelve los discos al stock/i)).toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Cancelar' }).at(-1))
     expect(api.deudas.eliminar).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Eliminar deuda' }))
+    const confirm = screen.getByRole('button', { name: 'Eliminar definitivamente' })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: /Escribí ELIMINAR/i }), { target: { value: 'ELIMINAR' } })
+    fireEvent.click(confirm)
 
     await waitFor(() => expect(api.deudas.eliminar).toHaveBeenCalledWith(7))
     await waitFor(() => expect(screen.queryByText('Ana Pérez')).not.toBeInTheDocument())
@@ -85,7 +88,8 @@ describe('Deudas deletion flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
     fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Eliminar deuda' }))
+    fireEvent.change(screen.getByRole('textbox', { name: /Escribí ELIMINAR/i }), { target: { value: 'ELIMINAR' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar definitivamente' }))
 
     await waitFor(() => expect(screen.getAllByRole('alert')[0]).toHaveTextContent('No se pudo eliminar la deuda. No se realizó ningún cambio.'))
     expect(screen.getAllByText('Ana Pérez').length).toBeGreaterThan(0)
@@ -99,7 +103,8 @@ describe('Deudas deletion flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
     fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
-    const confirm = screen.getByRole('button', { name: 'Eliminar deuda' })
+    fireEvent.change(screen.getByRole('textbox', { name: /Escribí ELIMINAR/i }), { target: { value: 'ELIMINAR' } })
+    const confirm = screen.getByRole('button', { name: 'Eliminar definitivamente' })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
 

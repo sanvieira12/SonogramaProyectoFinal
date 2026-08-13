@@ -211,7 +211,7 @@ export const api = {
     porCliente: (id) => request('GET', `/deudas/cliente/${id}`),
     crear: (deuda) => request('POST', '/deudas', deuda),
     actualizar: (id, deuda) => request('PUT', `/deudas/${id}`, deuda),
-    eliminar: (id) => request('DELETE', `/deudas/${id}`),
+    eliminar: (id) => request('DELETE', `/deudas/${id}?confirmacion=ELIMINAR`),
     importarExcel: async (file) => {
       const fd = new FormData(); fd.append('file', file)
       const res = await fetch(`${BASE}/deudas/importar-excel`, {

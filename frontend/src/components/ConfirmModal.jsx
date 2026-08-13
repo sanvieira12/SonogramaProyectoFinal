@@ -1,6 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
-export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, confirmarTexto = 'Confirmar', error }) {
+export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, confirmarTexto = 'Confirmar', confirmacionRequerida, error }) {
+  const [confirmacion, setConfirmacion] = useState('')
+
   useEffect(() => {
     function handleKeyDown(event) {
       if (event.key === 'Escape' && !cargando) onCancelar()
@@ -25,7 +27,20 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
         aria-labelledby="confirm-modal-title"
       >
         <h3 id="confirm-modal-title" className="text-slate-900 dark:text-white font-bold text-base mb-2">{titulo}</h3>
-        <p className="text-slate-500 dark:text-white/70 text-sm mb-6">{mensaje}</p>
+        <p className="text-slate-500 dark:text-white/70 text-sm mb-4">{mensaje}</p>
+        {confirmacionRequerida && (
+          <label className="block text-sm text-slate-600 dark:text-white/80 mb-6">
+            Escribí <strong>{confirmacionRequerida}</strong> para continuar
+            <input
+              autoFocus
+              className="input w-full mt-2"
+              value={confirmacion}
+              onChange={event => setConfirmacion(event.target.value)}
+              autoComplete="off"
+              aria-label={`Escribí ${confirmacionRequerida} para confirmar`}
+            />
+          </label>
+        )}
         {error && <p role="alert" className="text-red-600 dark:text-red-300 text-sm mb-4">{error}</p>}
         <div className="flex gap-3">
           <button
@@ -37,7 +52,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
           </button>
           <button
             onClick={onConfirmar}
-            disabled={cargando}
+            disabled={cargando || (confirmacionRequerida && confirmacion !== confirmacionRequerida)}
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all duration-200 active:scale-95"
           >
             {cargando ? 'Eliminando...' : confirmarTexto}
