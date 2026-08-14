@@ -51,8 +51,8 @@ class CrmRepositoryIntegrationTest {
                 .precioUnitario(new BigDecimal("1000")).cantidad(1).manualItem(false).build());
         sales.save(cancelled);
 
-        assertThat(sales.findCompletedForCrmCustomer(customer.getIdCliente()))
-                .extracting(Venta::getIdVenta).containsExactly(completed.getIdVenta());
+        assertThat(sales.findHistoryForCrmCustomer(customer.getIdCliente()))
+                .extracting(Venta::getIdVenta).containsExactly(cancelled.getIdVenta(), completed.getIdVenta());
         assertThat(discs.findAvailableForCrm()).hasSize(1);
         Object[] row = discs.findAvailableForCrm().get(0);
         assertThat(((Disco) row[0]).getIdDisco()).isEqualTo(available.getIdDisco());
@@ -97,14 +97,14 @@ class CrmRepositoryIntegrationTest {
         var statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
         statistics.setStatisticsEnabled(true);
         statistics.clear();
-        var forward = sales.findCompletedForCrmCustomer(customer.getIdCliente());
+        var forward = sales.findHistoryForCrmCustomer(customer.getIdCliente());
         forward.forEach(sale -> sale.getDetalles().forEach(detail -> detail.getDisco().getArtista()));
         assertThat(statistics.getEntityFetchCount()).isZero();
         assertThat(statistics.getCollectionFetchCount()).isZero();
 
         entityManager.clear();
         statistics.clear();
-        var reverse = sales.findAllCompletedForCrm();
+        var reverse = sales.findAllHistoryForCrm();
         reverse.forEach(sale -> {
             sale.getCliente().getNombre();
             sale.getDetalles().forEach(detail -> detail.getDisco().getAlbum());

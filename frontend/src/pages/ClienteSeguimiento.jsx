@@ -306,7 +306,7 @@ export default function ClienteSeguimiento() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-bold text-slate-900 dark:text-white">Perfil de gusto</h2>
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-stone-500">Preferencias calculadas desde compras completadas.</p>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-stone-500">Preferencias calculadas desde el historial de ventas registrado.</p>
           </div>
           <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-stone-900">
             {[['historico', 'Histórico'], ['reciente', 'Últimos 12 meses']].map(([value, label]) => (

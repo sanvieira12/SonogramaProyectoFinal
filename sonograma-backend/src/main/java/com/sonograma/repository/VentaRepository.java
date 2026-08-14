@@ -26,10 +26,11 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         LEFT JOIN FETCH v.detalles detalle
         LEFT JOIN FETCH detalle.disco detalleDisco
         WHERE c.idCliente = :clienteId
-          AND v.estado = com.sonograma.enums.EstadoVenta.COMPLETADA
+          AND v.estado IN (com.sonograma.enums.EstadoVenta.COMPLETADA,
+                           com.sonograma.enums.EstadoVenta.CANCELADA)
         ORDER BY v.fechaVenta DESC, v.idVenta DESC
         """)
-    List<Venta> findCompletedForCrmCustomer(@Param("clienteId") Long clienteId);
+    List<Venta> findHistoryForCrmCustomer(@Param("clienteId") Long clienteId);
 
     @Query("""
         SELECT DISTINCT v FROM Venta v
@@ -37,11 +38,12 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         LEFT JOIN FETCH v.disco legacyDisco
         LEFT JOIN FETCH v.detalles detalle
         LEFT JOIN FETCH detalle.disco detalleDisco
-        WHERE v.estado = com.sonograma.enums.EstadoVenta.COMPLETADA
+        WHERE v.estado IN (com.sonograma.enums.EstadoVenta.COMPLETADA,
+                           com.sonograma.enums.EstadoVenta.CANCELADA)
           AND c.activo = true
         ORDER BY v.cliente.idCliente, v.fechaVenta DESC, v.idVenta DESC
         """)
-    List<Venta> findAllCompletedForCrm();
+    List<Venta> findAllHistoryForCrm();
 
     /** Fetches all profit inputs for a period in one query, excluding cancelled sales. */
     @Query("""

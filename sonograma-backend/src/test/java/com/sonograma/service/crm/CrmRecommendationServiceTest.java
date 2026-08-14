@@ -153,7 +153,7 @@ class CrmRecommendationServiceTest {
                 .tipo(TipoInteresCrm.ARTISTA).texto("Drexciya").activo(true).build();
 
         when(discs.findById(50L)).thenReturn(java.util.Optional.of(candidate));
-        when(sales.findAllCompletedForCrm()).thenReturn(List.of(historySale, exactSale));
+        when(sales.findAllHistoryForCrm()).thenReturn(List.of(historySale, exactSale));
         when(interestsRepository.findAllActiveWithCustomer()).thenReturn(List.of(manualInterest));
         when(profiles.calculate(any(), any())).thenAnswer(invocation -> new CrmProfileCalculator().calculate(
                 invocation.getArgument(0), invocation.getArgument(1), LocalDateTime.now()));

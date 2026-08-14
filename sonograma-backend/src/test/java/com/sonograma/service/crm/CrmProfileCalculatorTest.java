@@ -26,11 +26,11 @@ class CrmProfileCalculatorTest {
         addDetail(oldSale, 1000L, aphex, new BigDecimal("1000"), 2, false);
         Venta recentSale = sale(101L, customer, asOf.minusMonths(2), EstadoVenta.COMPLETADA, BigDecimal.ZERO);
         addDetail(recentSale, 1001L, autechre, new BigDecimal("3000"), 1, false);
-        Venta cancelled = sale(102L, customer, asOf.minusDays(2), EstadoVenta.CANCELADA, BigDecimal.ZERO);
-        addDetail(cancelled, 1002L, aphex, new BigDecimal("9000"), 1, false);
+        Venta pending = sale(102L, customer, asOf.minusDays(2), EstadoVenta.PENDIENTE, BigDecimal.ZERO);
+        addDetail(pending, 1002L, aphex, new BigDecimal("9000"), 1, false);
 
         CrmProfileCalculator.CustomerProfile profile = calculator.calculate(customer,
-                List.of(oldSale, recentSale, cancelled), asOf);
+                List.of(oldSale, recentSale, pending), asOf);
 
         assertThat(profile.metrics().transactionCount()).isEqualTo(2);
         assertThat(profile.metrics().recordCount()).isEqualTo(3);
@@ -75,6 +75,28 @@ class CrmProfileCalculatorTest {
     }
 
     @Test
+    void includesCancelledLegacyHistoryButStillIgnoresPendingSales() {
+        LocalDateTime asOf = LocalDateTime.of(2026, 8, 14, 12, 0);
+        Cliente customer = customer(13L);
+        Venta cancelled = sale(400L, customer, asOf.minusDays(10), EstadoVenta.CANCELADA, BigDecimal.ZERO);
+        cancelled.getDetalles().add(manualDetail(cancelled, 4000L, "Signal Priest", "The Marginal EP", "1429"));
+        cancelled.getDetalles().add(manualDetail(cancelled, 4002L, "Signal Priest", "The Marginal EP", "1429"));
+        Disco pendingDisc = disc(9L, "Signal Priest", "The Marginal EP", "Techno", null,
+                "NORD", 2022, "12\"", CondicionDisco.NUEVO);
+        Venta pending = sale(401L, customer, asOf.minusDays(2), EstadoVenta.PENDIENTE, BigDecimal.ZERO);
+        addDetail(pending, 4001L, pendingDisc, new BigDecimal("9999"), 1, false);
+
+        CrmProfileCalculator.CustomerProfile profile = calculator.calculate(customer,
+                List.of(cancelled, pending), asOf);
+
+        assertThat(profile.metrics().transactionCount()).isEqualTo(1);
+        assertThat(profile.metrics().recordCount()).isEqualTo(1);
+        assertThat(profile.metrics().totalSpend()).isEqualByComparingTo("1429.00");
+        assertThat(profile.historical().artists()).containsOnlyKeys("signal priest");
+        assertThat(profile.lines()).hasSize(1);
+    }
+
+    @Test
     void excludesShippingTaxesAndOtherCheckoutCostsFromLegacyFallback() {
         LocalDateTime asOf = LocalDateTime.of(2026, 8, 14, 12, 0);
         Cliente customer = customer(12L);
@@ -115,5 +137,10 @@ class CrmProfileCalculatorTest {
         sale.getDetalles().add(DetalleVenta.builder().idDetalle(detailId).venta(sale).disco(disc)
                 .precioUnitario(price).cantidad(quantity).manualItem(manual)
                 .artistaSnap(disc.getArtista()).albumSnap(disc.getAlbum()).build());
+    }
+
+    private DetalleVenta manualDetail(Venta sale, Long id, String artist, String album, String price) {
+        return DetalleVenta.builder().idDetalle(id).venta(sale).precioUnitario(new BigDecimal(price))
+                .cantidad(1).manualItem(true).artistaSnap(artist).albumSnap(album).build();
     }
 }

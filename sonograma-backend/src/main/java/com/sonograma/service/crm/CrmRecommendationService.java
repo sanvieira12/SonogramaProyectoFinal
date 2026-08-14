@@ -58,7 +58,7 @@ public class CrmRecommendationService {
         Disco disc = discoRepository.findById(discId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", discId));
         int limit = limit(requestedLimit);
-        Map<Long, List<Venta>> salesByCustomer = ventaRepository.findAllCompletedForCrm().stream()
+        Map<Long, List<Venta>> salesByCustomer = ventaRepository.findAllHistoryForCrm().stream()
                 .collect(java.util.stream.Collectors.groupingBy(v -> v.getCliente().getIdCliente()));
         Map<Long, List<CrmInteresCliente>> interestsByCustomer = interestRepository.findAllActiveWithCustomer().stream()
                 .collect(java.util.stream.Collectors.groupingBy(i -> i.getCliente().getIdCliente()));

@@ -17,7 +17,8 @@ public class CrmProfileCalculator {
     public CustomerProfile calculate(Cliente cliente, List<Venta> sourceSales, LocalDateTime asOf) {
         List<Venta> sales = sourceSales == null ? List.of() : sourceSales.stream()
                 .filter(Objects::nonNull)
-                .filter(v -> v.getEstado() == EstadoVenta.COMPLETADA)
+                .filter(v -> v.getEstado() == EstadoVenta.COMPLETADA
+                        || v.getEstado() == EstadoVenta.CANCELADA)
                 .filter(v -> v.getFechaVenta() != null)
                 .sorted(Comparator.comparing(Venta::getFechaVenta).reversed())
                 .toList();
@@ -38,7 +39,17 @@ public class CrmProfileCalculator {
     private List<PurchaseLine> lines(Venta sale) {
         BigDecimal factor = discountFactor(sale.getDescuentoPorcentaje());
         if (sale.getDetalles() != null && !sale.getDetalles().isEmpty()) {
-            return sale.getDetalles().stream().map(detail -> fromDetail(sale, detail, factor)).toList();
+            List<PurchaseLine> result = new ArrayList<>();
+            Set<String> legacyManualKeys = new HashSet<>();
+            for (DetalleVenta detail : sale.getDetalles()) {
+                PurchaseLine line = fromDetail(sale, detail, factor);
+                if (isLegacyManualSnapshot(detail)) {
+                    String key = legacyManualKey(detail, line);
+                    if (!legacyManualKeys.add(key)) continue;
+                }
+                result.add(line);
+            }
+            return List.copyOf(result);
         }
         if (sale.getDisco() == null) return List.of();
         BigDecimal unitPrice;
@@ -51,6 +62,20 @@ public class CrmProfileCalculator {
             unitPrice = merchandiseFallback(sale);
         }
         return List.of(fromLegacy(sale, unitPrice));
+    }
+
+    private boolean isLegacyManualSnapshot(DetalleVenta detail) {
+        return detail.getDisco() == null && Boolean.TRUE.equals(detail.getManualItem());
+    }
+
+    private String legacyManualKey(DetalleVenta detail, PurchaseLine line) {
+        return String.join("|",
+                CrmMetadataNormalizer.normalize(line.artista()),
+                CrmMetadataNormalizer.normalize(line.album()),
+                CrmMetadataNormalizer.normalize(detail.getCodigoSnap()),
+                CrmMetadataNormalizer.normalize(detail.getDescripcionSnap()),
+                line.precioUnitarioPagado() == null ? "" : line.precioUnitarioPagado().toPlainString(),
+                String.valueOf(line.cantidad()));
     }
 
     private PurchaseLine fromDetail(Venta sale, DetalleVenta detail, BigDecimal factor) {

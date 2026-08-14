@@ -22,7 +22,13 @@ INSERT INTO detalle_venta (id_venta, id_disco, precio_unitario, artista_snap, al
 SELECT v.id_venta, v.id_disco, COALESCE(v.precio_venta, 0), d.artista, d.album, d.codigo_interno
 FROM venta v
 JOIN disco d ON v.id_disco = d.id_disco
-WHERE v.id_disco IS NOT NULL;
+WHERE v.id_disco IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM detalle_venta dv
+    WHERE dv.id_venta = v.id_venta
+      AND dv.id_disco = v.id_disco
+  );
 
 -- Backfill subtotal en ventas existentes
 UPDATE venta SET subtotal = COALESCE(precio_venta, 0), descuento_porcentaje = 0

@@ -34,7 +34,7 @@ public class CrmProfileService {
 
     public CrmProfileCalculator.CustomerProfile profile(Long customerId) {
         Cliente customer = activeCustomer(customerId);
-        return calculate(customer, ventaRepository.findCompletedForCrmCustomer(customerId));
+        return calculate(customer, ventaRepository.findHistoryForCrmCustomer(customerId));
     }
 
     CrmProfileCalculator.CustomerProfile calculate(Cliente customer, List<Venta> sales) {
