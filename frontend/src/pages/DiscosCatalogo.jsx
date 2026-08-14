@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { discoService } from '../services/discoService'
 import DiscoForm from '../components/DiscoForm'
 import ConfirmModal from '../components/ConfirmModal'
@@ -344,7 +345,69 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
 
 /* Panel lateral derecho con el detalle completo del disco.
    Se abre al hacer clic en una fila. */
-function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
+function CustomerAffinityModal({ disco, onClose }) {
+  const [customers, setCustomers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!disco?.idDisco) return
+    let cancelled = false
+    api.crm.clientesRecomendados(disco.idDisco)
+      .then(data => { if (!cancelled) setCustomers(data) })
+      .catch(err => { if (!cancelled) setError(err.message || 'No se pudieron calcular los clientes afines') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [disco?.idDisco])
+
+  if (!disco) return null
+  const affinityStyles = {
+    ALTA: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400',
+    MEDIA: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
+    BAJA: 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-400',
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-900" onClick={event => event.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur dark:border-stone-800 dark:bg-stone-900/95">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-stone-500">Clientes afines</p>
+            <h2 className="font-bold text-slate-900 dark:text-white">{disco.artista} — {disco.album}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
+        </div>
+        <div className="space-y-3 p-5">
+          {loading ? <div className="py-12 text-center text-sm text-slate-400">Analizando perfiles…</div> : null}
+          {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">{error}</div> : null}
+          {!loading && !error && customers.length === 0 ? <div className="py-12 text-center text-sm text-slate-400">No hay clientes con coincidencias suficientes.</div> : null}
+          {!loading && !error ? customers.map(result => (
+            <article key={result.cliente.idCliente} className="rounded-xl border border-slate-100 p-4 dark:border-stone-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{result.cliente.nombre} {result.cliente.apellido}</h3>
+                  <p className="text-xs text-slate-400 dark:text-stone-500">{result.cliente.instagramUsuario || result.cliente.telefono || result.cliente.email || 'Sin contacto registrado'}</p>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${affinityStyles[result.nivelAfinidad] || affinityStyles.BAJA}`}>
+                  Afinidad {result.nivelAfinidad.toLowerCase()}
+                </span>
+              </div>
+              <ul className="mt-3 space-y-1 text-xs text-slate-500 dark:text-stone-400">
+                {result.razones.map(reason => <li key={reason}>• {reason}</li>)}
+              </ul>
+              <Link to={`/clientes/${result.cliente.idCliente}/seguimiento`} onClick={onClose}
+                className="mt-3 inline-block text-xs font-semibold text-[#5C7D87] hover:underline dark:text-[#7E9FA8]">
+                Ver seguimiento →
+              </Link>
+            </article>
+          )) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
   if (!disco) return null
 
   return (
@@ -427,6 +490,9 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
 
         {/* Acciones fijas al fondo */}
         <div className="p-6 pt-0 space-y-2">
+          <button type="button" onClick={() => { onViewCustomers(disco); onCerrar() }} className="btn-secondary w-full text-[#5C7D87] dark:text-[#7E9FA8]">
+            Clientes afines
+          </button>
           <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary w-full">
             Ver QR ({disco.totalCopias ?? disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
           </button>
@@ -448,7 +514,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr }) {
   )
 }
 
-function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr }) {
+function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
   const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
   const previews = loaded.discoId === disco?.idDisco
     ? loaded.previews
@@ -550,6 +616,7 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr 
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
           <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary">Ver QR</button>
+          <button type="button" onClick={() => onViewCustomers(disco)} className="btn-secondary col-span-2 text-[#5C7D87] dark:text-[#7E9FA8]">Clientes afines</button>
           <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Eliminar definitivamente</button>
         </div>
       </div>
@@ -572,6 +639,7 @@ export default function DiscosCatalogo() {
   const [hoveredDisco, setHoveredDisco] = useState(null)
   const [selectedDisco, setSelectedDisco] = useState(null)
   const [qrState, setQrState] = useState({ disco: null, loading: false, error: '' })
+  const [affinityDisco, setAffinityDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
   const [sortKey, setSortKey] = useState(null)
@@ -989,6 +1057,7 @@ export default function DiscosCatalogo() {
         onEditar={setDiscoForm}
         onDarBaja={solicitarEliminacion}
         onViewQr={abrirQr}
+        onViewCustomers={setAffinityDisco}
       />
       </div>
 
@@ -999,7 +1068,10 @@ export default function DiscosCatalogo() {
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
         onDarBaja={solicitarEliminacion}
         onViewQr={d => { abrirQr(d); setSlideOverDisco(null) }}
+        onViewCustomers={setAffinityDisco}
       />
+
+      <CustomerAffinityModal key={affinityDisco?.idDisco || 'sin-disco'} disco={affinityDisco} onClose={() => setAffinityDisco(null)} />
 
       <QrModal
         key={qrState.disco?.idDisco || 'qr-modal'}

@@ -179,6 +179,19 @@ export const api = {
     },
   },
 
+  crm: {
+    perfil: (clienteId) => request('GET', `/crm/clientes/${clienteId}/perfil`),
+    recomendaciones: (clienteId, limit = 20) =>
+      request('GET', `/crm/clientes/${clienteId}/recomendaciones?limit=${encodeURIComponent(limit)}`),
+    intereses: (clienteId) => request('GET', `/crm/clientes/${clienteId}/intereses`),
+    crearInteres: (clienteId, interes) =>
+      request('POST', `/crm/clientes/${clienteId}/intereses`, interes),
+    cambiarEstadoInteres: (clienteId, interesId, activo) =>
+      request('PATCH', `/crm/clientes/${clienteId}/intereses/${interesId}`, { activo }),
+    clientesRecomendados: (discoId, limit = 20) =>
+      request('GET', `/crm/discos/${discoId}/clientes-recomendados?limit=${encodeURIComponent(limit)}`),
+  },
+
   ventas: {
     todas: () => request('GET', '/ventas'),
     porId: (id) => request('GET', `/ventas/${id}`),

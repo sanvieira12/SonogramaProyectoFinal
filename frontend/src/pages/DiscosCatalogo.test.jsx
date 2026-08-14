@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import DiscosCatalogo from './DiscosCatalogo'
 import { discoService } from '../services/discoService'
+import { api } from '../api/sonograma'
 
 vi.mock('../services/discoService', () => ({
   discoService: {
@@ -25,6 +27,7 @@ vi.mock('../api/sonograma', () => ({
       urlDescargaCopia: vi.fn(),
       descargarCopia: vi.fn(),
     },
+    crm: { clientesRecomendados: vi.fn() },
   },
   FINANCIAL_DATA_CHANGED_EVENT: 'sonograma:financial-data-changed',
   resolveApiUrl: vi.fn(value => value || ''),
@@ -58,7 +61,7 @@ describe('Catalog permanent deletion flow', () => {
   })
 
   async function openDeleteDialog() {
-    render(<DiscosCatalogo />)
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
     await screen.findByText('Deletion Artist')
     fireEvent.click(screen.getAllByText('Deletion Artist')[0])
     fireEvent.click(await screen.findByRole('button', { name: 'Eliminar definitivamente' }))
@@ -99,5 +102,23 @@ describe('Catalog permanent deletion flow', () => {
       .toHaveTextContent('No se puede eliminar mientras tenga una reserva activa'))
     expect(screen.getAllByText('Deletion Artist').length).toBeGreaterThan(0)
     expect(discoService.getAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads reverse recommendations only when Clientes afines is opened', async () => {
+    api.crm.clientesRecomendados.mockResolvedValue([{
+      cliente: { idCliente: 9, nombre: 'Ada', apellido: 'Lovelace', instagramUsuario: '@ada' },
+      nivelAfinidad: 'ALTA', puntaje: 72,
+      razones: ['Coincide con sus géneros habituales: Techno'],
+    }])
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByText('Deletion Artist')
+    expect(api.crm.clientesRecomendados).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getAllByText('Deletion Artist')[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Clientes afines' }))
+
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument()
+    expect(api.crm.clientesRecomendados).toHaveBeenCalledWith(42)
+    expect(screen.getByText('• Coincide con sus géneros habituales: Techno')).toBeInTheDocument()
   })
 })

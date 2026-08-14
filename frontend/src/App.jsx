@@ -7,6 +7,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const DiscosCatalogo = lazy(() => import('./pages/DiscosCatalogo'))
 const Clientes = lazy(() => import('./pages/Clientes'))
+const ClienteSeguimiento = lazy(() => import('./pages/ClienteSeguimiento'))
 const NuevaVenta = lazy(() => import('./pages/NuevaVenta'))
 const Importar = lazy(() => import('./pages/Importar'))
 const Deudas = lazy(() => import('./pages/Deudas'))
@@ -79,6 +80,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/discos" element={<DiscosCatalogo />} />
               <Route path="/clientes" element={<Clientes />} />
+              <Route path="/clientes/:id/seguimiento" element={<ClienteSeguimiento />} />
               <Route path="/ventas/nueva" element={<NuevaVenta />} />
               <Route path="/pre-ventas" element={<PreVentas />} />
               <Route path="/importar" element={<Importar />} />

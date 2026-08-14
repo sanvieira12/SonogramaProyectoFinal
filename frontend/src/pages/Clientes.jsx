@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 import Paginacion from '../components/Paginacion'
 import DacBranchSelect from '../components/DacBranchSelect'
@@ -261,7 +262,7 @@ function DetailStat({ label, value }) {
   )
 }
 
-function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, compras, onClose, onSaved, onDelete }) {
+function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, compras, onClose, onSaved, onDelete, onFollow }) {
   const cliente = detalleCliente?.cliente || clienteDetalle
   const direcciones = detalleCliente?.direcciones || []
   const envios = detalleCliente?.historialEnvios || []
@@ -371,6 +372,7 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
           <p className="text-sm text-slate-400 dark:text-stone-500">{cliente.email || 'Sin mail registrado'}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => onFollow(cliente)} className="btn-primary text-sm whitespace-nowrap">Ver seguimiento</button>
           <button onClick={() => onDelete(cliente)} className="btn-secondary text-sm text-red-600 dark:text-red-400">Borrar</button>
           <button onClick={() => setEditing(v => !v)} className="btn-secondary text-sm">{editing ? 'Ver ficha' : 'Editar'}</button>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800">✕</button>
@@ -550,6 +552,7 @@ function ClienteSidePanel({ clienteDetalle, detalleCliente, loadingDetalle, comp
 }
 
 export default function Clientes() {
+  const navigate = useNavigate()
   const [clientes, setClientes] = useState([])
   const [ventas, setVentas] = useState([])
   const [deudas, setDeudas] = useState([])
@@ -873,6 +876,7 @@ export default function Clientes() {
           onClose={() => { setClienteDetalle(null); setDetalleCliente(null) }}
           onSaved={onClienteSaved}
           onDelete={handleEliminarCliente}
+          onFollow={cliente => navigate(`/clientes/${cliente.idCliente}/seguimiento`)}
         />
       )}
     </div>

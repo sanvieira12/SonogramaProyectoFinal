@@ -58,4 +58,16 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
            "LOWER(d.album) LIKE LOWER(CONCAT('%', :q, '%'))) " +
            "ORDER BY d.artista")
     List<Disco> buscarPorArtistaOAlbum(@Param("q") String q);
+
+    @Query("""
+        SELECT d, COUNT(c)
+        FROM Disco d, DiscoQrCopy c
+        WHERE c.idDisco = d.idDisco
+          AND c.estado = com.sonograma.enums.EstadoCopiaDisco.DISPONIBLE
+          AND d.estado = com.sonograma.enums.EstadoDisco.DISPONIBLE
+          AND d.catalogDeletedAt IS NULL
+        GROUP BY d
+        ORDER BY d.idDisco
+        """)
+    List<Object[]> findAvailableForCrm();
 }

@@ -194,4 +194,24 @@ describe('normalizeApiBase', () => {
       { headers: { Authorization: 'Bearer token-1' } },
     )
   })
+
+  it('uses the CRM namespace for customer profiles, interests and reverse recommendations', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('[]'),
+    })
+
+    await api.crm.perfil(7)
+    await api.crm.crearInteres(7, { tipo: 'ARTISTA', texto: 'Drexciya' })
+    await api.crm.cambiarEstadoInteres(7, 3, false)
+    await api.crm.clientesRecomendados(42)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/crm/clientes/7/perfil', expect.objectContaining({ method: 'GET' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/crm/clientes/7/intereses', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/crm/clientes/7/intereses/3', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ activo: false }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/crm/discos/42/clientes-recomendados?limit=20', expect.objectContaining({ method: 'GET' }))
+  })
 })

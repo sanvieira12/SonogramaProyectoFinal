@@ -19,6 +19,30 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
 
     List<Venta> findByEstado(EstadoVenta estado);
 
+    @Query("""
+        SELECT DISTINCT v FROM Venta v
+        JOIN FETCH v.cliente c
+        LEFT JOIN FETCH v.disco legacyDisco
+        LEFT JOIN FETCH v.detalles detalle
+        LEFT JOIN FETCH detalle.disco detalleDisco
+        WHERE c.idCliente = :clienteId
+          AND v.estado = com.sonograma.enums.EstadoVenta.COMPLETADA
+        ORDER BY v.fechaVenta DESC, v.idVenta DESC
+        """)
+    List<Venta> findCompletedForCrmCustomer(@Param("clienteId") Long clienteId);
+
+    @Query("""
+        SELECT DISTINCT v FROM Venta v
+        JOIN FETCH v.cliente c
+        LEFT JOIN FETCH v.disco legacyDisco
+        LEFT JOIN FETCH v.detalles detalle
+        LEFT JOIN FETCH detalle.disco detalleDisco
+        WHERE v.estado = com.sonograma.enums.EstadoVenta.COMPLETADA
+          AND c.activo = true
+        ORDER BY v.cliente.idCliente, v.fechaVenta DESC, v.idVenta DESC
+        """)
+    List<Venta> findAllCompletedForCrm();
+
     /** Fetches all profit inputs for a period in one query, excluding cancelled sales. */
     @Query("""
         SELECT DISTINCT v FROM Venta v
