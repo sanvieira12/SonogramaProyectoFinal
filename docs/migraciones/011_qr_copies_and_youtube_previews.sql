@@ -33,4 +33,23 @@ CROSS JOIN LATERAL generate_series(
 ) AS n(copy_number)
 ON CONFLICT DO NOTHING;
 
+-- Deploys replay this migration. If the permanent Catalog deletion marker is
+-- already present, do not recreate inventory copies for historical tombstones.
+-- Dynamic SQL keeps first-time installations compatible because migration 037
+-- adds catalog_deleted_at later in the sequence.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'disco'
+          AND column_name = 'catalog_deleted_at'
+    ) THEN
+        EXECUTE 'DELETE FROM disco_qr_copy c USING disco d '
+             || 'WHERE c.id_disco = d.id_disco AND d.catalog_deleted_at IS NOT NULL';
+    END IF;
+END
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_disco_qr_copy_disco ON disco_qr_copy(id_disco);
