@@ -50,6 +50,12 @@ public class DiscogsImportJobDTO {
     private int linksDetected;
     private int missingDiscogsLinks;
     private int warnings;
+    private int rowsDetected;
+    private int rowsImported;
+    private int rowsRequiringReview;
+    private int rowsWithFullMetadata;
+    private int rowsWithWarnings;
+    private int rowsTechnicallyImpossible;
     private int metadataFailed;
     private int coversPending;
     private int youtubeTracksMissing;

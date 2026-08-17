@@ -264,9 +264,8 @@ function stepLabel(job, estado, processing) {
 function statusLabel(row) {
   if (row.catalogImportStatus === 'already_imported') return 'Ya importada'
   if (row.catalogImportStatus === 'imported') return 'Importada'
-  if (row.catalogImportStatus === 'skipped_sold') return 'Vendida — omitida'
-  if (row.catalogImportStatus === 'skipped_reserved') return 'Reservada — omitida'
-  if (row.metadataStatus === 'missing_link') return 'Sin link — revisión manual'
+  if (row.catalogImportStatus === 'manual_review') return 'Importación técnicamente imposible — revisión manual'
+  if (row.metadataStatus === 'missing_link') return 'Sin link — lista para importar con revisión'
   if (row.metadataStatus === 'rate_limited') return 'Reintentos automáticos agotados'
   if (row.metadataStatus === 'processing') return 'Consultando Discogs'
   if (row.metadataStatus === 'failed') return row.metadataErrorCode === 'MASTER_RESOLUTION_FAILED'
@@ -294,9 +293,9 @@ function ExcelLinks() {
     const rows = job?.rows || []
     return rows.filter(row => {
       if (filter === 'all') return true
-      if (filter === 'available') return row.sourceStatus === 'DISPONIBLE' && !['sold', 'reserved'].includes(row.status)
-      if (filter === 'sold') return row.status === 'sold'
-      if (filter === 'reserved') return row.status === 'reserved'
+      if (filter === 'available') return row.sourceStatus === 'DISPONIBLE'
+      if (filter === 'sold') return row.sourceStatus === 'VENDIDO'
+      if (filter === 'reserved') return row.sourceStatus === 'RESERVADO'
       if (filter === 'invalid') return row.metadataStatus === 'missing_link'
       if (filter === 'pending') return ['pending', 'processing', 'rate_limited', 'failed_retryable'].includes(row.metadataStatus)
       if (filter === 'failed') return row.metadataStatus === 'failed' || ['failed', 'failed_retryable', 'missing_local_file'].includes(row.coverStatus)
@@ -363,7 +362,7 @@ function ExcelLinks() {
     }
   }
 
-  async function importarDisponibles() {
+  async function importarFilasIdentificables() {
     setEstado('saving')
     try {
       setJob(await api.importaciones.discogsImportarJob(job.id))
@@ -421,7 +420,7 @@ function ExcelLinks() {
       <div>
         <h3 className="font-semibold text-slate-800 dark:text-stone-200 text-sm mb-1">Importar desde Excel con links de Discogs</h3>
         <p className="text-xs text-slate-500 dark:text-stone-400">
-          Lee links visibles e hipervínculos embebidos de releases y masters. El procesamiento continúa en segundo plano.
+          Lee todas las filas, intenta enriquecerlas y permite importar cada registro identificable como USADO. Los estados del Excel se conservan solo para revisión.
         </p>
       </div>
 
@@ -476,14 +475,19 @@ function ExcelLinks() {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-2">
             {[
-              ['Filas Excel leídas', job.realRowsRead ?? job.totalRowsRead],
+              ['Filas detectadas', job.rowsDetected ?? job.realRowsRead ?? job.totalRowsRead],
+              ['Filas importadas', job.rowsImported],
+              ['Requieren revisión', job.rowsRequiringReview],
+              ['Metadata completa', job.rowsWithFullMetadata],
+              ['Con advertencias', job.rowsWithWarnings],
+              ['Imposibles de importar', job.rowsTechnicallyImpossible],
               ['Links detectados', job.linksDetected],
               ['Sin link Discogs', job.missingDiscogsLinks],
               ['Filas vacías ignoradas', job.blankRowsIgnored],
               ['Release IDs', job.validReleaseUrls],
               ['Master IDs', job.validMasterUrls],
-              ['Vendidos', job.soldRows],
-              ['Reservados', job.reservedRows],
+              ['Estado Excel: vendidos', job.soldRows],
+              ['Estado Excel: reservados', job.reservedRows],
               ['Metadata obtenida', `${job.metadataFetched || 0}/${job.linksDetected || 0}`],
               ['Metadata pendiente', job.metadataPending],
               ['Metadata fallida', job.metadataFailed],
@@ -491,8 +495,7 @@ function ExcelLinks() {
               ['Portadas faltantes', job.coversMissing],
               ['YouTube encontrados', job.youtubeLinksFound],
               ['Tracks sin YouTube', job.youtubeTracksMissing],
-              ['Listos para importar', job.readyToImport],
-              ['Importados', job.imported],
+              ['Identificables por importar', job.readyToImport],
               ['Ya importados', job.alreadyImported],
               ['QR creados', job.qrEntriesCreated],
               ['Advertencias', job.warnings],
@@ -518,7 +521,7 @@ function ExcelLinks() {
           )}
           {job.rateLimited > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-              Discogs siguió limitando solicitudes después de los reintentos automáticos. Las filas afectadas quedaron persistidas para reintento manual.
+              Discogs siguió limitando solicitudes después de los reintentos automáticos. Las filas afectadas pueden importarse con la información disponible y reintentarse después.
             </div>
           )}
 
@@ -543,14 +546,14 @@ function ExcelLinks() {
 
           <div className="flex flex-wrap gap-2">
             {[
-              ['all', 'All'],
-              ['available', 'Available'],
-              ['sold', 'Sold'],
-              ['reserved', 'Reserved'],
-              ['invalid', 'Invalid'],
-              ['pending', 'Metadata pending'],
-              ['failed', 'Failed'],
-              ['imported', 'Imported'],
+              ['all', 'Todas'],
+              ['available', 'Estado Excel: disponible'],
+              ['sold', 'Estado Excel: vendido'],
+              ['reserved', 'Estado Excel: reservado'],
+              ['invalid', 'Sin link'],
+              ['pending', 'Metadata pendiente'],
+              ['failed', 'Con fallas de enriquecimiento'],
+              ['imported', 'Importadas'],
             ].map(([key, label]) => (
               <button key={key} onClick={() => setFilter(key)}
                 className={`px-3 py-1.5 rounded-md border text-xs transition-colors
@@ -611,6 +614,7 @@ function ExcelLinks() {
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500">
                       <div>{row.manualCondition || '—'} · {row.manualPriceUyu != null ? `$${row.manualPriceUyu}` : `sin precio${row.rawPrice ? ` (${row.rawPrice})` : ''}`}</div>
                       <div>{row.manualGenre || '—'} · {row.sourceStatus || '—'}</div>
+                      <div className="font-medium text-emerald-700 dark:text-emerald-300">Catálogo: USADO</div>
                       {row.internalCode && <div className="font-mono">{row.internalCode}</div>}
                       {row.observation && <div className="text-amber-700 dark:text-amber-300">Obs: {row.observation}</div>}
                     </td>
@@ -652,7 +656,8 @@ function ExcelLinks() {
                 <span>✓ Metadata obtenida: {job.metadataFetched || 0}</span>
                 <span>✓ Portadas almacenadas: {job.coversDownloaded || 0}</span>
                 <span>✓ Links YouTube: {job.youtubeLinksFound || 0}</span>
-                <span>✓ Listos para catálogo: {job.readyToImport || 0}</span>
+                <span>✓ Importadas al catálogo: {job.rowsImported || 0}</span>
+                <span>✓ Requieren revisión: {job.rowsRequiringReview || 0}</span>
               </div>
               {(job.rows || []).some(row => row.errorMessage || row.warningMessage) && (
                 <div className="mt-3 space-y-1">
@@ -669,9 +674,9 @@ function ExcelLinks() {
           )}
 
           <div className="flex flex-wrap gap-3">
-            <button onClick={importarDisponibles} disabled={readyCount === 0 || processing || estado === 'saving'}
+            <button onClick={importarFilasIdentificables} disabled={readyCount === 0 || processing || estado === 'saving'}
               className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
-              {estado === 'saving' ? 'Importando…' : `Importar al catálogo (${readyCount})`}
+              {estado === 'saving' ? 'Importando…' : `Importar todas las filas identificables (${readyCount})`}
             </button>
             <button onClick={retryPending} disabled={processing || !(job.metadataPending || job.rateLimited || job.failed)}
               className="px-5 py-2.5 rounded-lg border border-[#7E9FA8]/50 text-[#5C7D87] dark:text-[#7E9FA8] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">

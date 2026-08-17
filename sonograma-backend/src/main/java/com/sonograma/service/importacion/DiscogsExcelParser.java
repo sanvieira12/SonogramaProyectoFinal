@@ -112,7 +112,7 @@ public class DiscogsExcelParser {
                     observation,
                     sourceStatus,
                     internalCode,
-                    rowStatusForSourceStatus(sourceStatus),
+                    DiscogsImportRowStatus.PARSED,
                     joinWarnings(warnings, price.warning())
             );
         }
@@ -137,7 +137,8 @@ public class DiscogsExcelParser {
                     sourceStatus,
                     internalCode,
                     DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
-                    appendWarning("MISSING_DISCOGS_LINK — Fila con datos, pero sin URL de Discogs",
+                    appendWarning(
+                            "MANUAL_REVIEW_REQUIRED — MISSING_DISCOGS_LINK — Fila con datos identificatorios, pero sin URL de Discogs",
                             joinWarnings(warnings, price.warning()))
             );
         }
@@ -161,7 +162,8 @@ public class DiscogsExcelParser {
                 sourceStatus,
                 internalCode,
                 DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
-                appendWarning("MISSING_DISCOGS_LINK — Fila con datos, pero sin URL de Discogs",
+                appendWarning(
+                        "MANUAL_REVIEW_REQUIRED — MISSING_DISCOGS_LINK — No hay artista, título ni referencia Discogs suficientes para crear un producto",
                         joinWarnings(warnings, price.warning()))
         );
     }
@@ -437,21 +439,24 @@ public class DiscogsExcelParser {
     }
 
     private PriceParse parsePrice(String rawPrice, int excelRowNumber, Integer columnIndex) {
-        if (blank(rawPrice)) return new PriceParse(null, null);
+        if (blank(rawPrice)) {
+            return new PriceParse(null,
+                    "PRICE_REQUIRES_REVIEW — El precio está vacío y se importará sin precio.");
+        }
         String normalized = rawPrice.trim().toUpperCase(Locale.ROOT);
         if (normalized.contains("SIN PRECIO") || normalized.equals("S/P")) {
-            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "PRICE_REQUIRES_REVIEW — NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no contiene un valor numérico."));
         }
         String numeric = rawPrice.replaceAll("[^0-9,.-]", "").trim();
         if (numeric.isBlank()) {
-            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "PRICE_REQUIRES_REVIEW — NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no contiene un valor numérico."));
         }
         try {
             return new PriceParse(new BigDecimal(normalizePriceNumber(numeric)), null);
         } catch (NumberFormatException ex) {
-            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "PRICE_REQUIRES_REVIEW — NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no pudo convertirse a un número."));
         }
     }
@@ -508,12 +513,6 @@ public class DiscogsExcelParser {
             if ("reservado".equals(normalized)) return "RESERVADO";
         }
         return explicit;
-    }
-
-    private DiscogsImportRowStatus rowStatusForSourceStatus(String sourceStatus) {
-        if ("VENDIDO".equals(sourceStatus)) return DiscogsImportRowStatus.SOLD;
-        if ("RESERVADO".equals(sourceStatus)) return DiscogsImportRowStatus.RESERVED;
-        return DiscogsImportRowStatus.PARSED;
     }
 
     private String appendWarning(String message, String warning) {

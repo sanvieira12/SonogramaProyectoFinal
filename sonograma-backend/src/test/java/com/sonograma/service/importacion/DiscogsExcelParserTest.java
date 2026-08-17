@@ -100,7 +100,7 @@ class DiscogsExcelParserTest {
             var soldRow = parsed.rows().get(1);
             assertThat(soldRow.discogsType()).isEqualTo("release");
             assertThat(soldRow.discogsId()).isEqualTo(20923924L);
-            assertThat(soldRow.status()).isEqualTo(DiscogsImportRowStatus.SOLD);
+            assertThat(soldRow.status()).isEqualTo(DiscogsImportRowStatus.PARSED);
             assertThat(soldRow.manualPriceUyu()).isNull();
             assertThat(soldRow.errorMessage()).contains("SIN PRECIO");
         }
@@ -146,7 +146,7 @@ class DiscogsExcelParserTest {
 
             assertThat(rows.get(0).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
             assertThat(rows.get(1).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
-            assertThat(rows.get(1).errorMessage()).isNull();
+            assertThat(rows.get(1).errorMessage()).contains("PRICE_REQUIRES_REVIEW");
         }
     }
 
@@ -333,8 +333,8 @@ class DiscogsExcelParserTest {
             assertThat(parsed.rows()).filteredOn(row -> "release".equals(row.discogsType())).hasSize(24);
             assertThat(parsed.rows()).filteredOn(row -> "master".equals(row.discogsType())).hasSize(20);
             assertThat(parsed.rows()).filteredOn(row -> "hyperlink".equals(row.urlSource())).hasSize(44);
-            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.PARSED).hasSize(41);
-            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.SOLD).hasSize(3);
+            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.PARSED).hasSize(44);
+            assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.SOLD).isEmpty();
             assertThat(parsed.rows()).filteredOn(row -> row.status() == DiscogsImportRowStatus.IGNORED).isEmpty();
             assertThat(parsed.rows()).noneMatch(row -> row.manualGenre() != null
                     && row.manualGenre().contains("DUMMYFUNCTION"));

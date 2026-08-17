@@ -40,6 +40,21 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
             @Param("discogsId") Long discogsId
     );
 
+    @Query("""
+            SELECT r FROM DiscogsImportRow r
+            JOIN FETCH r.importedCatalogProduct p
+            JOIN r.job j
+            WHERE j.sourceFingerprint = :fingerprint
+              AND j.idDiscogsImportJob <> :jobId
+              AND r.sourceExcelRowNumber = :rowNumber
+            ORDER BY j.createdAt DESC
+            """)
+    List<DiscogsImportRow> findPriorImportedPhysicalRows(
+            @Param("fingerprint") String fingerprint,
+            @Param("jobId") Long jobId,
+            @Param("rowNumber") Integer rowNumber
+    );
+
     @EntityGraph(attributePaths = "importedCatalogProduct")
     List<DiscogsImportRow> findByResolvedReleaseIdAndImportedCatalogProductIsNotNullOrderByIdDiscogsImportRowDesc(
             Long resolvedReleaseId
