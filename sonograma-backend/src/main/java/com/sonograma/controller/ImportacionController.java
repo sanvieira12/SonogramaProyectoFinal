@@ -3,6 +3,7 @@ package com.sonograma.controller;
 import com.sonograma.dto.DiscoImportPreviewDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscogsImportJobDTO;
+import com.sonograma.dto.DiscogsZipStatusDTO;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
@@ -127,17 +128,25 @@ public class ImportacionController {
         return ResponseEntity.ok(discogsImportJobService.importParsedRows(jobId));
     }
 
-    @GetMapping("/discogs/jobs/{jobId}/covers.zip")
-    public ResponseEntity<StreamingResponseBody> discogsCoversZip(@PathVariable Long jobId) throws IOException {
-        Path zip = discogsImportJobService.buildCoversZip(jobId);
+    @PostMapping("/discogs/jobs/{jobId}/covers-zip")
+    public ResponseEntity<DiscogsZipStatusDTO> prepareDiscogsCoversZip(@PathVariable Long jobId) {
+        return ResponseEntity.accepted().body(discogsImportJobService.prepareCoversZip(jobId));
+    }
+
+    @GetMapping("/discogs/jobs/{jobId}/covers-zip/status")
+    public ResponseEntity<DiscogsZipStatusDTO> discogsCoversZipStatus(@PathVariable Long jobId) {
+        return ResponseEntity.ok(discogsImportJobService.getCoversZipStatus(jobId));
+    }
+
+    @GetMapping({
+            "/discogs/jobs/{jobId}/covers-zip/download",
+            "/discogs/jobs/{jobId}/covers.zip"
+    })
+    public ResponseEntity<StreamingResponseBody> downloadDiscogsCoversZip(@PathVariable Long jobId)
+            throws IOException {
+        Path zip = discogsImportJobService.getPreparedCoversZip(jobId);
         long size = Files.size(zip);
-        StreamingResponseBody body = output -> {
-            try {
-                Files.copy(zip, output);
-            } finally {
-                Files.deleteIfExists(zip);
-            }
-        };
+        StreamingResponseBody body = output -> Files.copy(zip, output);
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,

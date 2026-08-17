@@ -13,6 +13,4 @@ public interface DiscogsImportJobRepository extends JpaRepository<DiscogsImportJ
     @EntityGraph(attributePaths = {"rows", "rows.importedCatalogProduct"})
     @Query("SELECT j FROM DiscogsImportJob j WHERE j.idDiscogsImportJob = :id")
     Optional<DiscogsImportJob> findDetailedByIdDiscogsImportJob(@Param("id") Long idDiscogsImportJob);
-
-    Optional<DiscogsImportJob> findFirstBySourceFingerprint(String sourceFingerprint);
 }

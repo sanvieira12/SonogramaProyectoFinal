@@ -69,53 +69,28 @@ public class DiscogsExcelParser {
         String buyer = value(row, columns.get("buyer"), evaluator, warnings);
         if (Set.of("roto", "rayado").contains(normalize(buyer))) buyer = null;
         String observation = observation(row, columns, evaluator, warnings, buyer);
-        String hyperlinkUrl = null;
-        String visibleCellValue = null;
-        String urlSource = null;
-        DiscogsLinkParser.DiscogsLink link = null;
-
-        if (row != null) {
+        Integer expectedUrlColumn = columns.get("url");
+        LinkExtraction extractedLink = extractFromCell(
+                row == null || expectedUrlColumn == null ? null : row.getCell(expectedUrlColumn),
+                evaluator,
+                warnings,
+                false
+        );
+        if (extractedLink.link() == null && row != null) {
             for (Cell cell : row) {
-                Hyperlink hyperlink = cell.getHyperlink();
-                if (hyperlink == null) continue;
-                if (hyperlinkUrl == null) {
-                    hyperlinkUrl = hyperlink.getAddress();
-                    visibleCellValue = cellValue(cell, evaluator, warnings).value();
-                }
-                Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(hyperlink.getAddress());
-                if (parsed.isPresent()) {
-                    hyperlinkUrl = hyperlink.getAddress();
-                    visibleCellValue = cellValue(cell, evaluator, warnings).value();
-                    link = parsed.get();
-                    urlSource = "hyperlink";
+                if (expectedUrlColumn != null && cell.getColumnIndex() == expectedUrlColumn) continue;
+                LinkExtraction fallback = extractFromCell(cell, evaluator, warnings, true);
+                if (fallback.link() != null) {
+                    extractedLink = fallback;
                     break;
                 }
             }
         }
 
-        if (link == null && row != null) {
-            for (Cell cell : row) {
-                String formulaTarget = formulaHyperlinkTarget(cell);
-                if (formulaTarget != null) {
-                    Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(formulaTarget);
-                    if (parsed.isPresent()) {
-                        hyperlinkUrl = formulaTarget;
-                        visibleCellValue = cellValue(cell, evaluator, warnings).value();
-                        link = parsed.get();
-                        urlSource = "hyperlink_formula";
-                        break;
-                    }
-                }
-                String visible = cellValue(cell, evaluator, warnings).value();
-                Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(visible);
-                if (parsed.isPresent()) {
-                    visibleCellValue = visible;
-                    link = parsed.get();
-                    urlSource = sourceFromVisibleValue(visible);
-                    break;
-                }
-            }
-        }
+        String hyperlinkUrl = extractedLink.hyperlinkUrl();
+        String visibleCellValue = extractedLink.visibleCellValue();
+        String urlSource = extractedLink.urlSource();
+        DiscogsLinkParser.DiscogsLink link = extractedLink.link();
 
         if (link != null) {
             ArtistTitle extracted = extractArtistTitleFromDiscogsText(visibleCellValue);
@@ -162,7 +137,8 @@ public class DiscogsExcelParser {
                     sourceStatus,
                     internalCode,
                     DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
-                    appendWarning("Fila con datos, pero sin URL de Discogs", joinWarnings(warnings, price.warning()))
+                    appendWarning("MISSING_DISCOGS_LINK — Fila con datos, pero sin URL de Discogs",
+                            joinWarnings(warnings, price.warning()))
             );
         }
 
@@ -184,9 +160,39 @@ public class DiscogsExcelParser {
                 observation,
                 sourceStatus,
                 internalCode,
-                DiscogsImportRowStatus.IGNORED,
-                appendWarning("Fila ignorada: no contiene un link Discogs válido", joinWarnings(warnings, price.warning()))
-            );
+                DiscogsImportRowStatus.NEEDS_MANUAL_MATCH,
+                appendWarning("MISSING_DISCOGS_LINK — Fila con datos, pero sin URL de Discogs",
+                        joinWarnings(warnings, price.warning()))
+        );
+    }
+
+    private LinkExtraction extractFromCell(Cell cell, FormulaEvaluator evaluator,
+                                           List<String> warnings, boolean fallback) {
+        if (cell == null) return LinkExtraction.empty();
+        String visible = cellValue(cell, evaluator, warnings).value();
+        Hyperlink hyperlink = cell.getHyperlink();
+        if (hyperlink != null) {
+            Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(hyperlink.getAddress());
+            if (parsed.isPresent()) {
+                return new LinkExtraction(parsed.get(), hyperlink.getAddress(), visible,
+                        fallback ? "fallback_hyperlink" : "hyperlink");
+            }
+        }
+        String formulaTarget = formulaHyperlinkTarget(cell);
+        if (formulaTarget != null) {
+            Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(formulaTarget);
+            if (parsed.isPresent()) {
+                return new LinkExtraction(parsed.get(), formulaTarget, visible,
+                        fallback ? "fallback_hyperlink_formula" : "hyperlink_formula");
+            }
+        }
+        Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(visible);
+        if (parsed.isPresent()) {
+            String source = sourceFromVisibleValue(visible);
+            return new LinkExtraction(parsed.get(), null, visible,
+                    fallback ? "fallback_" + source : source);
+        }
+        return new LinkExtraction(null, null, blankToNull(visible), null);
     }
 
     private HeaderInfo detectHeader(Sheet sheet, FormulaEvaluator evaluator) throws IOException {
@@ -195,6 +201,7 @@ public class DiscogsExcelParser {
             Row row = sheet.getRow(rowIndex);
             if (row == null) continue;
             Map<String, Integer> columns = new HashMap<>();
+            Integer genericUrlColumn = null;
             List<String> extraColumns = new ArrayList<>();
             for (Cell cell : row) {
                 String rawHeader = cellValue(cell, evaluator, new ArrayList<>()).value().trim();
@@ -203,8 +210,10 @@ public class DiscogsExcelParser {
                     columns.putIfAbsent("artist", cell.getColumnIndex());
                 } else if (matchesAlias(header, "album", "titulo", "title")) {
                     columns.putIfAbsent("title", cell.getColumnIndex());
-                } else if (matchesAlias(header, "linkdediscogs", "linkdiscogs", "discogs", "discogsurl", "urldiscogs", "enlacediscogs", "link", "url")) {
+                } else if (matchesAlias(header, "linkdediscogs", "linkdiscogs", "discogs", "discogsurl", "urldiscogs", "enlacediscogs")) {
                     columns.putIfAbsent("url", cell.getColumnIndex());
+                } else if (matchesAlias(header, "link", "url")) {
+                    genericUrlColumn = genericUrlColumn == null ? cell.getColumnIndex() : genericUrlColumn;
                 } else if (matchesAlias(header, "condicion", "condition", "estadodeldisco", "mediacondition")) {
                     columns.putIfAbsent("condition", cell.getColumnIndex());
                 } else if (matchesAlias(header, "precio", "precioventa", "preciodeventa", "saleprice", "price")) {
@@ -222,6 +231,9 @@ public class DiscogsExcelParser {
                 } else if (!rawHeader.isBlank()) {
                     extraColumns.add(rawHeader);
                 }
+            }
+            if (!columns.containsKey("url") && genericUrlColumn != null) {
+                columns.put("url", genericUrlColumn);
             }
             if (columns.containsKey("url") || columns.containsKey("artist") || columns.containsKey("title")) {
                 return new HeaderInfo(rowIndex, columns,
@@ -255,15 +267,17 @@ public class DiscogsExcelParser {
     private CellRead cellValue(Cell cell, FormulaEvaluator evaluator, List<String> warnings) {
         if (cell == null) return new CellRead("", null);
         if (cell.getCellType() == CellType.FORMULA) {
-            CellType cachedType = cell.getCachedFormulaResultType();
-            if (cachedType != CellType.BLANK && cachedType != CellType.ERROR) {
-                return new CellRead(typedCellValue(cell, cachedType), null);
-            }
-            String fallback = ifErrorFallback(cell.getCellFormula());
-            if (cell.getCellFormula().toLowerCase(Locale.ROOT).contains("_xlfn.")) {
+            String formula = cell.getCellFormula();
+            String fallback = ifErrorFallback(formula);
+            if (formula.toLowerCase(Locale.ROOT).contains("_xlfn.")) {
                 String warning = formulaWarning(cell, fallback);
                 warnings.add(warning);
                 return new CellRead(fallback, warning);
+            }
+            CellType cachedType = cell.getCachedFormulaResultType();
+            if (cachedType != CellType.BLANK && cachedType != CellType.ERROR) {
+                String cached = typedCellValue(cell, cachedType);
+                if (!invalidFormulaValue(cached)) return new CellRead(cached, null);
             }
             try {
                 CellValue evaluated = evaluator.evaluate(cell);
@@ -376,7 +390,15 @@ public class DiscogsExcelParser {
         String detail = fallback.isBlank()
                 ? "no se pudo calcular la fórmula; se dejó vacía"
                 : "no se pudo calcular la fórmula; se utilizó el texto alternativo \"" + fallback + "\"";
-        return "Fila " + (cell.getRowIndex() + 1) + ": " + detail + ".";
+        return "UNSUPPORTED_EXCEL_FORMULA — Fila " + (cell.getRowIndex() + 1) + ": " + detail + ".";
+    }
+
+    private boolean invalidFormulaValue(String value) {
+        if (blank(value)) return false;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("#name")
+                || normalized.contains("_xlfn.")
+                || normalized.contains("dummyfunction");
     }
 
     private String joinWarnings(List<String> warnings, String additional) {
@@ -418,18 +440,18 @@ public class DiscogsExcelParser {
         if (blank(rawPrice)) return new PriceParse(null, null);
         String normalized = rawPrice.trim().toUpperCase(Locale.ROOT);
         if (normalized.contains("SIN PRECIO") || normalized.equals("S/P")) {
-            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no contiene un valor numérico."));
         }
         String numeric = rawPrice.replaceAll("[^0-9,.-]", "").trim();
         if (numeric.isBlank()) {
-            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no contiene un valor numérico."));
         }
         try {
             return new PriceParse(new BigDecimal(normalizePriceNumber(numeric)), null);
         } catch (NumberFormatException ex) {
-            return new PriceParse(null, cellIssue(excelRowNumber, columnIndex, rawPrice,
+            return new PriceParse(null, "NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
                     "El precio no pudo convertirse a un número."));
         }
     }
@@ -513,6 +535,17 @@ public class DiscogsExcelParser {
     private record PriceParse(BigDecimal value, String warning) {}
 
     private record CellRead(String value, String warning) {}
+
+    private record LinkExtraction(
+            DiscogsLinkParser.DiscogsLink link,
+            String hyperlinkUrl,
+            String visibleCellValue,
+            String urlSource
+    ) {
+        static LinkExtraction empty() {
+            return new LinkExtraction(null, null, null, null);
+        }
+    }
 
     public record ParsedSheet(String sheetName, int physicalExcelLastRow, int ignoredBlankRows,
                               List<ParsedRow> rows, List<String> extraColumns) {}

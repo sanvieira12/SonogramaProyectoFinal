@@ -473,8 +473,14 @@ export const api = {
     discogsImportarJob: (jobId) =>
       request('POST', `/importaciones/discogs/jobs/${jobId}/importar`),
 
+    discogsPrepareCoversZip: (jobId) =>
+      request('POST', `/importaciones/discogs/jobs/${jobId}/covers-zip`),
+
+    discogsCoversZipStatus: (jobId) =>
+      request('GET', `/importaciones/discogs/jobs/${jobId}/covers-zip/status`),
+
     discogsCoversZip: async (jobId) => {
-      const res = await fetch(`${BASE}/importaciones/discogs/jobs/${jobId}/covers.zip`, {
+      const res = await fetch(`${BASE}/importaciones/discogs/jobs/${jobId}/covers-zip/download`, {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
       })
       if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')

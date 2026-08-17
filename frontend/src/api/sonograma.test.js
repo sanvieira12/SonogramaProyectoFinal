@@ -167,8 +167,31 @@ describe('normalizeApiBase', () => {
       contentDisposition: 'attachment; filename="discogs-covers.zip"',
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/importaciones/discogs/jobs/42/covers.zip',
+      '/api/importaciones/discogs/jobs/42/covers-zip/download',
       { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
+
+  it('starts and reads persisted Discogs ZIP preparation progress', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"zipStatus":"preparing","zipProcessedCovers":3}'),
+    })
+
+    await expect(api.importaciones.discogsPrepareCoversZip(42)).resolves.toMatchObject({
+      zipStatus: 'preparing',
+      zipProcessedCovers: 3,
+    })
+    await api.importaciones.discogsCoversZipStatus(42)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      '/api/importaciones/discogs/jobs/42/covers-zip',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      '/api/importaciones/discogs/jobs/42/covers-zip/status',
+      expect.objectContaining({ method: 'GET' }),
     )
   })
 

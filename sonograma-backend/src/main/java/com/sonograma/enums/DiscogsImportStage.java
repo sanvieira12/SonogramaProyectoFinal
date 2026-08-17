@@ -1,0 +1,14 @@
+package com.sonograma.enums;
+
+public enum DiscogsImportStage {
+    READING_EXCEL,
+    PARSING_ROWS,
+    RESOLVING_DISCOGS,
+    FETCHING_METADATA,
+    DOWNLOADING_COVERS,
+    FETCHING_YOUTUBE,
+    READY_FOR_CATALOG_IMPORT,
+    IMPORTING_CATALOG,
+    PREPARING_ZIP,
+    COMPLETED
+}

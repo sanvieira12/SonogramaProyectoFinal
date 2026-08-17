@@ -1,6 +1,10 @@
 package com.sonograma.entity;
 
 import com.sonograma.enums.DiscogsImportRowStatus;
+import com.sonograma.enums.DiscogsMetadataStatus;
+import com.sonograma.enums.DiscogsCoverStatus;
+import com.sonograma.enums.DiscogsYoutubeStatus;
+import com.sonograma.enums.DiscogsCatalogImportStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -35,7 +39,7 @@ public class DiscogsImportRow {
     @Column(name = "normalized_discogs_url", columnDefinition = "TEXT")
     private String normalizedDiscogsUrl;
 
-    @Column(name = "url_source", length = 20)
+    @Column(name = "url_source", length = 40)
     private String urlSource;
 
     @Column(name = "discogs_type", length = 20)
@@ -112,6 +116,52 @@ public class DiscogsImportRow {
 
     @Column(name = "tracks_json", columnDefinition = "TEXT")
     private String tracksJson;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "metadata_status", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsMetadataStatus metadataStatus = DiscogsMetadataStatus.PENDING;
+
+    @Column(name = "metadata_error_code", length = 80)
+    private String metadataErrorCode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cover_status", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsCoverStatus coverStatus = DiscogsCoverStatus.PENDING;
+
+    @Column(name = "cover_error_code", length = 80)
+    private String coverErrorCode;
+
+    @Column(name = "cover_local_path", columnDefinition = "TEXT")
+    private String coverLocalPath;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "youtube_status", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsYoutubeStatus youtubeStatus = DiscogsYoutubeStatus.PENDING;
+
+    @Column(name = "youtube_error_code", length = 80)
+    private String youtubeErrorCode;
+
+    @Column(name = "youtube_tracks_found", nullable = false)
+    @Builder.Default
+    private Integer youtubeTracksFound = 0;
+
+    @Column(name = "youtube_tracks_missing", nullable = false)
+    @Builder.Default
+    private Integer youtubeTracksMissing = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "catalog_import_status", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsCatalogImportStatus catalogImportStatus = DiscogsCatalogImportStatus.PENDING;
+
+    @Column(name = "catalog_import_error_code", length = 80)
+    private String catalogImportErrorCode;
+
+    @Column(name = "warning_message", columnDefinition = "TEXT")
+    private String warningMessage;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)

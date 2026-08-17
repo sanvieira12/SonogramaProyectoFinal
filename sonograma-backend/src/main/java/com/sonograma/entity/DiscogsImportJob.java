@@ -1,6 +1,8 @@
 package com.sonograma.entity;
 
 import com.sonograma.enums.DiscogsImportJobStatus;
+import com.sonograma.enums.DiscogsImportStage;
+import com.sonograma.enums.DiscogsZipStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -45,8 +47,43 @@ public class DiscogsImportJob {
     @Builder.Default
     private DiscogsImportJobStatus status = DiscogsImportJobStatus.PENDING;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stage", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsImportStage stage = DiscogsImportStage.PARSING_ROWS;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "zip_status", nullable = false, length = 50)
+    @Builder.Default
+    private DiscogsZipStatus zipStatus = DiscogsZipStatus.NOT_STARTED;
+
+    @Column(name = "zip_total_covers", nullable = false)
+    @Builder.Default
+    private Integer zipTotalCovers = 0;
+
+    @Column(name = "zip_processed_covers", nullable = false)
+    @Builder.Default
+    private Integer zipProcessedCovers = 0;
+
+    @Column(name = "zip_added_covers", nullable = false)
+    @Builder.Default
+    private Integer zipAddedCovers = 0;
+
+    @Column(name = "zip_failed_covers", nullable = false)
+    @Builder.Default
+    private Integer zipFailedCovers = 0;
+
+    @Column(name = "zip_current_release", length = 500)
+    private String zipCurrentRelease;
+
+    @Column(name = "zip_file_name", length = 255)
+    private String zipFileName;
+
+    @Column(name = "zip_error", columnDefinition = "TEXT")
+    private String zipError;
 
     @Column(name = "created_at", nullable = false)
     @Builder.Default

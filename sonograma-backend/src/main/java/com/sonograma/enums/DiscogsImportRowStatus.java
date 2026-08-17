@@ -5,6 +5,7 @@ public enum DiscogsImportRowStatus {
     PARSED,
     FETCHING_DISCOGS,
     IMPORTED,
+    ALREADY_IMPORTED,
     NEEDS_MANUAL_MATCH,
     IGNORED,
     RATE_LIMITED,

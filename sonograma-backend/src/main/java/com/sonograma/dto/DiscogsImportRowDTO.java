@@ -38,7 +38,17 @@ public class DiscogsImportRowDTO {
     private String format;
     private String tracklist;
     private int youtubeLinksFound;
+    private int youtubeTracksMissing;
     private String imageUrl;
+    private String metadataStatus;
+    private String metadataErrorCode;
+    private String coverStatus;
+    private String coverErrorCode;
+    private String youtubeStatus;
+    private String youtubeErrorCode;
+    private String catalogImportStatus;
+    private String catalogImportErrorCode;
+    private String warningMessage;
     private String status;
     private String errorMessage;
     private Integer retryCount;

@@ -1,6 +1,6 @@
 package com.sonograma.service.importacion;
 
-import com.sonograma.entity.DiscogsImportRow;
+import com.sonograma.dto.DiscogsCoverZipRow;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -20,10 +20,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -113,72 +115,161 @@ public class DiscogsCoverService {
         }
     }
 
-    public Path buildZip(List<DiscogsImportRow> rows) throws IOException {
-        Path zipPath = Files.createTempFile("discogs-covers-", ".zip");
-        Set<Long> included = new HashSet<>();
+    public Path preparedZipPath(long jobId) throws IOException {
+        Path directory = coversDirectory.resolve("zip");
+        Files.createDirectories(directory);
+        return directory.resolve("discogs-covers-" + jobId + ".zip");
+    }
+
+    public ZipBuildResult buildZip(Path zipPath, List<DiscogsCoverZipRow> rows,
+                                   Consumer<ZipProgress> progress) throws IOException {
+        Files.createDirectories(zipPath.toAbsolutePath().normalize().getParent());
+        Path temporary = Files.createTempFile(zipPath.getParent(), "discogs-covers-", ".part");
         Set<String> usedNames = new HashSet<>();
-        try (OutputStream output = new BufferedOutputStream(Files.newOutputStream(zipPath));
+        List<ZipError> errors = new ArrayList<>();
+        List<Integer> missingLocalRows = new ArrayList<>();
+        List<DiscogsCoverZipRow> candidates = rows.stream()
+                .filter(row -> row.getResolvedReleaseId() != null)
+                .toList();
+        int added = 0;
+        int failed = 0;
+        try (OutputStream output = new BufferedOutputStream(Files.newOutputStream(temporary));
              ZipOutputStream zip = new ZipOutputStream(output)) {
             addSummary(zip, rows, usedNames);
-            for (DiscogsImportRow row : rows) {
-                Long releaseId = row.getResolvedReleaseId() != null
-                        ? row.getResolvedReleaseId()
-                        : row.getDiscogsId();
-                if (releaseId == null || !included.add(releaseId) || row.getImageUrl() == null) {
+            for (int index = 0; index < candidates.size(); index++) {
+                DiscogsCoverZipRow row = candidates.get(index);
+                Long releaseId = row.getResolvedReleaseId();
+                Path cover = localCover(row);
+                if (cover == null || !Files.isRegularFile(cover)) {
+                    failed++;
+                    missingLocalRows.add(row.getSourceExcelRowNumber());
+                    errors.add(new ZipError(row, "MISSING_LOCAL_FILE",
+                            "La portada descargada no está disponible en el almacenamiento local."));
+                    progress.accept(new ZipProgress(candidates.size(), index + 1, added, failed,
+                            currentRelease(row)));
                     continue;
                 }
-                Path cover = localPath(row.getImageUrl());
-                if (cover == null || !Files.isRegularFile(cover)) {
-                    CoverResult downloaded = download(row.getImageUrl(), releaseId);
-                    cover = downloaded.localPath();
-                }
-                if (cover == null || !Files.isRegularFile(cover)) {
-                    continue;
-                }
-                String filename = releaseId + " - " + sanitize(row.getArtist())
-                        + " - " + sanitize(row.getTitle())
+                String filename = row.getSourceExcelRowNumber() + "_" + releaseId
+                        + "_" + sanitize(row.getArtist())
+                        + "_" + sanitize(row.getTitle())
                         + extensionWithDot(cover);
                 zip.putNextEntry(new ZipEntry(uniqueZipEntryName(filename, usedNames)));
                 Files.copy(cover, zip);
                 zip.closeEntry();
+                added++;
+                progress.accept(new ZipProgress(candidates.size(), index + 1, added, failed,
+                        currentRelease(row)));
             }
+            collectRowErrors(rows, errors);
+            if (!errors.isEmpty()) addErrors(zip, errors, usedNames);
+            progress.accept(new ZipProgress(candidates.size(), candidates.size(), added, failed, null));
         } catch (Exception ex) {
-            Files.deleteIfExists(zipPath);
+            Files.deleteIfExists(temporary);
             throw ex;
         }
-        return zipPath;
+        try {
+            Files.move(temporary, zipPath, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+            Files.move(temporary, zipPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return new ZipBuildResult(zipPath, candidates.size(), added, failed, errors.size(),
+                List.copyOf(missingLocalRows));
     }
 
-    private void addSummary(ZipOutputStream zip, List<DiscogsImportRow> rows, Set<String> usedNames) throws IOException {
+    private Path localCover(DiscogsCoverZipRow row) {
+        if (row.getCoverLocalPath() != null && !row.getCoverLocalPath().isBlank()) {
+            try {
+                Path candidate = Path.of(row.getCoverLocalPath()).toAbsolutePath().normalize();
+                if (candidate.startsWith(coversDirectory)) return candidate;
+            } catch (RuntimeException invalidPath) {
+                log.warn("Ruta local de portada Discogs inválida fila={}: {}",
+                        row.getSourceExcelRowNumber(), row.getCoverLocalPath());
+            }
+        }
+        return localPath(row.getImageUrl());
+    }
+
+    private String currentRelease(DiscogsCoverZipRow row) {
+        String artist = row.getArtist() == null ? "Sin artista" : row.getArtist();
+        String title = row.getTitle() == null ? "Sin título" : row.getTitle();
+        String value = artist + " – " + title;
+        return value.length() > 500 ? value.substring(0, 500) : value;
+    }
+
+    private void collectRowErrors(List<DiscogsCoverZipRow> rows, List<ZipError> errors) {
+        for (DiscogsCoverZipRow row : rows) {
+            if (row.getSourceDiscogsId() == null) {
+                errors.add(new ZipError(row, "MISSING_DISCOGS_LINK", concise(
+                        row.getWarningMessage(), "No se detectó un link de Discogs.")));
+            } else if (row.getMetadataErrorCode() != null) {
+                errors.add(new ZipError(row, row.getMetadataErrorCode(), concise(
+                        row.getErrorMessage(), "No se pudo obtener metadata de Discogs.")));
+            }
+            if (row.getPriceRaw() != null && row.getPriceUyu() == null) {
+                errors.add(new ZipError(row, "NON_NUMERIC_PRICE",
+                        "El precio '" + row.getPriceRaw() + "' requiere revisión manual."));
+            }
+            if (row.getCoverErrorCode() != null && errors.stream().noneMatch(error ->
+                    error.row() == row && error.errorCode().equals(row.getCoverErrorCode()))) {
+                errors.add(new ZipError(row, row.getCoverErrorCode(), concise(
+                        row.getWarningMessage(), "La portada no está disponible.")));
+            }
+        }
+    }
+
+    private String concise(String value, String fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        String singleLine = value.replaceAll("\\s+", " ").trim();
+        return singleLine.length() > 500 ? singleLine.substring(0, 500) : singleLine;
+    }
+
+    private void addErrors(ZipOutputStream zip, List<ZipError> errors, Set<String> usedNames) throws IOException {
         StringBuilder csv = new StringBuilder();
-        csv.append("row_number,discogs_id,artist,title,price_uyu,condition_grade,status,metadata_status,cover_status,imported_catalog_id,qr_id\n");
-        for (DiscogsImportRow row : rows) {
+        csv.append("excel_row,discogs_url,source_type,source_discogs_id,resolved_release_id,artist,title,error_code,error_message\n");
+        for (ZipError error : errors) {
+            DiscogsCoverZipRow row = error.row();
             csv.append(csv(row.getSourceExcelRowNumber())).append(',')
-                    .append(csv(firstNonNull(row.getResolvedReleaseId(), row.getDiscogsId()))).append(',')
+                    .append(csv(row.getDiscogsUrl())).append(',')
+                    .append(csv(row.getSourceType())).append(',')
+                    .append(csv(row.getSourceDiscogsId())).append(',')
+                    .append(csv(row.getResolvedReleaseId())).append(',')
                     .append(csv(row.getArtist())).append(',')
                     .append(csv(row.getTitle())).append(',')
-                    .append(csv(row.getManualPriceUyu())).append(',')
-                    .append(csv(row.getManualCondition())).append(',')
-                    .append(csv(row.getSourceStatus())).append(',')
-                    .append(csv(row.getStatus())).append(',')
-                    .append(csv(row.getImageUrl() != null && row.getImageUrl().contains("/discogs/covers/")
-                            ? "downloaded"
-                            : "missing")).append(',')
-                    .append(csv(row.getImportedCatalogProduct() == null
-                            ? null
-                            : row.getImportedCatalogProduct().getIdDisco())).append(',')
-                    .append(csv(row.getImportedCatalogProduct() == null
-                            ? null
-                            : row.getImportedCatalogProduct().getCodigoQr()))
-                    .append('\n');
+                    .append(csv(error.errorCode())).append(',')
+                    .append(csv(error.errorMessage())).append('\n');
         }
-        zip.putNextEntry(new ZipEntry(uniqueZipEntryName("discogs-summary.csv", usedNames)));
+        zip.putNextEntry(new ZipEntry(uniqueZipEntryName("errors.csv", usedNames)));
         zip.write(csv.toString().getBytes(StandardCharsets.UTF_8));
         zip.closeEntry();
     }
 
-    private Long firstNonNull(Long first, Long second) {
-        return first == null ? second : first;
+    private void addSummary(ZipOutputStream zip, List<DiscogsCoverZipRow> rows,
+                            Set<String> usedNames) throws IOException {
+        StringBuilder csv = new StringBuilder();
+        csv.append("excel_row,discogs_url,source_type,source_discogs_id,resolved_release_id,artist,title,price_uyu,price_raw,condition,source_status,metadata_status,cover_status,youtube_status,catalog_import_status,imported_catalog_id,qr_id\n");
+        for (DiscogsCoverZipRow row : rows) {
+            csv.append(csv(row.getSourceExcelRowNumber())).append(',')
+                    .append(csv(row.getDiscogsUrl())).append(',')
+                    .append(csv(row.getSourceType())).append(',')
+                    .append(csv(row.getSourceDiscogsId())).append(',')
+                    .append(csv(row.getResolvedReleaseId())).append(',')
+                    .append(csv(row.getArtist())).append(',')
+                    .append(csv(row.getTitle())).append(',')
+                    .append(csv(row.getPriceUyu())).append(',')
+                    .append(csv(row.getPriceRaw())).append(',')
+                    .append(csv(row.getCondition())).append(',')
+                    .append(csv(row.getSourceStatus())).append(',')
+                    .append(csv(row.getMetadataStatus())).append(',')
+                    .append(csv(row.getCoverStatus())).append(',')
+                    .append(csv(row.getYoutubeStatus())).append(',')
+                    .append(csv(row.getCatalogImportStatus())).append(',')
+                    .append(csv(row.getCatalogDiscoId())).append(',')
+                    .append(csv(row.getCodigoQr())).append('\n');
+        }
+        zip.putNextEntry(new ZipEntry(uniqueZipEntryName("discogs-summary.csv", usedNames)));
+        zip.write(csv.toString().getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
     }
 
     private String csv(Object value) {
@@ -303,4 +394,23 @@ public class DiscogsCoverService {
             return new CoverResult(false, false, fallbackUrl, null, warning);
         }
     }
+
+    public record ZipProgress(
+            int total,
+            int processed,
+            int added,
+            int failed,
+            String currentRelease
+    ) {}
+
+    public record ZipBuildResult(
+            Path path,
+            int total,
+            int added,
+            int failed,
+            int warningCount,
+            List<Integer> missingLocalRows
+    ) {}
+
+    private record ZipError(DiscogsCoverZipRow row, String errorCode, String errorMessage) {}
 }

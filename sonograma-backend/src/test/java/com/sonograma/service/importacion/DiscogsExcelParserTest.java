@@ -183,6 +183,100 @@ class DiscogsExcelParserTest {
     }
 
     @Test
+    void prioritizesTheDiscogsColumnBeforeFallbackLinksElsewhereInTheRow() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Sitio del artista");
+            header.createCell(1).setCellValue("LINK DE DISCOGS");
+
+            var row = sheet.createRow(1);
+            var unrelated = row.createCell(0);
+            unrelated.setCellValue("Perfil");
+            var unrelatedLink = workbook.getCreationHelper().createHyperlink(HyperlinkType.URL);
+            unrelatedLink.setAddress("https://discogs.com/release/111-wrong");
+            unrelated.setHyperlink(unrelatedLink);
+
+            var discogs = row.createCell(1);
+            discogs.setCellValue("Ficha correcta");
+            var discogsLink = workbook.getCreationHelper().createHyperlink(HyperlinkType.URL);
+            discogsLink.setAddress("https://www.discogs.com/es/master/222-correct?utm_source=sheet");
+            discogs.setHyperlink(discogsLink);
+
+            workbook.write(output);
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "priority.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow -> {
+                assertThat(parsedRow.discogsType()).isEqualTo("master");
+                assertThat(parsedRow.discogsId()).isEqualTo(222L);
+                assertThat(parsedRow.urlSource()).isEqualTo("hyperlink");
+                assertThat(parsedRow.normalizedDiscogsUrl()).isEqualTo("https://www.discogs.com/master/222");
+            });
+        }
+    }
+
+    @Test
+    void fallsBackToTheRemainingRowOnlyWhenTheDiscogsColumnHasNoReference() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("LINK DE DISCOGS");
+            header.createCell(1).setCellValue("Notas");
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellValue("sin link");
+            row.createCell(1).setCellFormula(
+                    "HYPERLINK(\"https://discogs.com/master/333-title\",\"respaldo\")");
+
+            workbook.write(output);
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "fallback.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow -> {
+                assertThat(parsedRow.discogsId()).isEqualTo(333L);
+                assertThat(parsedRow.discogsType()).isEqualTo("master");
+                assertThat(parsedRow.urlSource()).isEqualTo("fallback_hyperlink_formula");
+            });
+        }
+    }
+
+    @Test
+    void keepsSpPriceAndUnsupportedFormulaAsManualReviewWarnings() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("LINK DE DISCOGS");
+            header.createCell(1).setCellValue("PRECIO");
+            header.createCell(2).setCellValue("GENERO");
+
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellValue("[r123456]");
+            row.createCell(1).setCellValue(" SP ");
+            row.createCell(2).setCellFormula("_xlfn.DUMMYFUNCTION(\"wrong genre\")");
+
+            workbook.write(output);
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "manual-review.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow -> {
+                assertThat(parsedRow.discogsId()).isEqualTo(123456L);
+                assertThat(parsedRow.manualPriceUyu()).isNull();
+                assertThat(parsedRow.rawPrice()).isEqualTo("SP");
+                assertThat(parsedRow.manualGenre()).isNull();
+                assertThat(parsedRow.errorMessage())
+                        .contains("NON_NUMERIC_PRICE")
+                        .contains("UNSUPPORTED_EXCEL_FORMULA");
+            });
+        }
+    }
+
+    @Test
     void ignoresSupplierOnlyRowsCapturesUnmappedObservationsAndParsesThousandsPrice() throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {

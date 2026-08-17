@@ -14,6 +14,7 @@ public class DiscogsImportJobDTO {
     private String nombreArchivo;
     private String nombreHoja;
     private String status;
+    private String stage;
     private String errorMessage;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -38,6 +39,7 @@ public class DiscogsImportJobDTO {
     private int failed;
     private int rateLimited;
     private int imported;
+    private int alreadyImported;
     private int coversDownloaded;
     private int coversMissing;
     private int mp3PreviewsFound;
@@ -45,6 +47,21 @@ public class DiscogsImportJobDTO {
     private int qrEntriesCreated;
     private int pending;
     private int readyToImport;
+    private int linksDetected;
+    private int missingDiscogsLinks;
+    private int warnings;
+    private int metadataFailed;
+    private int coversPending;
+    private int youtubeTracksMissing;
+    private String zipStatus;
+    private int zipTotalCovers;
+    private int zipProcessedCovers;
+    private int zipAddedCovers;
+    private int zipFailedCovers;
+    private int zipProgressPercentage;
+    private String zipCurrentRelease;
+    private boolean zipReady;
+    private String zipError;
     private List<String> extraColumns;
     private List<DiscogsImportRowDTO> rows;
 }
