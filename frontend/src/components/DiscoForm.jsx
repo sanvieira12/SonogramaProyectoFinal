@@ -9,7 +9,7 @@ const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTIN
 
 const VACIO = {
   codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
-  condicion: 'NUEVO', tipoDisco: 'VINILO', formato: '', costo: '', precioVenta: '', pricingMode: 'AUTO', estado: 'DISPONIBLE', imagenUrl: '',
+  condicion: 'NUEVO', condicionFisica: '', tipoDisco: 'VINILO', formato: '', costo: '', precioVenta: '', pricingMode: 'AUTO', estado: 'DISPONIBLE', imagenUrl: '',
 }
 
 function resizarBase64(file, maxPx = 400) {
@@ -213,6 +213,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           descripcion: disco.descripcion || '',
           anio: disco.anio || '',
           condicion: disco.condicion || 'NUEVO',
+          condicionFisica: disco.condicionFisica || '',
           tipoDisco: disco.tipoDisco || 'VINILO',
           formato: disco.formato || '',
           costo: disco.costo || '',
@@ -329,12 +330,16 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Condición</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Categoría</label>
               <select value={form.condicion} onChange={e => set('condicion', e.target.value)} className="input">
                 {CONDICIONES.map(c => <option key={c}>{c}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Condición física</label>
+              <input value={form.condicionFisica} onChange={e => set('condicionFisica', e.target.value)} className="input" placeholder="NM, VG+, VG" maxLength={50} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Tipo</label>

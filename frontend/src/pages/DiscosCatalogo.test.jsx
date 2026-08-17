@@ -41,7 +41,8 @@ const disco = {
   artista: 'Deletion Artist',
   album: 'Deletion Album',
   estado: 'DISPONIBLE',
-  condicion: 'NUEVO',
+  condicion: 'USADO',
+  condicionFisica: 'NM',
   cantidadCopias: 1,
   totalCopias: 1,
   qrCopies: [],
@@ -120,5 +121,16 @@ describe('Catalog permanent deletion flow', () => {
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument()
     expect(api.crm.clientesRecomendados).toHaveBeenCalledWith(42)
     expect(screen.getByText('• Coincide con sus géneros habituales: Techno')).toBeInTheDocument()
+  })
+
+  it('shows physical condition separately from the used category', async () => {
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    await screen.findByText('Deletion Artist')
+    expect(screen.getAllByText('NM').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getAllByText('Deletion Artist')[0])
+    expect(await screen.findByText('Categoría')).toBeInTheDocument()
+    expect(screen.getAllByText('USADO').length).toBeGreaterThan(0)
   })
 })

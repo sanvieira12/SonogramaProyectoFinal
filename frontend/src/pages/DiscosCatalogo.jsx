@@ -467,7 +467,8 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               ['Año',           disco.anio],
               ['Género',        disco.genero],
               ['Sello',         disco.selloDiscografico],
-              ['Condición',     disco.condicion],
+              ['Categoría',     disco.condicion],
+              ['Condición',     disco.condicionFisica],
               ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
               ['Precio venta',  disco.precioVenta ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
               ['Stock actual',  disco.cantidadCopias ?? 0],
@@ -552,7 +553,8 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
     ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
     ['Venta', disco.precioVenta != null ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
     ['Stock', disco.cantidadCopias ?? 0],
-    ['Condición', disco.condicion],
+    ['Categoría', disco.condicion],
+    ['Condición', disco.condicionFisica],
     ['Formato', disco.tipoDisco],
     ['Año', disco.anio],
     ['Sello', disco.selloDiscografico],
@@ -956,7 +958,7 @@ export default function DiscosCatalogo() {
                         </div>
                       </td>
                       <td className="px-3 py-3.5 align-middle text-slate-600 dark:text-stone-400 hidden sm:table-cell">
-                        {d.condicion || <span className="text-slate-300 dark:text-stone-600">—</span>}
+                        {d.condicionFisica || <span className="text-slate-300 dark:text-stone-600">—</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle font-semibold text-slate-900 dark:text-white tabular-nums">
                         {d.precioVenta

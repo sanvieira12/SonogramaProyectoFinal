@@ -25,6 +25,7 @@ public class DiscoResponseDTO {
     private String descripcion;
     private Integer anio;
     private String condicion;
+    private String condicionFisica;
     private String tipoDisco;
     private String formato;
     private BigDecimal costo;

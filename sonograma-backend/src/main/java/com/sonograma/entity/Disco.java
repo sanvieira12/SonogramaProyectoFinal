@@ -52,6 +52,10 @@ public class Disco {
     @Column(name = "condicion")
     private CondicionDisco condicion;
 
+    /** Graduación física independiente de la categoría comercial (NM, VG+, VG, etc.). */
+    @Column(name = "condicion_fisica", length = 50)
+    private String condicionFisica;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "tipo_disco")
     private TipoDisco tipoDisco;

@@ -220,6 +220,7 @@ public class DiscoService {
                 || contiene(disco.getCodigoInterno(), query)
                 || contiene(disco.getEstado() != null ? disco.getEstado().name() : null, query)
                 || contiene(disco.getCondicion() != null ? disco.getCondicion().name() : null, query)
+                || contiene(disco.getCondicionFisica(), query)
                 || contiene(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null, query)
                 || contiene(disco.getAnio() != null ? String.valueOf(disco.getAnio()) : null, query);
     }

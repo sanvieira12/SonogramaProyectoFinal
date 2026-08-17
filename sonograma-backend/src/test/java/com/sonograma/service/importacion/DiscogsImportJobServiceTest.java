@@ -196,7 +196,7 @@ class DiscogsImportJobServiceTest {
             row.createCell(1).setCellValue("Excel Artist");
             row.createCell(2).setCellValue("Excel Album");
             row.createCell(3).setCellValue("VENDIDO");
-            row.createCell(4).setCellValue("NUEVO");
+            row.createCell(4).setCellValue("NM");
             row.createCell(5).setCellValue("SP");
             workbook.write(output);
             created = service.createJob(new MockMultipartFile(
@@ -220,8 +220,9 @@ class DiscogsImportJobServiceTest {
         assertThat(imported.getRowsImported()).isEqualTo(1);
         assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
             assertThat(disco.getCondicion().name()).isEqualTo("USADO");
+            assertThat(disco.getCondicionFisica()).isEqualTo("NM");
             assertThat(disco.getPrecioVenta()).isNull();
-            assertThat(disco.getNotas()).contains("Condición física Excel: NUEVO", "Estado Excel: VENDIDO");
+            assertThat(disco.getNotas()).contains("Condición física Excel: NM", "Estado Excel: VENDIDO");
         });
     }
 

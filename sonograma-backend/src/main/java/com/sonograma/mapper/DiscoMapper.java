@@ -20,6 +20,7 @@ public class DiscoMapper {
                 .descripcion(disco.getDescripcion())
                 .anio(disco.getAnio())
                 .condicion(disco.getCondicion() != null ? disco.getCondicion().name() : null)
+                .condicionFisica(disco.getCondicionFisica())
                 .tipoDisco(disco.getTipoDisco() != null ? disco.getTipoDisco().name() : null)
                 .formato(disco.getFormato())
                 .costo(disco.getCosto())
@@ -53,6 +54,7 @@ public class DiscoMapper {
                 .descripcion(request.getDescripcion())
                 .anio(request.getAnio())
                 .condicion(request.getCondicion())
+                .condicionFisica(normalizePhysicalCondition(request.getCondicionFisica()))
                 .tipoDisco(request.getTipoDisco())
                 .formato(request.getFormato())
                 .costo(request.getCosto())
@@ -82,6 +84,9 @@ public class DiscoMapper {
         if (request.getDescripcion() != null) disco.setDescripcion(request.getDescripcion());
         if (request.getAnio() != null) disco.setAnio(request.getAnio());
         if (request.getCondicion() != null) disco.setCondicion(request.getCondicion());
+        if (request.getCondicionFisica() != null) {
+            disco.setCondicionFisica(normalizePhysicalCondition(request.getCondicionFisica()));
+        }
         if (request.getTipoDisco() != null) disco.setTipoDisco(request.getTipoDisco());
         if (request.getFormato() != null) disco.setFormato(request.getFormato());
         if (request.getCosto() != null) disco.setCosto(request.getCosto());
@@ -99,5 +104,11 @@ public class DiscoMapper {
         if (request.getPreviewUrl() != null) disco.setPreviewUrl(request.getPreviewUrl());
         if (request.getDiscogsUrl() != null) disco.setDiscogsUrl(request.getDiscogsUrl());
         if (request.getCantidadCopias() != null) disco.setCantidadCopias(request.getCantidadCopias());
+    }
+
+    private static String normalizePhysicalCondition(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase();
+        return normalized.length() <= 50 ? normalized : normalized.substring(0, 50);
     }
 }

@@ -843,6 +843,7 @@ public class DiscogsImportJobService {
                 .selloDiscografico(row.getLabel())
                 .anio(row.getYear())
                 .condicion(CondicionDisco.USADO)
+                .condicionFisica(normalizePhysicalCondition(row.getManualCondition()))
                 .tipoDisco(parseFormat(row.getFormat()))
                 .formato(row.getFormat())
                 .estado(EstadoDisco.DISPONIBLE)
@@ -899,9 +900,12 @@ public class DiscogsImportJobService {
         if (!blank(row.getTracklist())) disco.setTracklist(row.getTracklist());
         if (!blank(row.getImageUrl())) disco.setImagenUrl(row.getImageUrl());
         disco.setPreviewUrl(null);
-        // Discogs Excel imports are unconditionally used records. Spreadsheet
-        // condition and availability are retained only as traceability notes.
+        // Discogs Excel imports are unconditionally used records. The spreadsheet
+        // condition is a separate physical grade (NM, VG+, etc.).
         disco.setCondicion(CondicionDisco.USADO);
+        if (!blank(row.getManualCondition())) {
+            disco.setCondicionFisica(normalizePhysicalCondition(row.getManualCondition()));
+        }
         disco.setProcedencia(firstNonBlank(
             ImportMetadataNormalizer.normalizeSource(disco.getProcedencia()),
             ImportMetadataNormalizer.SOURCE_DISCOGS
@@ -915,6 +919,12 @@ public class DiscogsImportJobService {
         }
         disco.setTipoDisco(parseFormat(row.getFormat()));
         disco.setNotas(mergeNotes(disco.getNotas(), catalogNotes(row)));
+    }
+
+    private String normalizePhysicalCondition(String value) {
+        if (blank(value)) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return normalized.length() <= 50 ? normalized : normalized.substring(0, 50);
     }
 
     private Optional<Disco> findExistingDisco(DiscogsImportRow row) {

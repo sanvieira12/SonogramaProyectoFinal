@@ -48,6 +48,9 @@ public class DiscoRequestDTO {
     @NotNull(message = "La condición es obligatoria")
     private CondicionDisco condicion;
 
+    @Size(max = 50)
+    private String condicionFisica;
+
     @NotNull(message = "El tipo de disco es obligatorio")
     private TipoDisco tipoDisco;
 
