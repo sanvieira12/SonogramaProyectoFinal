@@ -592,6 +592,57 @@ class DiscogsImportJobServiceTest {
         }
     }
 
+    @Test
+    void preparesDownloadableZipWithWarningsWhenOnlySomeCoversAreAvailable() throws Exception {
+        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("zip-with-missing-covers.xlsx")
+                .nombreHoja("Links")
+                .sourceFingerprint("zip-with-missing-covers-fingerprint")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        Files.createDirectories(COVERS_DIRECTORY);
+        Path cover = COVERS_DIRECTORY.resolve("2001.jpg");
+        Files.write(cover, new byte[]{2, 0, 0, 1});
+
+        DiscogsImportRow valid = parsedRow(job, 2, 2001L);
+        valid.setCoverLocalPath(cover.toString());
+        valid.setImageUrl("/api/importaciones/discogs/covers/2001.jpg");
+        valid.setCoverStatus(DiscogsCoverStatus.SUCCESS);
+        DiscogsImportRow unavailable = parsedRow(job, 3, 2002L);
+        unavailable.setCoverStatus(DiscogsCoverStatus.UNAVAILABLE);
+        unavailable.setCoverErrorCode("COVER_UNAVAILABLE");
+        unavailable.setWarningMessage("COVER_UNAVAILABLE — Portada no informada por Discogs.");
+        rowRepository.saveAllAndFlush(List.of(valid, unavailable));
+
+        service.prepareCoversZip(job.getIdDiscogsImportJob());
+
+        await().atMost(Duration.ofSeconds(8)).untilAsserted(() -> {
+            DiscogsZipStatusDTO zipStatus = service.getCoversZipStatus(job.getIdDiscogsImportJob());
+            assertThat(zipStatus.getZipStatus()).isEqualTo("ready_with_warnings");
+            assertThat(zipStatus.isZipReady()).isTrue();
+            assertThat(zipStatus.getZipTotalCovers()).isEqualTo(2);
+            assertThat(zipStatus.getZipProcessedCovers()).isEqualTo(2);
+            assertThat(zipStatus.getZipAddedCovers()).isEqualTo(1);
+            assertThat(zipStatus.getZipFailedCovers()).isEqualTo(1);
+            assertThat(zipStatus.getZipError()).isNull();
+        });
+
+        Path zip = service.getPreparedCoversZip(job.getIdDiscogsImportJob());
+        try (ZipFile archive = new ZipFile(zip.toFile())) {
+            assertThat(archive.stream().filter(entry -> entry.getName().endsWith(".jpg"))).hasSize(1);
+            assertThat(archive.getEntry("errors.csv")).isNotNull();
+            String errors = new String(archive.getInputStream(archive.getEntry("errors.csv")).readAllBytes());
+            assertThat(errors).contains("\"3\"").contains("MISSING_LOCAL_FILE", "COVER_UNAVAILABLE");
+        }
+        assertThat(rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(
+                job.getIdDiscogsImportJob()).get(1))
+                .satisfies(row -> {
+                    assertThat(row.getCoverStatus()).isEqualTo(DiscogsCoverStatus.UNAVAILABLE);
+                    assertThat(row.getCoverErrorCode()).isEqualTo("COVER_UNAVAILABLE");
+                    assertThat(row.getWarningMessage()).contains("portada local no estaba disponible");
+                });
+    }
+
     private MockMultipartFile fixture() throws Exception {
         return workbookWithUrls(List.of("https://discogs.com/release/999"));
     }

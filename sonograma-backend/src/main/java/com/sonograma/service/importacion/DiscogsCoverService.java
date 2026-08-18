@@ -178,13 +178,14 @@ public class DiscogsCoverService {
     }
 
     private Path localCover(DiscogsCoverZipRow row) {
-        if (row.getCoverLocalPath() != null && !row.getCoverLocalPath().isBlank()) {
+        String coverLocalPath = row.getCoverLocalPath();
+        if (coverLocalPath != null && !coverLocalPath.isBlank()) {
             try {
-                Path candidate = Path.of(row.getCoverLocalPath()).toAbsolutePath().normalize();
+                Path candidate = Path.of(coverLocalPath).toAbsolutePath().normalize();
                 if (candidate.startsWith(coversDirectory)) return candidate;
             } catch (RuntimeException invalidPath) {
                 log.warn("Ruta local de portada Discogs inválida fila={}: {}",
-                        row.getSourceExcelRowNumber(), row.getCoverLocalPath());
+                        row.getSourceExcelRowNumber(), coverLocalPath);
             }
         }
         return localPath(row.getImageUrl());
@@ -333,12 +334,13 @@ public class DiscogsCoverService {
     }
 
     private Path localPath(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) return null;
         String prefix = "/api/importaciones/discogs/covers/";
         int index = imageUrl.indexOf(prefix);
         if (index < 0) return null;
         try {
             return safeFile(imageUrl.substring(index + prefix.length()));
-        } catch (IOException ex) {
+        } catch (IOException | RuntimeException ex) {
             return null;
         }
     }

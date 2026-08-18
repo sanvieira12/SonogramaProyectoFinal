@@ -84,24 +84,109 @@ class DiscogsCoverServiceTest {
 
         DiscogsCoverZipRow first = zipRow(4, 500L, stored.toString());
         DiscogsCoverZipRow duplicateName = zipRow(5, 500L, stored.toString());
-        DiscogsCoverZipRow missing = zipRow(6, 600L, tempDir.resolve("missing.jpg").toString());
-        missing.setCoverStatus("FAILED_RETRYABLE");
-        missing.setCoverErrorCode("COVER_DOWNLOAD_FAILED");
+        DiscogsCoverZipRow noImage = zipRow(6, 600L, null);
+        noImage.setImageUrl(null);
+        noImage.setCoverStatus("UNAVAILABLE");
+        noImage.setCoverErrorCode("COVER_UNAVAILABLE");
+        DiscogsCoverZipRow missing = zipRow(7, 700L, tempDir.resolve("missing.jpg").toString());
 
         Path zip = tempDir.resolve("partial.zip");
-        var result = service.buildZip(zip, List.of(first, duplicateName, missing), ignored -> {});
+        var result = service.buildZip(zip, List.of(first, duplicateName, noImage, missing), ignored -> {});
 
-        assertThat(result.total()).isEqualTo(3);
+        assertThat(result.total()).isEqualTo(4);
         assertThat(result.added()).isEqualTo(2);
-        assertThat(result.failed()).isEqualTo(1);
-        assertThat(result.missingLocalRows()).containsExactly(6);
+        assertThat(result.failed()).isEqualTo(2);
+        assertThat(result.missingLocalRows()).containsExactly(6, 7);
         try (ZipFile archive = new ZipFile(zip.toFile())) {
             assertThat(archive.getEntry("discogs-summary.csv")).isNotNull();
             assertThat(archive.getEntry("errors.csv")).isNotNull();
             assertThat(archive.stream().filter(entry -> entry.getName().endsWith(".jpg"))).hasSize(2);
             assertThat(archive.stream().map(entry -> entry.getName()).toList()).doesNotHaveDuplicates();
             String errors = new String(archive.getInputStream(archive.getEntry("errors.csv")).readAllBytes());
-            assertThat(errors).contains("MISSING_LOCAL_FILE").contains("COVER_DOWNLOAD_FAILED");
+            assertThat(errors)
+                    .contains("\"6\"")
+                    .contains("\"7\"")
+                    .contains("MISSING_LOCAL_FILE")
+                    .contains("COVER_UNAVAILABLE");
+        }
+    }
+
+    @Test
+    void nullImageUrlIsReportedWithoutAbortingValidCovers() throws Exception {
+        DiscogsCoverService service = new DiscogsCoverService(tempDir.toString());
+        Path stored = tempDir.resolve("801.jpg");
+        Files.write(stored, new byte[]{8, 0, 1});
+        DiscogsCoverZipRow valid = zipRow(8, 801L, stored.toString());
+        DiscogsCoverZipRow missing = zipRow(9, 802L, null);
+        missing.setImageUrl(null);
+
+        Path zip = tempDir.resolve("null-image-url.zip");
+        var result = service.buildZip(zip, List.of(valid, missing), ignored -> {});
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.missingLocalRows()).containsExactly(9);
+        try (ZipFile archive = new ZipFile(zip.toFile())) {
+            assertThat(archive.stream().filter(entry -> entry.getName().endsWith(".jpg"))).hasSize(1);
+            assertThat(archive.getEntry("errors.csv")).isNotNull();
+            String errors = new String(archive.getInputStream(archive.getEntry("errors.csv")).readAllBytes());
+            assertThat(errors).contains("\"9\"").contains("MISSING_LOCAL_FILE");
+        }
+    }
+
+    @Test
+    void blankImageUrlsAreReportedWithoutThrowing() throws Exception {
+        DiscogsCoverService service = new DiscogsCoverService(tempDir.toString());
+
+        for (int index = 0; index < 2; index++) {
+            DiscogsCoverZipRow row = zipRow(10 + index, 900L + index, null);
+            row.setImageUrl(index == 0 ? "" : "   ");
+            Path zip = tempDir.resolve("blank-image-url-" + index + ".zip");
+
+            var result = service.buildZip(zip, List.of(row), ignored -> {});
+
+            assertThat(result.added()).isZero();
+            assertThat(result.failed()).isEqualTo(1);
+            try (ZipFile archive = new ZipFile(zip.toFile())) {
+                assertThat(archive.getEntry("errors.csv")).isNotNull();
+            }
+        }
+    }
+
+    @Test
+    void nonexistentLocalFileDoesNotInterruptRemainingRows() throws Exception {
+        DiscogsCoverService service = new DiscogsCoverService(tempDir.toString());
+        DiscogsCoverZipRow missing = zipRow(12, 1001L, tempDir.resolve("gone.jpg").toString());
+        Path stored = tempDir.resolve("1002.jpg");
+        Files.write(stored, new byte[]{1, 0, 0, 2});
+        DiscogsCoverZipRow valid = zipRow(13, 1002L, stored.toString());
+
+        Path zip = tempDir.resolve("missing-local-file.zip");
+        var result = service.buildZip(zip, List.of(missing, valid), ignored -> {});
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.missingLocalRows()).containsExactly(12);
+        try (ZipFile archive = new ZipFile(zip.toFile())) {
+            assertThat(archive.stream().filter(entry -> entry.getName().endsWith(".jpg"))).hasSize(1);
+            assertThat(archive.getEntry("errors.csv")).isNotNull();
+        }
+    }
+
+    @Test
+    void malformedLocalPathAndUnexpectedImageUrlAreHandledAsMissing() throws Exception {
+        DiscogsCoverService service = new DiscogsCoverService(tempDir.toString());
+        DiscogsCoverZipRow row = zipRow(14, 1100L, "bad\u0000path");
+        row.setImageUrl("https://images.discogs.com/1100.jpg");
+
+        Path zip = tempDir.resolve("malformed-local-path.zip");
+        var result = service.buildZip(zip, List.of(row), ignored -> {});
+
+        assertThat(result.added()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.missingLocalRows()).containsExactly(14);
+        try (ZipFile archive = new ZipFile(zip.toFile())) {
+            assertThat(archive.getEntry("errors.csv")).isNotNull();
         }
     }
 

@@ -375,8 +375,10 @@ public class DiscogsImportJobService {
                     rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(jobId).stream()
                             .filter(row -> result.missingLocalRows().contains(row.getSourceExcelRowNumber()))
                             .forEach(row -> {
-                                row.setCoverStatus(DiscogsCoverStatus.MISSING_LOCAL_FILE);
-                                row.setCoverErrorCode("MISSING_LOCAL_FILE");
+                                if (row.getCoverErrorCode() == null) {
+                                    row.setCoverStatus(DiscogsCoverStatus.MISSING_LOCAL_FILE);
+                                    row.setCoverErrorCode("MISSING_LOCAL_FILE");
+                                }
                                 appendWarning(row, "La portada local no estaba disponible al preparar el ZIP.");
                             });
                 }
