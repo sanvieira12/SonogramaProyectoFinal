@@ -277,6 +277,33 @@ class DiscogsExcelParserTest {
     }
 
     @Test
+    void preservesSingleLetterAndSingleNumberExcelCodesExactly() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("LINK DE DISCOGS");
+            header.createCell(1).setCellValue("CÓDIGO");
+
+            var letter = sheet.createRow(1);
+            letter.createCell(0).setCellValue("https://www.discogs.com/release/111");
+            letter.createCell(1).setCellValue("F");
+
+            var number = sheet.createRow(2);
+            number.createCell(0).setCellValue("https://www.discogs.com/release/222");
+            number.createCell(1).setCellValue(1);
+            workbook.write(output);
+
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "short-codes.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).extracting(DiscogsExcelParser.ParsedRow::internalCode)
+                    .containsExactly("F", "1");
+        }
+    }
+
+    @Test
     void ignoresSupplierOnlyRowsCapturesUnmappedObservationsAndParsesThousandsPrice() throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {

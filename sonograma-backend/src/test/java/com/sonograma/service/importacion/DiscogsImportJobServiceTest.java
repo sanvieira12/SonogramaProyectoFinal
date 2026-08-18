@@ -29,9 +29,11 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.zip.ZipFile;
@@ -359,58 +361,94 @@ class DiscogsImportJobServiceTest {
     }
 
     @Test
-    void importParsedRowsMergesDuplicateDiscogsRowsIntoExistingCatalogStock() throws Exception {
+    void singleLetterBusinessCodeDoesNotMergeDifferentDiscogsReleases() {
         DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
-                .nombreArchivo("duplicate.xlsx")
+                .nombreArchivo("single-letter-code.xlsx")
                 .nombreHoja("Links")
                 .status(DiscogsImportJobStatus.COMPLETED)
                 .build());
-        rowRepository.saveAll(List.of(
-                parsedRow(job, 1, 999L),
-                parsedRow(job, 2, 1000L)
-        ));
+
+        DiscogsImportRow first = parsedRow(job, 1, 111L);
+        first.setInternalCode("F");
+        first.setManualPriceUyu(new BigDecimal("800.00"));
+        first.setManualCondition("VG+");
+        first.setSourceStatus("DISPONIBLE");
+        first.setArtist("First Artist");
+        first.setTitle("First Album");
+
+        DiscogsImportRow second = parsedRow(job, 2, 222L);
+        second.setInternalCode("F");
+        second.setManualPriceUyu(new BigDecimal("1200.00"));
+        second.setManualCondition("NM");
+        second.setSourceStatus("VENDIDO");
+        second.setArtist("Second Artist");
+        second.setTitle("Second Album");
+        rowRepository.saveAll(List.of(first, second));
 
         DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
 
         assertThat(imported.getImported()).isEqualTo(2);
-        assertThat(discoRepository.count()).isEqualTo(1);
+        assertThat(imported.getRowsImported()).isEqualTo(2);
+        assertThat(imported.getCatalogProductsAffected()).isEqualTo(2);
+        assertThat(discoRepository.count()).isEqualTo(2);
         assertThat(imported.getRows())
                 .extracting(DiscogsImportRowDTO::getImportedCatalogProductId)
                 .doesNotContainNull()
-                .hasSize(2)
-                .allMatch(id -> id.equals(imported.getRows().get(0).getImportedCatalogProductId()));
-        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
-            assertThat(disco.getCantidadCopias()).isEqualTo(2);
-            assertThat(disco.getCodigoInterno()).isEqualTo("CAT-1");
+                .doesNotHaveDuplicates();
+        assertThat(discoRepository.findAll()).allSatisfy(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+            assertThat(disco.getCodigoInterno()).isEqualTo("F");
             assertThat(disco.getProcedencia()).isEqualTo("Discogs");
+        }).anySatisfy(disco -> {
+            assertThat(disco.getDiscogsUrl()).endsWith("/release/111");
+            assertThat(disco.getPrecioVenta()).isEqualByComparingTo("800.00");
+            assertThat(disco.getCondicionFisica()).isEqualTo("VG+");
+        }).anySatisfy(disco -> {
+            assertThat(disco.getDiscogsUrl()).endsWith("/release/222");
+            assertThat(disco.getPrecioVenta()).isEqualByComparingTo("1200.00");
+            assertThat(disco.getCondicionFisica()).isEqualTo("NM");
         });
 
         service.importParsedRows(job.getIdDiscogsImportJob());
-        assertThat(discoRepository.count()).isEqualTo(1);
-        assertThat(discoRepository.findAll()).singleElement()
-                .extracting(disco -> disco.getCantidadCopias())
-                .isEqualTo(2);
+        assertThat(discoRepository.count()).isEqualTo(2);
+        assertThat(discoRepository.findAll()).allSatisfy(disco ->
+                assertThat(disco.getCantidadCopias()).isEqualTo(1));
+    }
+
+    @Test
+    void singleNumberBusinessCodeDoesNotMergeDifferentDiscogsReleases() {
+        DiscogsImportJob job = completedJob("single-number-code.xlsx");
+        DiscogsImportRow first = parsedRow(job, 1, 111L);
+        DiscogsImportRow second = parsedRow(job, 2, 222L);
+        first.setInternalCode("1");
+        second.setInternalCode("1");
+        rowRepository.saveAll(List.of(first, second));
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(2);
+        assertThat(imported.getCatalogProductsAffected()).isEqualTo(2);
+        assertThat(discoRepository.findAll()).hasSize(2).allSatisfy(disco -> {
+            assertThat(disco.getCodigoInterno()).isEqualTo("1");
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+        });
     }
 
     @Test
     void repeatedSupplierOriginCodeDoesNotMergeDifferentDiscogsRows() {
-        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
-                .nombreArchivo("supplier-code.xlsx")
-                .nombreHoja("Links")
-                .status(DiscogsImportJobStatus.COMPLETED)
-                .build());
+        DiscogsImportJob job = completedJob("supplier-code.xlsx");
 
-        DiscogsImportRow first = parsedRow(job, 2, 2001L);
+        DiscogsImportRow first = parsedRow(job, 2, 111L);
         first.setInternalCode("FP");
         first.setArtist("First Artist");
         first.setTitle("First Album");
-        first.setNormalizedDiscogsUrl("https://discogs.com/release/2001");
+        first.setNormalizedDiscogsUrl("https://discogs.com/release/111");
 
-        DiscogsImportRow second = parsedRow(job, 3, 2002L);
+        DiscogsImportRow second = parsedRow(job, 3, 222L);
         second.setInternalCode("FP");
         second.setArtist("Second Artist");
         second.setTitle("Second Album");
-        second.setNormalizedDiscogsUrl("https://discogs.com/release/2002");
+        second.setNormalizedDiscogsUrl("https://discogs.com/release/222");
 
         rowRepository.saveAll(List.of(first, second));
 
@@ -421,6 +459,57 @@ class DiscogsImportJobServiceTest {
         assertThat(discoRepository.findAll())
                 .extracting(disco -> disco.getCodigoInterno())
                 .containsOnly("FP");
+    }
+
+    @Test
+    void sameDiscogsReleaseIncrementsStockEvenWhenBusinessCodeIsSingleLetter() {
+        DiscogsImportJob job = completedJob("same-release.xlsx");
+        DiscogsImportRow first = parsedRow(job, 1, 111L);
+        DiscogsImportRow second = parsedRow(job, 2, 111L);
+        first.setInternalCode("F");
+        second.setInternalCode("F");
+        rowRepository.saveAll(List.of(first, second));
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(2);
+        assertThat(imported.getRowsImported()).isEqualTo(2);
+        assertThat(imported.getCatalogProductsAffected()).isEqualTo(1);
+        assertThat(imported.getRows())
+                .extracting(DiscogsImportRowDTO::getImportedCatalogProductId)
+                .containsOnly(imported.getRows().get(0).getImportedCatalogProductId());
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCodigoInterno()).isEqualTo("F");
+            assertThat(disco.getCantidadCopias()).isEqualTo(2);
+            assertThat(disco.getDiscogsUrl()).endsWith("/release/111");
+        });
+    }
+
+    @Test
+    void importsFiveHundredDifferentReleasesSharingSingleLetterCodeWithoutLimitOrMerging() {
+        DiscogsImportJob job = completedJob("five-hundred-releases.xlsx");
+        List<DiscogsImportRow> rows = new ArrayList<>();
+        for (int index = 0; index < 500; index++) {
+            DiscogsImportRow row = parsedRow(job, index + 2, 100_000L + index);
+            row.setInternalCode("F");
+            row.setArtist("Artist " + index);
+            row.setTitle("Album " + index);
+            rows.add(row);
+        }
+        rowRepository.saveAll(rows);
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(500);
+        assertThat(imported.getRowsImported()).isEqualTo(500);
+        assertThat(imported.getCatalogProductsAffected()).isEqualTo(500);
+        assertThat(discoRepository.findAll()).hasSize(500).allSatisfy(disco -> {
+            assertThat(disco.getCodigoInterno()).isEqualTo("F");
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+        });
+        assertThat(discoRepository.findAll())
+                .extracting(disco -> disco.getDiscogsUrl())
+                .doesNotHaveDuplicates();
     }
 
     @Test
@@ -532,9 +621,9 @@ class DiscogsImportJobServiceTest {
 
         assertThat(imported.getImported()).isEqualTo(2);
         assertThat(imported.getFailed()).isZero();
-        assertThat(discoRepository.count()).isEqualTo(1);
-        assertThat(discoRepository.findAll()).singleElement()
-                .satisfies(disco -> assertThat(disco.getCantidadCopias()).isEqualTo(2));
+        assertThat(discoRepository.count()).isEqualTo(2);
+        assertThat(discoRepository.findAll()).allSatisfy(disco ->
+                assertThat(disco.getCantidadCopias()).isEqualTo(1));
         assertThat(rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(
                 job.getIdDiscogsImportJob()))
                 .satisfiesExactly(
@@ -692,6 +781,14 @@ class DiscogsImportJobServiceTest {
                 "A1. Track",
                 List.of(new TrackInfo("A1", "Track", null, "https://youtube.test/track"))
         );
+    }
+
+    private DiscogsImportJob completedJob(String filename) {
+        return jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo(filename)
+                .nombreHoja("Links")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
     }
 
     private DiscogsImportRow parsedRow(DiscogsImportJob job, int rowNumber, long releaseId) {

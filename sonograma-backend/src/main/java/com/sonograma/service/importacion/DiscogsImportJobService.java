@@ -857,7 +857,7 @@ public class DiscogsImportJobService {
                 .tracklist(row.getTracklist())
                 .imagenUrl(row.getImageUrl())
                 .previewUrl(null)
-                .discogsUrl(row.getNormalizedDiscogsUrl())
+                .discogsUrl(catalogDiscogsUrl(row))
                 .procedencia(ImportMetadataNormalizer.SOURCE_DISCOGS)
                 .notas(catalogNotes(row))
                 .build();
@@ -902,6 +902,8 @@ public class DiscogsImportJobService {
         if (!blank(row.getTracklist())) disco.setTracklist(row.getTracklist());
         if (!blank(row.getImageUrl())) disco.setImagenUrl(row.getImageUrl());
         disco.setPreviewUrl(null);
+        String discogsUrl = catalogDiscogsUrl(row);
+        if (!blank(discogsUrl)) disco.setDiscogsUrl(discogsUrl);
         // Discogs Excel imports are unconditionally used records. The spreadsheet
         // condition is a separate physical grade (NM, VG+, etc.).
         disco.setCondicion(CondicionDisco.USADO);
@@ -930,37 +932,45 @@ public class DiscogsImportJobService {
     }
 
     private Optional<Disco> findExistingDisco(DiscogsImportRow row) {
-        if (row.getResolvedReleaseId() != null) {
+        Long releaseId = releaseIdentity(row);
+        if (releaseId != null) {
             Optional<Disco> fromImportedDiscogsRow = rowRepository
                     .findByResolvedReleaseIdAndImportedCatalogProductIsNotNullOrderByIdDiscogsImportRowDesc(
-                            row.getResolvedReleaseId())
+                            releaseId)
                     .stream()
                     .map(DiscogsImportRow::getImportedCatalogProduct)
                     .filter(Objects::nonNull)
                     .findFirst();
             if (fromImportedDiscogsRow.isPresent()) return fromImportedDiscogsRow;
-        }
-        if (!blank(row.getNormalizedDiscogsUrl())) {
-            Optional<Disco> byUrl = discoRepository.findByDiscogsUrl(row.getNormalizedDiscogsUrl());
-            if (byUrl.isPresent()) {
-                return byUrl;
-            }
-        }
-        if (row.getResolvedReleaseId() != null) {
+
             Optional<Disco> byRelease = discoRepository.findByDiscogsUrl(
-                    "https://www.discogs.com/release/" + row.getResolvedReleaseId());
+                    canonicalReleaseUrl(releaseId));
             if (byRelease.isPresent()) return byRelease;
-        }
-        boolean supplierOriginCode = isSupplierOriginCode(row.getInternalCode());
-        if (!blank(row.getInternalCode()) && !supplierOriginCode) {
-            Optional<Disco> byCode = discoRepository.findByCodigoInternoIgnoreCase(row.getInternalCode());
-            if (byCode.isPresent()) {
-                return byCode;
+
+            // Older imports stored the normalized source URL. Check it only for
+            // release rows: a master URL is not a concrete catalog identity.
+            if ("release".equalsIgnoreCase(row.getDiscogsType())
+                    && !blank(row.getNormalizedDiscogsUrl())) {
+                Optional<Disco> bySourceReleaseUrl = discoRepository
+                        .findByDiscogsUrl(row.getNormalizedDiscogsUrl());
+                if (bySourceReleaseUrl.isPresent()) return bySourceReleaseUrl;
             }
-        }
-        if (supplierOriginCode) {
+
+            // A resolved release is authoritative. Never fall through to code,
+            // artist/title, or format matching for a different release.
             return Optional.empty();
         }
+
+        // Unresolved master/source links are also not safe merge keys. In
+        // particular, neither their Excel business code nor their master URL
+        // identifies a concrete physical release.
+        if (row.getDiscogsId() != null || !blank(row.getNormalizedDiscogsUrl())) {
+            return Optional.empty();
+        }
+
+        // Link-less manual-review rows retain the legacy descriptive fallback.
+        // codigoInterno is deliberately absent: Excel Codigo is provenance data,
+        // not a globally unique product identifier for this import pipeline.
         if (blank(row.getArtist()) || blank(row.getTitle())) {
             return Optional.empty();
         }
@@ -1034,8 +1044,18 @@ public class DiscogsImportJobService {
         }
     }
 
-    private boolean isSupplierOriginCode(String code) {
-        return !blank(code) && normalize(code).matches("[a-z]{2,4}");
+    private Long releaseIdentity(DiscogsImportRow row) {
+        if (row.getResolvedReleaseId() != null) return row.getResolvedReleaseId();
+        return "release".equalsIgnoreCase(row.getDiscogsType()) ? row.getDiscogsId() : null;
+    }
+
+    private String catalogDiscogsUrl(DiscogsImportRow row) {
+        Long releaseId = releaseIdentity(row);
+        return releaseId == null ? row.getNormalizedDiscogsUrl() : canonicalReleaseUrl(releaseId);
+    }
+
+    private String canonicalReleaseUrl(Long releaseId) {
+        return "https://www.discogs.com/release/" + releaseId;
     }
 
     private String importError(DiscogsImportRow row, RuntimeException ex) {
@@ -1179,6 +1199,12 @@ public class DiscogsImportJobService {
                         || "missing_link".equals(row.getMetadataStatus())))
                 .rowsDetected(rows.size())
                 .rowsImported(count(rows, row -> row.getImportedCatalogProductId() != null))
+                .catalogProductsAffected((int) rows.stream()
+                        .filter(row -> "imported".equals(row.getStatus()))
+                        .map(DiscogsImportRowDTO::getImportedCatalogProductId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .count())
                 .rowsRequiringReview(count(rows, this::requiresReview))
                 .rowsWithFullMetadata(count(rows, this::hasFullMetadata))
                 .rowsWithWarnings(count(rows, this::requiresReview))

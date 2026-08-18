@@ -26,7 +26,8 @@ const completedJob = {
   status: 'completed_with_warnings',
   stage: 'completed',
   rowsDetected: 1,
-  rowsImported: 0,
+  rowsImported: 1,
+  catalogProductsAffected: 1,
   rowsRequiringReview: 1,
   rowsWithFullMetadata: 0,
   rowsWithWarnings: 1,
@@ -46,7 +47,7 @@ const completedJob = {
   coversMissing: 1,
   youtubeLinksFound: 0,
   youtubeTracksMissing: 1,
-  imported: 0,
+  imported: 1,
   alreadyImported: 0,
   warnings: 1,
   rows: [{
@@ -81,6 +82,9 @@ describe('DiscogsTab Excel import', () => {
     expect(await screen.findByText('Filas detectadas')).toBeInTheDocument()
     expect(screen.getByText('Estado Excel: vendidos')).toBeInTheDocument()
     expect(screen.getByText('Catálogo: USADO')).toBeInTheDocument()
+    expect(screen.getByText('Copias importadas en esta carga')).toBeInTheDocument()
+    expect(screen.getByText('Productos de catálogo afectados')).toBeInTheDocument()
+    expect(screen.getByText('Filas asociadas al catálogo')).toBeInTheDocument()
     expect(screen.queryByText(/Vendida — omitida/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', {
       name: 'Importar todas las filas identificables (1)',

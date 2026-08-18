@@ -476,7 +476,9 @@ function ExcelLinks() {
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-2">
             {[
               ['Filas detectadas', job.rowsDetected ?? job.realRowsRead ?? job.totalRowsRead],
-              ['Filas importadas', job.rowsImported],
+              ['Filas asociadas al catálogo', job.rowsImported],
+              ['Copias importadas en esta carga', job.imported],
+              ['Productos de catálogo afectados', job.catalogProductsAffected],
               ['Requieren revisión', job.rowsRequiringReview],
               ['Metadata completa', job.rowsWithFullMetadata],
               ['Con advertencias', job.rowsWithWarnings],
@@ -656,7 +658,9 @@ function ExcelLinks() {
                 <span>✓ Metadata obtenida: {job.metadataFetched || 0}</span>
                 <span>✓ Portadas almacenadas: {job.coversDownloaded || 0}</span>
                 <span>✓ Links YouTube: {job.youtubeLinksFound || 0}</span>
-                <span>✓ Importadas al catálogo: {job.rowsImported || 0}</span>
+                <span>✓ Copias físicas importadas en esta carga: {job.imported || 0}</span>
+                <span>✓ Filas asociadas al catálogo: {job.rowsImported || 0}</span>
+                <span>✓ Productos de catálogo afectados: {job.catalogProductsAffected || 0}</span>
                 <span>✓ Requieren revisión: {job.rowsRequiringReview || 0}</span>
               </div>
               {(job.rows || []).some(row => row.errorMessage || row.warningMessage) && (
