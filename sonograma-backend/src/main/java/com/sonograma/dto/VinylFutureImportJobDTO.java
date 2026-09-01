@@ -27,5 +27,6 @@ public record VinylFutureImportJobDTO(
     VinylFutureImportSummaryDTO summary,
     List<String> warnings,
     List<String> errors,
-    List<VinylFutureImportJobItemDTO> items
+    List<VinylFutureImportJobItemDTO> items,
+    List<InvoiceSourceRowDTO> sourceRows
 ) {}

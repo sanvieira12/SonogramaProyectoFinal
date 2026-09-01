@@ -39,6 +39,21 @@ public class PedidoItem {
     @Builder.Default
     private Integer lineaFactura = 0;
 
+    @Column(name = "pagina_fuente")
+    private Integer paginaFuente;
+
+    @Column(name = "texto_fuente", columnDefinition = "TEXT")
+    private String textoFuente;
+
+    @Column(name = "estado_lectura", length = 40)
+    private String estadoLectura;
+
+    @Column(name = "motivo_revision", columnDefinition = "TEXT")
+    private String motivoRevision;
+
+    @Column(name = "cantidad_estimada")
+    private Integer cantidadEstimada;
+
     @Column(name = "formato")
     private String formato;
 

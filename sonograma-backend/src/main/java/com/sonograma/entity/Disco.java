@@ -27,6 +27,10 @@ public class Disco {
     @Column(name = "codigo_interno")
     private String codigoInterno;
 
+    /** Identidad normalizada del catálogo del proveedor Vinyl Future. */
+    @Column(name = "vinylfuture_supplier_code_normalized", unique = true, length = 180)
+    private String vinylFutureSupplierCodeNormalized;
+
     @Column(name = "codigo_qr", unique = true)
     private String codigoQr;
 

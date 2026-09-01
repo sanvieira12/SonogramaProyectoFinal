@@ -35,6 +35,10 @@ public class Pedido {
     @Column(name = "origen_importacion")
     private String origenImportacion;
 
+    /** Clave idempotente reservada exclusivamente para una factura Vinyl Future. */
+    @Column(name = "vinylfuture_operation_key", unique = true, length = 240)
+    private String vinylFutureOperationKey;
+
     @Column(name = "destinatario")
     private String destinatario;
 

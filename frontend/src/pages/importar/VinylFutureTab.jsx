@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { api } from '../../api/sonograma'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, resolveApiUrl } from '../../api/sonograma'
 import { downloadBlob } from '../../utils/downloadBlob'
 
 function Spinner({ text }) {
@@ -235,12 +235,205 @@ function ExcelImport() {
   )
 }
 
+function dato(value) {
+  return value == null || value === '' ? 'Sin información disponible' : value
+}
+
+function ManualUrlImport({ pendingItem, onResolved, onCancelPending }) {
+  const [url, setUrl] = useState('')
+  const [estado, setEstado] = useState('idle')
+  const [preview, setPreview] = useState(null)
+  const [cantidad, setCantidad] = useState(() => pendingItem?.estimatedQuantity > 0 ? pendingItem.estimatedQuantity : 1)
+  const [resultado, setResultado] = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [descargando, setDescargando] = useState('')
+
+  async function buscar() {
+    if (!url.trim()) return
+    setEstado('searching')
+    setErrorMsg('')
+    try {
+      const data = await api.importar.vinylfutureManualBuscar(url.trim(), pendingItem?.pendingItemId)
+      setPreview(data)
+      setCantidad(data.suggestedQuantity > 0 ? data.suggestedQuantity : 1)
+      setEstado('preview')
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo buscar el producto')
+      setEstado('error')
+    }
+  }
+
+  async function confirmar() {
+    if (!preview || !Number.isInteger(Number(cantidad)) || Number(cantidad) < 1) {
+      setErrorMsg('La cantidad debe ser un número entero mayor que cero.')
+      return
+    }
+    setEstado('saving')
+    setErrorMsg('')
+    try {
+      const data = await api.importar.vinylfutureManualConfirmar(preview.previewId, Number(cantidad))
+      setResultado(data)
+      setEstado('done')
+      if (data.pendingItemResolved) onResolved?.()
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo agregar el producto al catálogo')
+      setEstado('preview')
+    }
+  }
+
+  async function descargarPortada() {
+    setDescargando('cover')
+    setErrorMsg('')
+    try {
+      const data = await api.importar.vinylfuturePortada(preview.previewId)
+      downloadBlob(data.blob, `${preview.catalogueCode || 'vinylfuture'}-portada.jpg`, data.contentDisposition)
+    } catch (err) {
+      setErrorMsg(err.message || 'Portada no disponible')
+    } finally {
+      setDescargando('')
+    }
+  }
+
+  async function descargarZip() {
+    setDescargando('zip')
+    setErrorMsg('')
+    try {
+      const data = await api.importar.vinylfutureProductoZip(preview.previewId)
+      downloadBlob(data.blob, data.filename, data.contentDisposition)
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo generar el archivo ZIP del producto.')
+    } finally {
+      setDescargando('')
+    }
+  }
+
+  function reiniciar() {
+    setUrl('')
+    setPreview(null)
+    setResultado(null)
+    setErrorMsg('')
+    setEstado('idle')
+    setCantidad(1)
+    onCancelPending?.()
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-950/40 space-y-4">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#5C7D87] dark:text-[#7E9FA8]">B. Importación manual</p>
+        <h3 className="mt-1 font-semibold text-slate-800 dark:text-stone-200">Importar producto por enlace</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-stone-400">
+          Pegá un enlace de producto de Vinyl Future, revisá la información y elegí cuántas copias agregar.
+        </p>
+      </div>
+
+      {pendingItem && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+          <p className="font-semibold">Resolviendo un elemento de la factura {pendingItem.invoiceNumber || 'sin número'}</p>
+          <p className="mt-1">Página {pendingItem.pageNumber || 'sin información'}: {pendingItem.sourceText}</p>
+          <button type="button" onClick={reiniciar} className="mt-2 underline">Cancelar resolución</button>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <label className="flex-1 text-xs font-medium text-slate-600 dark:text-stone-300">
+          Enlace de Vinyl Future
+          <input
+            type="url"
+            value={url}
+            onChange={event => setUrl(event.target.value)}
+            placeholder="https://www.vinylfuture.com/..."
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-[#7E9FA8] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+          />
+        </label>
+        <button type="button" onClick={buscar} disabled={!url.trim() || estado === 'searching'}
+          className="self-end rounded-lg bg-[#5C7D87] px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">
+          {estado === 'searching' ? 'Buscando información…' : 'Buscar'}
+        </button>
+      </div>
+
+      {estado === 'searching' && <Spinner text="Buscando información del producto…" />}
+
+      {preview && (
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-stone-800 space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="h-36 w-36 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-stone-800 dark:bg-stone-900">
+              {preview.coverAvailable ? (
+                <img src={resolveApiUrl(preview.coverUrl)} alt={`Portada de ${preview.title || 'producto Vinyl Future'}`} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center p-3 text-center text-xs text-slate-400">Portada no disponible</div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Producto encontrado</p>
+              <h4 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{dato(preview.artist)} — {dato(preview.title)}</h4>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                {[
+                  ['Código', preview.catalogueCode], ['Formato', preview.format], ['Sello', preview.label],
+                  ['Año', preview.year], ['Género', preview.genre], ['País', preview.country],
+                ].map(([label, value]) => (
+                  <div key={label}><span className="text-slate-400">{label}: </span><span className="text-slate-700 dark:text-stone-300">{dato(value)}</span></div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-slate-500 dark:text-stone-400">Estado de metadatos: {preview.metadataStatus}</p>
+              <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${preview.existingProduct
+                ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
+                : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300'}`}>
+                {preview.existingProduct
+                  ? 'Producto ya existente. Se reutilizará el producto y se agregarán las copias seleccionadas al stock.'
+                  : 'Producto nuevo. Se creará en el catálogo con las copias seleccionadas.'}
+              </div>
+            </div>
+          </div>
+
+          {preview.tracks?.length > 0 ? (
+            <p className="text-xs text-slate-500 dark:text-stone-400">Previsualizaciones de audio disponibles: {preview.tracks.length}</p>
+          ) : (
+            <p className="text-xs text-slate-400">Audio: Sin información disponible</p>
+          )}
+
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs font-medium text-slate-600 dark:text-stone-300">
+              Copias físicas a agregar
+              <input type="number" min="1" step="1" value={cantidad}
+                onChange={event => setCantidad(event.target.value)}
+                className="mt-1 block w-28 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900" />
+            </label>
+            <button type="button" onClick={confirmar} disabled={estado === 'saving' || estado === 'done'}
+              className="rounded-lg bg-[#5C7D87] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+              {estado === 'saving' ? 'Agregando al catálogo…' : preview.existingProduct ? 'Agregar copia al stock' : 'Agregar al catálogo'}
+            </button>
+            <button type="button" onClick={descargarPortada} disabled={!preview.coverAvailable || Boolean(descargando)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:opacity-40 dark:border-stone-700 dark:text-stone-300">
+              {descargando === 'cover' ? 'Descargando…' : preview.coverAvailable ? 'Descargar portada' : 'Portada no disponible'}
+            </button>
+            <button type="button" onClick={descargarZip} disabled={Boolean(descargando)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:opacity-40 dark:border-stone-700 dark:text-stone-300">
+              {descargando === 'zip' ? 'Generando ZIP…' : 'Descargar ZIP del producto'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {resultado && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300">
+          {resultado.alreadyProcessed
+            ? 'Esta operación ya había sido procesada; no se agregaron copias duplicadas.'
+            : `${resultado.catalogueStatus === 'NUEVO' ? 'Producto creado' : 'Producto existente reutilizado'}: se agregaron ${resultado.addedCopies} copia(s). Stock resultante: ${resultado.resultingStock}.`}
+        </div>
+      )}
+      {errorMsg && <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>}
+    </section>
+  )
+}
+
 // ── Sub-section B: existing PDF → ZIP export ─────────────────────────────────
 
-function PdfExport() {
+function PdfExport({ onImportFinished }) {
   const [archivo, setArchivo] = useState(null)
   const [estado, setEstado] = useState('idle')
   const [job, setJob] = useState(null)
+  const [validacion, setValidacion] = useState(null)
   const [exportando, setExportando] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [segundos, setSegundos] = useState(0)
@@ -269,16 +462,46 @@ function PdfExport() {
   async function procesar() {
     if (!archivo) return
     setSegundos(0)
+    setEstado('validating')
+    setErrorMsg('')
+    try {
+      const validation = await api.importar.vinylfutureValidar(archivo)
+      setValidacion(validation)
+      if (!validation.consistent || validation.unparsedRows > 0 || validation.errors?.length > 0) {
+        setEstado('review')
+        return
+      }
+      await iniciarImportacion(validation.validationId, false)
+    } catch (err) {
+      setErrorMsg(err.message || 'Error al validar el PDF')
+      setEstado('error')
+    }
+  }
+
+  async function iniciarImportacion(validationId, continuarParcial) {
+    setSegundos(0)
     setEstado('loading')
     setErrorMsg('')
     try {
-      const start = await api.importar.vinylfutureCatalogo(archivo)
+      const start = await api.importar.vinylfutureConfirmar(validationId, continuarParcial)
       const firstJob = await api.importar.vinylfutureJob(start.jobId)
       setJob(firstJob)
     } catch (err) {
       setErrorMsg(err.message || 'Error al procesar el PDF')
       setEstado('error')
     }
+  }
+
+  async function cancelarImportacion() {
+    const validationId = validacion?.validationId
+    if (validationId) {
+      try {
+        await api.importar.vinylfutureCancelar(validationId)
+      } catch {
+        // La validación no produce cambios; el reinicio local sigue siendo seguro.
+      }
+    }
+    reset()
   }
 
   useEffect(() => {
@@ -329,7 +552,7 @@ function PdfExport() {
   }
 
   function reset() {
-    setArchivo(null); setJob(null)
+    setArchivo(null); setJob(null); setValidacion(null)
     setEstado('idle'); setErrorMsg(''); setSegundos(0); setExportSegundos(0)
   }
 
@@ -337,6 +560,10 @@ function PdfExport() {
   const progress = Math.max(0, Math.min(job?.progressPercent || 0, 100))
   const activeStep = job?.currentStep || 'Factura recibida'
   const canDownloadZip = estado === 'done' && Boolean(job?.importId || resumen?.importId)
+
+  useEffect(() => {
+    if (estado === 'done') onImportFinished?.()
+  }, [estado, onImportFinished])
 
   return (
     <div className="space-y-4">
@@ -355,6 +582,61 @@ function PdfExport() {
           </button>
         </>
       )}
+      {estado === 'validating' && (
+        <div className="rounded-xl border border-[#7E9FA8]/20 bg-[#7E9FA8]/5 px-4 py-3">
+          <Spinner text="Validando factura…" />
+        </div>
+      )}
+      {estado === 'review' && validacion && (
+        <div className="space-y-4 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+          <div>
+            <p className="font-semibold text-amber-800 dark:text-amber-300">Se detectaron elementos que requieren revisión</p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              Ningún cambio fue realizado todavía en el catálogo ni en el stock.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              ['Cantidad declarada', validacion.declaredQuantity],
+              ['Filas detectadas', validacion.detectedSourceRows],
+              ['Copias válidas', validacion.parsedPhysicalQuantity],
+              ['Copias pendientes', validacion.unparsedRows > 0 && validacion.pendingPhysicalQuantity === 0
+                ? 'Sin determinar'
+                : validacion.pendingPhysicalQuantity],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-amber-200 px-3 py-2 dark:border-amber-800">
+                <p className="text-[10px] uppercase tracking-wider text-amber-700/70 dark:text-amber-500">{label}</p>
+                <p className="text-lg font-bold text-amber-900 dark:text-amber-200">{value ?? 'No disponible'}</p>
+              </div>
+            ))}
+          </div>
+          {validacion.sourceRows?.filter(row => row.status === 'REVIEW_REQUIRED').map(row => (
+            <div key={row.sourceRowNumber} className="rounded-lg border border-red-200 bg-white/70 p-3 text-xs dark:border-red-900 dark:bg-stone-950/40">
+              <p className="font-semibold text-red-700 dark:text-red-300">No se pudo interpretar una línea de producto.</p>
+              <p className="mt-1 text-slate-600 dark:text-stone-300">Página: {row.pageNumber || 'No disponible'}</p>
+              <p className="mt-1 break-words text-slate-600 dark:text-stone-300">Texto detectado: {row.sourceText}</p>
+              <p className="mt-1 text-red-600 dark:text-red-400">Motivo: {row.reason}</p>
+              {row.estimatedQuantity != null && <p className="mt-1 text-slate-600 dark:text-stone-300">Cantidad estimada: {row.estimatedQuantity}</p>}
+            </div>
+          ))}
+          {validacion.errors?.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-red-700 dark:text-red-300">
+              {validacion.errors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => iniciarImportacion(validacion.validationId, true)}
+              disabled={validacion.parsedPhysicalQuantity < 1}
+              className="rounded-lg bg-[#5C7D87] px-4 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">
+              Continuar con {validacion.parsedPhysicalQuantity} copias válidas
+            </button>
+            <button onClick={cancelarImportacion}
+              className="rounded-lg border border-amber-400 px-4 py-2.5 text-sm font-medium text-amber-800 dark:text-amber-300">
+              Cancelar importación
+            </button>
+          </div>
+        </div>
+      )}
       {estado === 'loading' && (
         <div className="rounded-xl border border-[#7E9FA8]/20 bg-[#7E9FA8]/5 px-4 py-3">
           <Spinner text={`Procesando factura · ${activeStep}`} />
@@ -369,13 +651,19 @@ function PdfExport() {
       {estado === 'done' && (
         <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
           <p className="font-medium text-emerald-700 dark:text-emerald-400 text-sm mb-3">
-            {job?.status === 'COMPLETED_WITH_ERRORS' ? 'Completado con errores' : 'Completado'}: {resumen?.recordsImported || 0} discos agregados al catálogo
+            {resumen?.partialImport
+              ? 'Importación completada con elementos pendientes'
+              : job?.status === 'COMPLETED_WITH_ERRORS'
+                ? 'Importación completada con advertencias'
+                : 'Factura validada e importada correctamente'}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             {[
-              ['Productos detectados', job?.totalItems ?? resumen?.recordsDetected],
-              ['Unidades totales', job?.totalQuantity],
-              ['Importados', job?.successCount ?? resumen?.recordsImported],
+              ['Factura', resumen?.invoiceNumber || job?.invoiceNumber],
+              ['Cantidad declarada', resumen?.declaredCopies ?? job?.totalQuantity],
+              ['Copias importadas', resumen?.importedCopies],
+              ['Copias pendientes', resumen?.pendingCopies],
+              ['Productos procesados', job?.successCount ?? resumen?.recordsImported],
               ['Omitidos', job?.skippedCount],
               ['Errores', job?.failedCount],
               ['Portadas encontradas', resumen?.coversFound],
@@ -385,13 +673,15 @@ function PdfExport() {
               ['Audios/portadas fallidos', resumen?.failedMediaDownloads],
               ['YouTube', resumen?.youtubeLinksFound],
               ['QR creados', resumen?.qrEntriesCreated],
-              ['Duplicados', resumen?.skippedDuplicates],
-              ['Links fallidos', resumen?.failedLinks],
-              ['Rate limit', resumen?.rateLimitFailures],
+              ['Productos nuevos', Math.max(0, (resumen?.recordsImported || 0) - (resumen?.skippedDuplicates || 0))],
+              ['Productos ya existentes', resumen?.skippedDuplicates],
+              ['Enlaces sin datos', resumen?.failedLinks],
+              ['Límites del proveedor', resumen?.rateLimitFailures],
+              ['Estado del ZIP', resumen?.zipStatus === 'DISPONIBLE' ? 'Disponible' : 'No disponible'],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-emerald-200 dark:border-emerald-800 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-emerald-600/70 dark:text-emerald-500">{label}</p>
-                <p className="text-lg font-bold text-emerald-800 dark:text-emerald-300">{value || 0}</p>
+                <p className="text-lg font-bold text-emerald-800 dark:text-emerald-300">{value ?? 0}</p>
               </div>
             ))}
           </div>
@@ -413,8 +703,18 @@ function PdfExport() {
           )}
           {resumen?.failedLinkDetails?.length > 0 && (
             <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
-              Sin metadata externa: {resumen.failedLinkDetails.join(', ')}
+              Información adicional pendiente: {resumen.failedLinkDetails.join(', ')}
             </p>
+          )}
+          {job?.sourceRows?.some(row => row.status === 'REVIEW_REQUIRED') && (
+            <details className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+              <summary className="cursor-pointer font-medium">Ver elementos pendientes</summary>
+              <ul className="mt-2 space-y-2">
+                {job.sourceRows.filter(row => row.status === 'REVIEW_REQUIRED').map(row => (
+                  <li key={row.sourceRowNumber}>Página {row.pageNumber}: {row.sourceText} — {row.reason}</li>
+                ))}
+              </ul>
+            </details>
           )}
           <button onClick={exportarZip} disabled={exportando || !canDownloadZip}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500 text-emerald-700 dark:text-emerald-300 text-sm font-medium disabled:opacity-50">
@@ -447,9 +747,72 @@ function PdfExport() {
 }
 
 export default function VinylFutureTab() {
+  const [pendientes, setPendientes] = useState([])
+  const [pendienteSeleccionado, setPendienteSeleccionado] = useState(null)
+  const [errorPendientes, setErrorPendientes] = useState('')
+
+  const cargarPendientes = useCallback(async () => {
+    try {
+      setPendientes(await api.importar.vinylfuturePendientes())
+      setErrorPendientes('')
+    } catch (err) {
+      setErrorPendientes(err.message || 'No se pudieron cargar los elementos pendientes')
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    api.importar.vinylfuturePendientes()
+      .then(data => {
+        if (!cancelled) setPendientes(data)
+      })
+      .catch(err => {
+        if (!cancelled) setErrorPendientes(err.message || 'No se pudieron cargar los elementos pendientes')
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  function handleResolved() {
+    setPendienteSeleccionado(null)
+    cargarPendientes()
+  }
+
   return (
     <div className="space-y-8">
-      <PdfExport />
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-950/40">
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#5C7D87] dark:text-[#7E9FA8]">A. Factura PDF</p>
+        <PdfExport onImportFinished={cargarPendientes} />
+      </section>
+
+      {pendientes.length > 0 && (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950/20 space-y-3">
+          <div>
+            <h3 className="font-semibold text-amber-900 dark:text-amber-200">Elementos pendientes de facturas</h3>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Elegí un elemento y vinculalo explícitamente con el producto correcto.</p>
+          </div>
+          {pendientes.map(item => (
+            <div key={item.pendingItemId} className="flex flex-col justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 p-3 text-xs dark:border-amber-900 dark:bg-stone-950/40 sm:flex-row sm:items-center">
+              <div>
+                <p className="font-semibold text-slate-800 dark:text-stone-200">Factura {item.invoiceNumber || 'sin número'} · página {item.pageNumber || 'sin información'}</p>
+                <p className="mt-1 text-slate-600 dark:text-stone-400">{item.sourceText}</p>
+                <p className="mt-1 text-amber-700 dark:text-amber-400">{item.reviewReason}</p>
+              </div>
+              <button type="button" onClick={() => setPendienteSeleccionado(item)}
+                className="shrink-0 rounded-lg bg-amber-700 px-4 py-2 font-medium text-white">
+                Resolver manualmente
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+      {errorPendientes && <p className="text-xs text-red-600 dark:text-red-400">{errorPendientes}</p>}
+
+      <ManualUrlImport
+        key={pendienteSeleccionado?.pendingItemId || 'importacion-manual'}
+        pendingItem={pendienteSeleccionado}
+        onResolved={handleResolved}
+        onCancelPending={() => setPendienteSeleccionado(null)}
+      />
     </div>
   )
 }

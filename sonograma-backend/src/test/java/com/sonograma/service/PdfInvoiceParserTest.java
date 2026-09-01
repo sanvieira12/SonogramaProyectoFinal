@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.InvoiceItem;
+import com.sonograma.dto.InvoiceParseResult;
 import com.sonograma.dto.ParsedInvoice;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -11,6 +12,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +45,44 @@ class PdfInvoiceParserTest {
             return out.toByteArray();
         }
     }
+
+    private byte[] buildPositionedTablePdf(PositionedRow... rows) throws Exception {
+        try (PDDocument doc = new PDDocument();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                writePositionedText(cs, font, 40, 740, "Description");
+                writePositionedText(cs, font, 390, 740, "Unit Price");
+                writePositionedText(cs, font, 460, 740, "Quantity");
+                writePositionedText(cs, font, 520, 740, "Sum");
+
+                float y = 715;
+                for (PositionedRow row : rows) {
+                    writePositionedText(cs, font, 40, y, row.description());
+                    writePositionedText(cs, font, row.unitPriceX(), y, row.unitPrice());
+                    writePositionedText(cs, font, 475, y, row.quantity());
+                    writePositionedText(cs, font, 530, y, row.lineTotal());
+                    y -= 20;
+                }
+            }
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    private void writePositionedText(PDPageContentStream cs, PDType1Font font,
+                                     float x, float y, String text) throws Exception {
+        cs.beginText();
+        cs.setFont(font, 9);
+        cs.newLineAtOffset(x, y);
+        cs.showText(text);
+        cs.endText();
+    }
+
+    private record PositionedRow(String description, String unitPrice, String quantity,
+                                 String lineTotal, float unitPriceX) {}
 
     // ── Test 1: single page – prices, quantities, invoice total ──────────────
 
@@ -298,5 +339,199 @@ class PdfInvoiceParserTest {
         assertEquals("2x12\"", doubleFormat.formato());
         assertEquals("Too Fast Into The Future LP", doubleFormat.album());
         assertTrue(invoice.items().stream().noneMatch(item -> "Postage".equalsIgnoreCase(item.codigoCatalogo())));
+    }
+
+    @Test
+    void preservesUnparseableCandidateWithPageTextAndSpanishReason() throws Exception {
+        byte[] pdf = buildPdf(
+            "Invoice No.: INV-ERROR\n" +
+            "OK01 - Artista- Título     10,00   1   10,00",
+            "BAD02 - Otro Artista- Otro Título     12,00   X   12,00\n" +
+            "Quantity  Postage:  Fees:  Net:  VAT. 7%:  VAT. 19%:  Total:\n" +
+            "2  0,00  0,00  22,00  0,00  0,00  22,00"
+        );
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        assertEquals(1, result.invoice().items().size());
+        assertEquals(2, result.sourceRows().size());
+        assertEquals("REVIEW_REQUIRED", result.sourceRows().get(1).status());
+        assertEquals(2, result.sourceRows().get(1).pageNumber());
+        assertTrue(result.sourceRows().get(1).sourceText().contains("BAD02"));
+        assertEquals("No se pudo determinar la cantidad.", result.sourceRows().get(1).reason());
+        assertTrue(result.errors().stream().anyMatch(error -> error.contains("declarada (2)")));
+    }
+
+    @Test
+    void positionalFallbackParsesMissingWhitespaceBetweenFormatAndUnitPrice() throws Exception {
+        byte[] pdf = buildPositionedTablePdf(new PositionedRow(
+            "GEN22611 - LONG ARTIST- SYNTHESIZING TEN PATTERNS TO A DANCE BEAT LP 2x12\"",
+            "48,79", "2", "97,58", 418
+        ));
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        assertTrue(result.sourceRows().getFirst().sourceText().contains("2x12\"48,79 2 97,58"));
+        assertEquals(1, result.invoice().items().size());
+        InvoiceItem item = result.invoice().items().getFirst();
+        assertEquals("GEN22611", item.codigoCatalogo());
+        assertEquals("LONG ARTIST", item.artista());
+        assertEquals("SYNTHESIZING TEN PATTERNS TO A DANCE BEAT LP", item.album());
+        assertEquals("2x12\"", item.formato());
+        assertEquals(new BigDecimal("48.79"), item.precioUnitario());
+        assertEquals(2, item.cantidad());
+        assertEquals("PARSED", result.sourceRows().getFirst().status());
+    }
+
+    @Test
+    void positionalFallbackRemovesOverlappingPriceGlyphsFromLongDescription() throws Exception {
+        byte[] pdf = buildPositionedTablePdf(new PositionedRow(
+            "LONGBOX77 - Long Artist Collective- A Very Long Anniversary Collection With Restored Mixes And Bonus Material Box Edition (3x12\")",
+            "50,99", "1", "50,99", 418
+        ));
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        InvoiceItem item = result.invoice().items().getFirst();
+        assertEquals("LONGBOX77", item.codigoCatalogo());
+        assertEquals("Long Artist Collective", item.artista());
+        assertEquals("A Very Long Anniversary Collection With Restored Mixes And Bonus Material Box Edition (3x12\")",
+            item.album());
+        assertFalse(item.album().contains("50,99"));
+        assertFalse(item.album().contains("5102,9"));
+        assertFalse(result.sourceRows().getFirst().sourceText()
+            .contains("(3x12\") 50,99 1 50,99"));
+    }
+
+    @Test
+    void candidateWithOnlyFlattenedLineTotalUsesPositionalUnitPrice() throws Exception {
+        byte[] pdf = buildPositionedTablePdf(new PositionedRow(
+            "OVERLAP88 - Another Artist Group- Description Extending Across The Unit Price Column Friends EP",
+            "10,49", "1", "10,49", 418
+        ));
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+        String flattened = result.sourceRows().getFirst().sourceText();
+        java.util.regex.Matcher money = java.util.regex.Pattern.compile("\\d+[,.]\\d{2}").matcher(flattened);
+        int moneyTokens = 0;
+        while (money.find()) moneyTokens++;
+
+        assertEquals(1, moneyTokens);
+        assertEquals(1, result.invoice().items().size());
+        assertEquals(new BigDecimal("10.49"), result.invoice().items().getFirst().precioUnitario());
+        assertEquals("Description Extending Across The Unit Price Column Friends EP",
+            result.invoice().items().getFirst().album());
+    }
+
+    @Test
+    void positionalFallbackRequiresArithmeticConsistency() throws Exception {
+        byte[] pdf = buildPositionedTablePdf(new PositionedRow(
+            "ARITHMETIC9 - Generic Artist- A Description Long Enough To Overlap The Price Column With Additional Words Beyond It",
+            "10,00", "2", "20,00", 418
+        ));
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        assertEquals(1, result.invoice().items().size());
+        assertEquals(new BigDecimal("20.00"), result.invoice().items().getFirst().subtotal());
+        assertEquals("PARSED", result.sourceRows().getFirst().status());
+    }
+
+    @Test
+    void ambiguousPositionalRecoveryRemainsReviewRequired() throws Exception {
+        byte[] pdf = buildPositionedTablePdf(new PositionedRow(
+            "AMBIGUOUS9 - Generic Artist- A Description Long Enough To Overlap The Price Column With Additional Words Beyond It",
+            "10,00", "2", "25,00", 418
+        ));
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        assertTrue(result.invoice().items().isEmpty());
+        assertEquals(1, result.sourceRows().size());
+        assertEquals("REVIEW_REQUIRED", result.sourceRows().getFirst().status());
+        assertEquals("El precio por la cantidad no coincide con el total de la línea recuperada.",
+            result.sourceRows().getFirst().reason());
+    }
+
+    @Test
+    void simpleProductRowsContinueThroughOriginalRegexParser() throws Exception {
+        byte[] pdf = buildPdf("SIMPLE77 - Artist- Uncomplicated Release     12,50   2   0,00");
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+
+        assertEquals(1, result.invoice().items().size());
+        assertEquals(new BigDecimal("25.00"), result.invoice().items().getFirst().subtotal());
+        assertEquals("PARSED", result.sourceRows().getFirst().status());
+    }
+
+    @Test
+    void realVinylFutureRegressionPdfReconcilesAllPhysicalCopies() throws Exception {
+        String defaultFixture = Path.of(
+            System.getProperty("user.home"), "Downloads", "0036-188471.pdf"
+        ).toString();
+        Path fixture = Path.of(System.getProperty("vinylfuture.real-pdf", defaultFixture));
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isRegularFile(fixture),
+            "Fixture real no disponible: " + fixture);
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(Files.readAllBytes(fixture));
+        ParsedInvoice invoice = result.invoice();
+
+        assertEquals(32, invoice.cantidadTotalPdf());
+        assertEquals(32, invoice.items().stream().mapToInt(InvoiceItem::cantidad).sum());
+        assertTrue(result.sourceRows().stream().allMatch(row -> "PARSED".equals(row.status())));
+        assertTrue(result.errors().isEmpty());
+        assertEquals(2, quantityFor(invoice, "LITA22611"));
+        assertEquals(1, quantityFor(invoice, "K7046XXXLP"));
+        assertEquals(1, quantityFor(invoice, "MMV004"));
+        assertEquals(4, quantityFor(invoice, "OYSTER80"));
+        assertEquals(3, quantityFor(invoice, "RCM101120LP"));
+        assertEquals(2, quantityFor(invoice, "TOKO6"));
+
+        InvoiceItem boxSet = invoice.items().stream()
+            .filter(item -> "K7046XXXLP".equals(item.codigoCatalogo()))
+            .findFirst().orElseThrow();
+        assertEquals("DJ-Kicks Kruder & Dorfmeister (30th Anniversary Box) (3x12\")", boxSet.album());
+        assertFalse(boxSet.album().contains("50,99"));
+
+        InvoiceItem longEp = invoice.items().stream()
+            .filter(item -> "MMV004".equals(item.codigoCatalogo()))
+            .findFirst().orElseThrow();
+        assertEquals("Manuel De Lorenzi & Friends Ep", longEp.album());
+        assertFalse(longEp.album().contains("10,49"));
+    }
+
+    @Test
+    void knownRowsFromInvoice0036188471KeepExactRepeatedQuantitiesWithoutInventingMissingRows() throws Exception {
+        byte[] pdf = buildPdf(
+            "Invoice No.: 0036-188471\n" +
+            "OYSTER80 - Michelle- Unfailing Love     10,00   1   10,00\n" +
+            "OYSTER80 - Michelle- Unfailing Love     10,00   2   20,00\n" +
+            "OYSTER80 - Michelle- Unfailing Love     10,00   1   10,00\n" +
+            "RCM101120LP - John Frusciante- The Empyrean     10,00   1   10,00\n" +
+            "RCM101120LP - John Frusciante- The Empyrean     10,00   1   10,00",
+            "RCM101120LP - John Frusciante- The Empyrean     10,00   1   10,00\n" +
+            "TOKO6 - KLARKY CAT- GUMBO     10,00   1   10,00\n" +
+            "TOKO6 - KLARKY CAT- GUMBO     10,00   1   10,00\n" +
+            "Quantity  Postage:  Fees:  Net:  VAT. 7%:  VAT. 19%:  Total:\n" +
+            "32  0,00  0,00  90,00  0,00  0,00  90,00"
+        );
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+        ParsedInvoice invoice = result.invoice();
+
+        assertEquals("0036-188471", invoice.numeroFactura());
+        assertEquals(4, quantityFor(invoice, "OYSTER80"));
+        assertEquals(3, quantityFor(invoice, "RCM101120LP"));
+        assertEquals(2, quantityFor(invoice, "TOKO6"));
+        assertEquals(9, invoice.items().stream().mapToInt(InvoiceItem::cantidad).sum());
+        assertEquals(32, invoice.cantidadTotalPdf());
+        assertTrue(result.errors().stream().anyMatch(error -> error.contains("(32)") && error.contains("(9)")));
+    }
+
+    private int quantityFor(ParsedInvoice invoice, String code) {
+        return invoice.items().stream()
+            .filter(item -> code.equals(item.codigoCatalogo()))
+            .mapToInt(InvoiceItem::cantidad)
+            .sum();
     }
 }

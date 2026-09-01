@@ -16,8 +16,27 @@ public record VinylFutureImportSummaryDTO(
     int failedLinks,
     int skippedDuplicates,
     int rateLimitFailures,
-    List<String> failedLinkDetails
+    List<String> failedLinkDetails,
+    String invoiceNumber,
+    Integer declaredCopies,
+    int importedCopies,
+    int pendingCopies,
+    int pendingSourceRows,
+    boolean partialImport,
+    String zipStatus
 ) {
+    public VinylFutureImportSummaryDTO(
+            String importId, int recordsDetected, int recordsImported, int coversFound,
+            int coversDownloaded, int mp3PreviewsFound, int mp3Downloaded,
+            int youtubeLinksFound, int qrEntriesCreated, int failedMediaDownloads,
+            int failedLinks, int skippedDuplicates, int rateLimitFailures,
+            List<String> failedLinkDetails) {
+        this(importId, recordsDetected, recordsImported, coversFound, coversDownloaded,
+            mp3PreviewsFound, mp3Downloaded, youtubeLinksFound, qrEntriesCreated,
+            failedMediaDownloads, failedLinks, skippedDuplicates, rateLimitFailures,
+            failedLinkDetails, null, null, 0, 0, 0, false, "PENDIENTE");
+    }
+
     public VinylFutureImportSummaryDTO withImportId(String value) {
         return new VinylFutureImportSummaryDTO(
             value,
@@ -33,7 +52,24 @@ public record VinylFutureImportSummaryDTO(
             failedLinks,
             skippedDuplicates,
             rateLimitFailures,
-            failedLinkDetails
+            failedLinkDetails,
+            invoiceNumber,
+            declaredCopies,
+            importedCopies,
+            pendingCopies,
+            pendingSourceRows,
+            partialImport,
+            zipStatus
+        );
+    }
+
+    public VinylFutureImportSummaryDTO withZipStatus(String value) {
+        return new VinylFutureImportSummaryDTO(
+            importId, recordsDetected, recordsImported, coversFound, coversDownloaded,
+            mp3PreviewsFound, mp3Downloaded, youtubeLinksFound, qrEntriesCreated,
+            failedMediaDownloads, failedLinks, skippedDuplicates, rateLimitFailures,
+            failedLinkDetails, invoiceNumber, declaredCopies, importedCopies,
+            pendingCopies, pendingSourceRows, partialImport, value
         );
     }
 }

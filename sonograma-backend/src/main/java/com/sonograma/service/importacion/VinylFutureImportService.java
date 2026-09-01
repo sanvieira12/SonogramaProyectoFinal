@@ -13,6 +13,7 @@ import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
+import com.sonograma.service.VinylFutureCatalogStockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -36,6 +37,7 @@ public class VinylFutureImportService {
     private final DiscoQrCopyService qrCopyService;
     private final AudioPreviewService audioPreviewService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
+    private final VinylFutureCatalogStockService catalogStockService;
 
     private static final Map<String, String> COLUMN_ALIASES = new HashMap<>();
 
@@ -116,12 +118,6 @@ public class VinylFutureImportService {
         for (DiscoImportPreviewDTO preview : seleccionados) {
             if (!preview.getErrores().isEmpty() && tieneErroresCriticos(preview)) continue;
             try {
-                if (preview.getCodigoInterno() != null
-                        && !preview.getCodigoInterno().isBlank()
-                        && discoRepository.findByCodigoInterno(preview.getCodigoInterno()).isPresent()) {
-                    log.info("VinylFuture Excel omitido por código duplicado: {}", preview.getCodigoInterno());
-                    continue;
-                }
                 DiscoRequestDTO req = mapearARequest(preview);
                 if (req.getPrecioVenta() == null && req.getCosto() != null) {
                     CatalogPricingService.PricingResult pricing =
@@ -136,10 +132,16 @@ public class VinylFutureImportService {
                 com.sonograma.entity.Disco disco = DiscoMapper.toEntity(req);
                 disco.setEstado(com.sonograma.enums.EstadoDisco.DISPONIBLE);
                 disco.setCodigoQr(UUID.randomUUID().toString());
-                disco = discoRepository.save(disco);
-                qrCopyService.synchronize(disco);
+                int quantity = preview.getCantidadCopias() != null ? preview.getCantidadCopias() : 1;
+                com.sonograma.entity.Disco candidate = disco;
+                var resolution = catalogStockService.addStock(
+                    preview.getCodigoInterno(),
+                    quantity,
+                    () -> candidate,
+                    existing -> enrichExisting(existing, candidate)
+                );
+                disco = resolution.disco();
                 audioPreviewService.guardarDesdeTracks(disco.getIdDisco(), preview.getTracks());
-                disco = discoRepository.save(disco);
                 preVentaCodeMatcher.linkPendingPreSales(disco);
                 DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
                 dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
@@ -150,6 +152,25 @@ public class VinylFutureImportService {
             }
         }
         return guardados;
+    }
+
+    private void enrichExisting(com.sonograma.entity.Disco existing, com.sonograma.entity.Disco candidate) {
+        if (blank(existing.getArtista())) existing.setArtista(candidate.getArtista());
+        if (blank(existing.getAlbum())) existing.setAlbum(candidate.getAlbum());
+        if (blank(existing.getSelloDiscografico())) existing.setSelloDiscografico(candidate.getSelloDiscografico());
+        if (blank(existing.getGenero())) existing.setGenero(candidate.getGenero());
+        if (blank(existing.getPais())) existing.setPais(candidate.getPais());
+        if (blank(existing.getEstilo())) existing.setEstilo(candidate.getEstilo());
+        if (blank(existing.getFormato())) existing.setFormato(candidate.getFormato());
+        if (blank(existing.getImagenUrl())) existing.setImagenUrl(candidate.getImagenUrl());
+        if (blank(existing.getTracklist())) existing.setTracklist(candidate.getTracklist());
+        if (existing.getAnio() == null) existing.setAnio(candidate.getAnio());
+        if (existing.getTipoDisco() == null) existing.setTipoDisco(candidate.getTipoDisco());
+        if (existing.getCondicion() == null) existing.setCondicion(candidate.getCondicion());
+    }
+
+    private boolean blank(String value) {
+        return value == null || value.isBlank();
     }
 
     private Map<Integer, String> buildColumnMap(Row headerRow) {

@@ -1,13 +1,17 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.InvoiceItem;
+import com.sonograma.dto.InvoiceParseResult;
+import com.sonograma.dto.InvoiceSourceRowDTO;
 import com.sonograma.dto.ParsedInvoice;
 import com.sonograma.dto.TrackInfo;
 import com.sonograma.dto.VinylFutureImportJobDTO;
 import com.sonograma.dto.VinylFutureImportJobStartDTO;
+import com.sonograma.dto.VinylFutureInvoiceValidationDTO;
 import com.sonograma.dto.VinylPageData;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.Pedido;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.VinylFutureImportJobStatus;
 import com.sonograma.repository.DiscoRepository;
@@ -21,8 +25,12 @@ import com.sonograma.service.VinylFutureScraperService;
 import com.sonograma.service.VinylFutureSearchService;
 import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.VinylFutureImportBatchService;
+import com.sonograma.service.VinylFutureManualImportService;
+import com.sonograma.service.VinylFutureCatalogStockService;
+import com.sonograma.service.VinylFutureIdentityNormalizer;
 import com.sonograma.service.ZipBundleService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -44,10 +52,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class ImportControllerTest {
@@ -65,7 +75,18 @@ class ImportControllerTest {
     @Mock private CatalogPricingService pricingService;
     @Mock private VinylFutureImportBatchService importBatchService;
     @Mock private com.sonograma.service.PedidoService pedidoService;
+    @Mock private VinylFutureManualImportService manualImportService;
+    @Mock private VinylFutureCatalogStockService catalogStockService;
     @Mock private PlatformTransactionManager transactionManager;
+    private final VinylFutureIdentityNormalizer identityNormalizer = new VinylFutureIdentityNormalizer();
+
+    @BeforeEach
+    void setUpPedido() {
+        Pedido pedido = Pedido.builder().idPedido(501L).items(new java.util.ArrayList<>()).build();
+        lenient().when(pedidoService.persistirVinylFuture(any(), anyString(), any(), any(), anyBoolean()))
+            .thenReturn(pedido);
+        lenient().when(pedidoService.identidadesVinylFutureImportadas(501L)).thenReturn(java.util.Set.of());
+    }
 
     @Test
     void catalogImportPersistsStructuredDataWithoutBuildingZip() throws Exception {
@@ -93,23 +114,20 @@ class ImportControllerTest {
             List.of(new TrackInfo("A1", "First Track", "/api/importar/vinylfuture/media/CAT-123/a1.mp3", null))
         );
 
-        when(pdfParser.parseInvoice(any(byte[].class))).thenReturn(invoice);
-        when(discoRepository.existsByNumeroFacturaCompra("0031-188471")).thenReturn(false);
+        when(pdfParser.parseInvoiceWithDiagnostics(any(byte[].class))).thenReturn(parseResult(invoice));
         when(searchService.buscar(item)).thenReturn(Optional.of(page.sourceUrl()));
         when(scraperService.scrape(page.sourceUrl())).thenReturn(Optional.of(page));
         when(assetService.storeAssetsWithResult(item, page))
             .thenReturn(new VinylFutureAssetService.AssetStoreResult(storedPage, 1, 1, 0));
-        when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.empty());
-        when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> {
-            Disco disco = invocation.getArgument(0);
+        when(catalogStockService.addStock(eq("CAT-123"), eq(2), any(), any())).thenAnswer(invocation -> {
+            java.util.function.Supplier<Disco> factory = invocation.getArgument(2);
+            Disco disco = factory.get();
             savedDisco[0] = disco;
             disco.setIdDisco(10L);
-            return disco;
+            return new VinylFutureCatalogStockService.Resolution(
+                disco, VinylFutureCatalogStockService.ProductStatus.NEW, 2, 2
+            );
         });
-        when(qrCopyService.synchronize(any(Disco.class))).thenReturn(List.of(
-            DiscoQrCopy.builder().idDisco(10L).copyNumber(1).codigoQr("qr-1").build(),
-            DiscoQrCopy.builder().idDisco(10L).copyNumber(2).codigoQr("qr-2").build()
-        ));
         when(csvExportService.buildCsv(any())).thenReturn("csv");
         Path prebuiltZip = Files.createTempFile("vinylfuture-ready-", ".zip");
         Files.write(prebuiltZip, "ready".getBytes());
@@ -131,6 +149,9 @@ class ImportControllerTest {
             pricingService,
             importBatchService,
             pedidoService,
+            manualImportService,
+            catalogStockService,
+            identityNormalizer,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
@@ -197,6 +218,9 @@ class ImportControllerTest {
             pricingService,
             importBatchService,
             pedidoService,
+            manualImportService,
+            catalogStockService,
+            identityNormalizer,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
@@ -241,20 +265,19 @@ class ImportControllerTest {
             .cantidadCopias(1)
             .build();
 
-        when(pdfParser.parseInvoice(any(byte[].class))).thenReturn(invoice);
-        when(discoRepository.existsByNumeroFacturaCompra("INV-77")).thenReturn(false);
+        when(pdfParser.parseInvoiceWithDiagnostics(any(byte[].class))).thenReturn(parseResult(invoice));
         when(searchService.buscar(item)).thenReturn(Optional.of(page.sourceUrl()));
         when(scraperService.scrape(page.sourceUrl())).thenReturn(Optional.of(page));
         when(assetService.storeAssetsWithResult(item, page))
             .thenReturn(new VinylFutureAssetService.AssetStoreResult(page, 0, 0, 0));
-        when(discoRepository.findByCodigoInterno("CAT-123")).thenReturn(Optional.of(existing));
-        when(discoRepository.save(any(Disco.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(qrCopyService.synchronize(any(Disco.class)))
-            .thenReturn(List.of(
-                DiscoQrCopy.builder().idDisco(10L).copyNumber(1).codigoQr("qr-existing").build(),
-                DiscoQrCopy.builder().idDisco(10L).copyNumber(2).codigoQr("qr-2").build(),
-                DiscoQrCopy.builder().idDisco(10L).copyNumber(3).codigoQr("qr-3").build()
-            ));
+        when(catalogStockService.addStock(eq("CAT-123"), eq(2), any(), any())).thenAnswer(invocation -> {
+            java.util.function.Consumer<Disco> enricher = invocation.getArgument(3);
+            enricher.accept(existing);
+            existing.setCantidadCopias(3);
+            return new VinylFutureCatalogStockService.Resolution(
+                existing, VinylFutureCatalogStockService.ProductStatus.EXISTING, 2, 3
+            );
+        });
         when(csvExportService.buildCsv(any())).thenReturn("csv");
         Path prebuiltZip = Files.createTempFile("vinylfuture-merge-", ".zip");
         Files.write(prebuiltZip, "ready".getBytes());
@@ -276,6 +299,9 @@ class ImportControllerTest {
             pricingService,
             importBatchService,
             pedidoService,
+            manualImportService,
+            catalogStockService,
+            identityNormalizer,
             org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
             transactionManager
         );
@@ -293,7 +319,179 @@ class ImportControllerTest {
             );
         });
         assertThat(existing.getCantidadCopias()).isEqualTo(3);
-        verify(qrCopyService).synchronize(existing);
+        verify(catalogStockService).addStock(eq("CAT-123"), eq(2), any(), any());
         controller.shutdownImportPool();
+    }
+
+    @Test
+    void cancellingAfterValidationDiscrepancyDoesNotPersistOrImportAnything() throws Exception {
+        InvoiceItem valid = new InvoiceItem(
+            "VALID-1", "Artista", "Título", "12",
+            new BigDecimal("10.00"), 1, new BigDecimal("10.00")
+        );
+        ParsedInvoice invoice = invoice(List.of(valid), 2, "INV-PARCIAL");
+        InvoiceSourceRowDTO parsedRow = new InvoiceSourceRowDTO(
+            1, 1, "VALID-1 - Artista- Título 10,00 1 10,00",
+            "PARSED", 1, null, valid
+        );
+        InvoiceSourceRowDTO pendingRow = new InvoiceSourceRowDTO(
+            2, 2, "ROTA-2 - Artista- Título 10,00 X 10,00",
+            "REVIEW_REQUIRED", 1, "No se pudo determinar la cantidad.", null
+        );
+        when(pdfParser.parseInvoiceWithDiagnostics(any(byte[].class))).thenReturn(
+            new InvoiceParseResult(invoice, List.of(parsedRow, pendingRow), List.of(),
+                List.of("La cantidad declarada (2) no coincide con las copias interpretadas (1)."))
+        );
+
+        ImportController controller = controller();
+        VinylFutureInvoiceValidationDTO validation = controller.validarFacturaVinylFuture(
+            new MockMultipartFile("file", "invoice.pdf", "application/pdf", "pdf".getBytes())
+        ).getBody();
+
+        assertThat(validation).isNotNull();
+        assertThat(validation.consistent()).isFalse();
+        assertThat(validation.pendingPhysicalQuantity()).isEqualTo(1);
+        assertThat(controller.cancelarValidacionVinylFuture(validation.validationId()).getStatusCode().value())
+            .isEqualTo(204);
+        verify(pedidoService, never()).persistirVinylFuture(any(), anyString(), any(), any(), eq(true));
+        verify(searchService, never()).buscar(any());
+        controller.shutdownImportPool();
+    }
+
+    @Test
+    void acceptedPartialImportProcessesOnlyValidItemsAndKeepsPendingRowInResult() throws Exception {
+        InvoiceItem valid = new InvoiceItem(
+            "VALID-1", "Artista", "Título", "12",
+            new BigDecimal("10.00"), 1, new BigDecimal("10.00")
+        );
+        ParsedInvoice invoice = invoice(List.of(valid), 2, "INV-PARCIAL-2");
+        InvoiceSourceRowDTO parsedRow = new InvoiceSourceRowDTO(
+            1, 1, "VALID-1 - Artista- Título 10,00 1 10,00",
+            "PARSED", 1, null, valid
+        );
+        InvoiceSourceRowDTO pendingRow = new InvoiceSourceRowDTO(
+            2, 2, "ROTA-2 - Artista- Título 10,00 X 10,00",
+            "REVIEW_REQUIRED", 1, "No se pudo determinar la cantidad.", null
+        );
+        when(pdfParser.parseInvoiceWithDiagnostics(any(byte[].class))).thenReturn(
+            new InvoiceParseResult(invoice, List.of(parsedRow, pendingRow), List.of(),
+                List.of("La cantidad declarada (2) no coincide con las copias interpretadas (1)."))
+        );
+        when(searchService.buscar(valid)).thenReturn(Optional.empty());
+        when(catalogStockService.addStock(eq("VALID-1"), eq(1), any(), any())).thenAnswer(invocation -> {
+            java.util.function.Supplier<Disco> factory = invocation.getArgument(2);
+            Disco disco = factory.get();
+            disco.setIdDisco(90L);
+            return new VinylFutureCatalogStockService.Resolution(
+                disco, VinylFutureCatalogStockService.ProductStatus.NEW, 1, 1
+            );
+        });
+        when(csvExportService.buildCsv(any())).thenReturn("csv");
+        Path zip = Files.createTempFile("vinylfuture-partial-", ".zip");
+        when(zipBundleService.buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_INV-PARCIAL-2")))
+            .thenReturn(zip);
+        when(importBatchService.store(any(), any(), anyString(), eq(zip))).thenReturn("partial-1");
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+
+        ImportController controller = controller();
+        VinylFutureInvoiceValidationDTO validation = controller.validarFacturaVinylFuture(
+            new MockMultipartFile("file", "invoice.pdf", "application/pdf", "pdf".getBytes())
+        ).getBody();
+        ResponseEntity<VinylFutureImportJobStartDTO> started = controller.confirmarFacturaVinylFuture(
+            validation.validationId(), true
+        );
+
+        await().untilAsserted(() -> {
+            VinylFutureImportJobDTO job = controller.obtenerJobVinylFuture(started.getBody().jobId()).getBody();
+            assertThat(job.summary()).isNotNull();
+            assertThat(job.summary().partialImport()).isTrue();
+            assertThat(job.summary().importedCopies()).isEqualTo(1);
+            assertThat(job.summary().pendingCopies()).isEqualTo(1);
+            assertThat(job.summary().failedLinks()).isEqualTo(1);
+            assertThat(job.sourceRows()).contains(pendingRow);
+            assertThat(job.sourceRows()).contains(parsedRow);
+            assertThat(job.currentStep()).isEqualTo("Importación completada con elementos pendientes");
+        });
+        verify(searchService).buscar(valid);
+        verify(pedidoService).persistirVinylFuture(
+            any(), eq("invoice.pdf"), eq(invoice), eq(List.of(parsedRow, pendingRow)), eq(true)
+        );
+        verify(zipBundleService).buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_INV-PARCIAL-2"));
+        controller.shutdownImportPool();
+    }
+
+    @Test
+    void zipFailureIsReportedSeparatelyAfterCatalogImportSucceeds() throws Exception {
+        InvoiceItem item = new InvoiceItem(
+            "ZIP-1", "Artista", "Título", "12",
+            BigDecimal.TEN, 1, BigDecimal.TEN
+        );
+        ParsedInvoice invoice = invoice(List.of(item), 1, "INV-ZIP");
+        when(pdfParser.parseInvoiceWithDiagnostics(any(byte[].class))).thenReturn(parseResult(invoice));
+        when(searchService.buscar(item)).thenReturn(Optional.empty());
+        when(catalogStockService.addStock(eq("ZIP-1"), eq(1), any(), any())).thenAnswer(invocation -> {
+            java.util.function.Supplier<Disco> factory = invocation.getArgument(2);
+            Disco disco = factory.get();
+            disco.setIdDisco(91L);
+            return new VinylFutureCatalogStockService.Resolution(
+                disco, VinylFutureCatalogStockService.ProductStatus.NEW, 1, 1
+            );
+        });
+        when(csvExportService.buildCsv(any())).thenReturn("csv");
+        when(zipBundleService.buildZip(eq("csv"), any(), eq("VinylFuture_Invoice_INV-ZIP")))
+            .thenThrow(new IllegalStateException("fallo técnico simulado"));
+        when(importBatchService.store(any(), any(), anyString(), eq(null))).thenReturn("zip-retry-1");
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+
+        ImportController controller = controller();
+        ResponseEntity<VinylFutureImportJobStartDTO> started = controller.importarFacturaAlCatalogo(
+            new MockMultipartFile("file", "invoice.pdf", "application/pdf", "pdf".getBytes())
+        );
+
+        await().untilAsserted(() -> {
+            VinylFutureImportJobDTO job = controller.obtenerJobVinylFuture(started.getBody().jobId()).getBody();
+            assertThat(job.status()).isEqualTo(VinylFutureImportJobStatus.COMPLETED_WITH_ERRORS);
+            assertThat(job.summary()).isNotNull();
+            assertThat(job.summary().importedCopies()).isEqualTo(1);
+            assertThat(job.summary().zipStatus()).isEqualTo("FALLIDO");
+            assertThat(job.warnings()).anyMatch(warning -> warning.startsWith("No se pudo generar el archivo ZIP"));
+        });
+        controller.shutdownImportPool();
+    }
+
+    private ImportController controller() {
+        return new ImportController(
+            pdfParser, searchService, scraperService, assetService, csvExportService,
+            zipBundleService, discoRepository, shippingOrderService, audioPreviewService,
+            qrCopyService, pricingService, importBatchService, pedidoService,
+            manualImportService, catalogStockService, identityNormalizer,
+            org.mockito.Mockito.mock(com.sonograma.service.PreVentaCodeMatcher.class),
+            transactionManager
+        );
+    }
+
+    private ParsedInvoice invoice(List<InvoiceItem> items, int declaredQuantity, String number) {
+        return new ParsedInvoice(
+            items, List.of(), BigDecimal.TEN, declaredQuantity,
+            null, null, null, number, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null
+        );
+    }
+
+    private InvoiceParseResult parseResult(ParsedInvoice invoice) {
+        List<InvoiceSourceRowDTO> rows = new java.util.ArrayList<>();
+        for (int index = 0; index < invoice.items().size(); index++) {
+            InvoiceItem item = invoice.items().get(index);
+            rows.add(new InvoiceSourceRowDTO(
+                index + 1,
+                1,
+                item.codigoCatalogo() + " - " + item.artista() + "- " + item.album(),
+                "PARSED",
+                item.cantidad(),
+                null,
+                item
+            ));
+        }
+        return new InvoiceParseResult(invoice, List.copyOf(rows), List.of(), List.of());
     }
 }

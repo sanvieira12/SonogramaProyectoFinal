@@ -300,6 +300,28 @@ export const api = {
   },
 
   importar: {
+    vinylfutureValidar: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${BASE}/importar/vinylfuture/validar`, {
+        method: 'POST',
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        body: fd,
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const text = await res.text()
+      let data
+      try { data = text ? JSON.parse(text) : null } catch { data = null }
+      if (!res.ok) throw new Error(data?.message || text || 'No se pudo validar la factura')
+      return data
+    },
+    vinylfutureConfirmar: (validationId, continuarParcial = false) =>
+      request(
+        'POST',
+        `/importar/vinylfuture/validaciones/${encodeURIComponent(validationId)}/confirmar?continuarParcial=${continuarParcial}`,
+      ),
+    vinylfutureCancelar: (validationId) =>
+      request('DELETE', `/importar/vinylfuture/validaciones/${encodeURIComponent(validationId)}`),
     vinylfutureCatalogo: async (file) => {
       const fd = new FormData()
       fd.append('file', file)
@@ -316,6 +338,31 @@ export const api = {
       return data
     },
     vinylfutureJob: (jobId) => request('GET', `/importar/vinylfuture/jobs/${encodeURIComponent(jobId)}`),
+    vinylfutureManualBuscar: (url, pendingItemId = null) =>
+      request('POST', '/importar/vinylfuture/manual/buscar', { url, pendingItemId }),
+    vinylfutureManualConfirmar: (previewId, quantity) =>
+      request('POST', `/importar/vinylfuture/manual/${encodeURIComponent(previewId)}/confirmar`, { quantity }),
+    vinylfuturePendientes: () => request('GET', '/importar/vinylfuture/manual/pendientes'),
+    vinylfuturePortada: async (previewId) => {
+      const res = await fetch(`${BASE}/importar/vinylfuture/manual/${encodeURIComponent(previewId)}/portada`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      if (!res.ok) throw new Error(await readResponseMessage(res, 'Portada no disponible'))
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error('Portada no disponible')
+      return { blob, contentDisposition: res.headers.get('Content-Disposition') || '' }
+    },
+    vinylfutureProductoZip: async (previewId) => {
+      const res = await fetch(`${BASE}/importar/vinylfuture/manual/${encodeURIComponent(previewId)}/zip`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      return readZipResponse(res, {
+        fallbackFilename: 'vinylfuture-producto.zip',
+        fallbackError: 'No se pudo generar el archivo ZIP del producto.',
+      })
+    },
     vinylfutureCsv: async (file) => {
       const fd = new FormData()
       fd.append('file', file)

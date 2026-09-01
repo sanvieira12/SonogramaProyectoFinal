@@ -20,5 +20,10 @@ public record PedidoItemResponseDTO(
     BigDecimal precioFinalUyu,
     String portadaUrl,
     Long idDisco,
-    String enrichStatus
+    String enrichStatus,
+    Integer paginaFuente,
+    String textoFuente,
+    String estadoLectura,
+    String motivoRevision,
+    Integer cantidadEstimada
 ) {}

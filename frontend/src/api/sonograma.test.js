@@ -122,6 +122,100 @@ describe('normalizeApiBase', () => {
     )
   })
 
+  it('valida y confirma una factura VinylFuture antes de importarla', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"validationId":"validation-1","consistent":true}'),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        text: () => Promise.resolve('{"jobId":"job-1"}'),
+      })
+
+    await expect(api.importar.vinylfutureValidar(new File(['pdf'], 'factura.pdf')))
+      .resolves.toMatchObject({ validationId: 'validation-1', consistent: true })
+    await expect(api.importar.vinylfutureConfirmar('validation-1', true))
+      .resolves.toEqual({ jobId: 'job-1' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/importar/vinylfuture/validar', expect.objectContaining({
+      method: 'POST',
+      headers: { Authorization: 'Bearer token-1' },
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/importar/vinylfuture/validaciones/validation-1/confirmar?continuarParcial=true',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('busca y confirma un producto Vinyl Future manual con cantidad', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"previewId":"preview-1","catalogueCode":"TEST-1"}'),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"productId":42,"addedCopies":3}'),
+      })
+
+    await api.importar.vinylfutureManualBuscar('https://www.vinylfuture.com/product__1', 9)
+    await api.importar.vinylfutureManualConfirmar('preview-1', 3)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      '/api/importar/vinylfuture/manual/buscar',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://www.vinylfuture.com/product__1', pendingItemId: 9 }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      '/api/importar/vinylfuture/manual/preview-1/confirmar',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ quantity: 3 }) }),
+    )
+  })
+
+  it('descarga la portada y el ZIP individuales del producto Vinyl Future', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const cover = new Blob(['cover'], { type: 'image/jpeg' })
+    const zip = new Blob(['zip'], { type: 'application/zip' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'Content-Type': 'image/jpeg' }),
+        blob: () => Promise.resolve(cover),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          'Content-Type': 'application/zip',
+          'Content-Disposition': 'attachment; filename="producto.zip"',
+        }),
+        blob: () => Promise.resolve(zip),
+      })
+
+    await expect(api.importar.vinylfuturePortada('preview-1')).resolves.toMatchObject({ blob: cover })
+    await expect(api.importar.vinylfutureProductoZip('preview-1')).resolves.toMatchObject({
+      blob: zip, filename: 'producto.zip',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      '/api/importar/vinylfuture/manual/preview-1/portada',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      '/api/importar/vinylfuture/manual/preview-1/zip',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
+
   it('exports VinylFuture CSV ZIP with a filename from Content-Disposition', async () => {
     vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
     const blob = new Blob(['zip'])

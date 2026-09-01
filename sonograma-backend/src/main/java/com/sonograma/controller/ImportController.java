@@ -1,6 +1,9 @@
 package com.sonograma.controller;
 
 import com.sonograma.dto.InvoiceItem;
+import com.sonograma.dto.InvoiceParseResult;
+import com.sonograma.dto.InvoiceProductConsolidationDTO;
+import com.sonograma.dto.InvoiceSourceRowDTO;
 import com.sonograma.dto.ParsedInvoice;
 import com.sonograma.dto.AudioPreviewDTO;
 import com.sonograma.dto.TrackInfo;
@@ -9,7 +12,14 @@ import com.sonograma.dto.VinylFutureImportJobDTO;
 import com.sonograma.dto.VinylFutureImportJobItemDTO;
 import com.sonograma.dto.VinylFutureImportJobStartDTO;
 import com.sonograma.dto.VinylFutureImportSummaryDTO;
+import com.sonograma.dto.VinylFutureInvoiceValidationDTO;
+import com.sonograma.dto.VinylFutureManualConfirmRequestDTO;
+import com.sonograma.dto.VinylFutureManualImportResultDTO;
+import com.sonograma.dto.VinylFutureManualPreviewDTO;
+import com.sonograma.dto.VinylFutureManualSearchRequestDTO;
+import com.sonograma.dto.VinylFuturePendingItemDTO;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.Pedido;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.PricingMode;
@@ -30,6 +40,9 @@ import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.VinylFutureImportBatchService;
 import com.sonograma.service.ZipBundleService;
 import com.sonograma.service.PedidoService;
+import com.sonograma.service.VinylFutureManualImportService;
+import com.sonograma.service.VinylFutureCatalogStockService;
+import com.sonograma.service.VinylFutureIdentityNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -51,6 +64,8 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -76,6 +91,9 @@ import jakarta.annotation.PreDestroy;
 @Slf4j
 public class ImportController {
 
+    private static final Duration VALIDATION_TTL = Duration.ofMinutes(30);
+    private static final int MAX_VALIDATIONS = 20;
+
     private final PdfInvoiceParser pdfParser;
     private final VinylFutureSearchService vinylFutureSearch;
     private final VinylFutureScraperService vinylFutureScraper;
@@ -89,10 +107,52 @@ public class ImportController {
     private final CatalogPricingService catalogPricingService;
     private final VinylFutureImportBatchService importBatchService;
     private final PedidoService pedidoService;
+    private final VinylFutureManualImportService manualImportService;
+    private final VinylFutureCatalogStockService catalogStockService;
+    private final VinylFutureIdentityNormalizer vinylFutureIdentityNormalizer;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService importPool = Executors.newFixedThreadPool(4);
     private final Map<String, VinylFutureJobState> vinylFutureJobs = new ConcurrentHashMap<>();
+    private final Map<String, VinylFutureValidationSession> vinylFutureValidations = new ConcurrentHashMap<>();
+
+    @PostMapping("/vinylfuture/validar")
+    public ResponseEntity<VinylFutureInvoiceValidationDTO> validarFacturaVinylFuture(
+            @RequestParam MultipartFile file) {
+        cleanupValidations();
+        VinylFutureValidationSession session = createValidationSession(file);
+        vinylFutureValidations.put(session.validation().validationId(), session);
+        cleanupValidationOverflow();
+        return ResponseEntity.ok(session.validation());
+    }
+
+    @PostMapping("/vinylfuture/validaciones/{validationId}/confirmar")
+    public ResponseEntity<VinylFutureImportJobStartDTO> confirmarFacturaVinylFuture(
+            @PathVariable String validationId,
+            @RequestParam(defaultValue = "false") boolean continuarParcial) {
+        cleanupValidations();
+        VinylFutureValidationSession session = vinylFutureValidations.remove(validationId);
+        if (session == null) {
+            throw new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "La validación venció o no existe. Volvé a validar la factura."
+            );
+        }
+        if (session.validation().requiresReview() && !continuarParcial) {
+            vinylFutureValidations.put(validationId, session);
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "La factura tiene elementos pendientes. Confirmá expresamente la importación parcial."
+            );
+        }
+        return startVinylFutureJob(session, continuarParcial);
+    }
+
+    @DeleteMapping("/vinylfuture/validaciones/{validationId}")
+    public ResponseEntity<Void> cancelarValidacionVinylFuture(@PathVariable String validationId) {
+        vinylFutureValidations.remove(validationId);
+        return ResponseEntity.noContent().build();
+    }
 
     /**
      * Primary PDF flow: imports complete records into the catalog without forcing a download.
@@ -100,25 +160,74 @@ public class ImportController {
     @PostMapping("/vinylfuture-catalogo")
     public ResponseEntity<VinylFutureImportJobStartDTO> importarFacturaAlCatalogo(
             @RequestParam MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Archivo vacío");
+        VinylFutureValidationSession session = createValidationSession(file);
+        if (session.validation().requiresReview()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Se detectaron problemas en la factura. Usá la validación previa para revisar y confirmar los elementos válidos."
+            );
         }
+        return startVinylFutureJob(session, false);
+    }
+
+    private ResponseEntity<VinylFutureImportJobStartDTO> startVinylFutureJob(
+            VinylFutureValidationSession session,
+            boolean partialImport) {
         String jobId = UUID.randomUUID().toString();
         VinylFutureJobState job = new VinylFutureJobState(jobId);
         job.currentStep = "Factura recibida";
+        job.setValidation(session.validation());
         vinylFutureJobs.put(jobId, job);
-
-        byte[] bytes;
-        try {
-            bytes = file.getBytes();
-        } catch (IOException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No se pudo leer el PDF: " + ex.getMessage(), ex);
-        }
-        importPool.submit(() -> runVinylFutureJob(job, bytes, file.getOriginalFilename()));
+        importPool.submit(() -> runVinylFutureJob(job, session, partialImport));
         return ResponseEntity.accepted().body(new VinylFutureImportJobStartDTO(
             jobId,
             "/importar/vinylfuture/jobs/" + jobId
         ));
+    }
+
+    private VinylFutureValidationSession createValidationSession(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Archivo vacío");
+        }
+        try {
+            byte[] bytes = file.getBytes();
+            InvoiceParseResult parseResult = pdfParser.parseInvoiceWithDiagnostics(bytes);
+            ParsedInvoice invoice = parseResult.invoice();
+            pedidoService.verificarFacturaVinylFutureImportable(invoice.numeroFactura());
+            String validationId = UUID.randomUUID().toString();
+            VinylFutureInvoiceValidationDTO validation = buildValidation(parseResult)
+                .withValidationId(validationId);
+            return new VinylFutureValidationSession(
+                bytes,
+                file.getOriginalFilename(),
+                parseResult,
+                validation,
+                Instant.now()
+            );
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (IOException ex) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "No se pudo leer el PDF: " + ex.getMessage(),
+                ex
+            );
+        }
+    }
+
+    private void cleanupValidations() {
+        Instant cutoff = Instant.now().minus(VALIDATION_TTL);
+        vinylFutureValidations.entrySet().removeIf(entry -> entry.getValue().createdAt().isBefore(cutoff));
+    }
+
+    private void cleanupValidationOverflow() {
+        if (vinylFutureValidations.size() <= MAX_VALIDATIONS) return;
+        vinylFutureValidations.values().stream()
+            .sorted(java.util.Comparator.comparing(VinylFutureValidationSession::createdAt))
+            .limit(vinylFutureValidations.size() - MAX_VALIDATIONS)
+            .map(session -> session.validation().validationId())
+            .toList()
+            .forEach(vinylFutureValidations::remove);
     }
 
     @GetMapping("/vinylfuture/jobs/{jobId}")
@@ -130,13 +239,61 @@ public class ImportController {
         return ResponseEntity.ok(job.toDto());
     }
 
-    private void runVinylFutureJob(VinylFutureJobState job, byte[] bytes, String filename) {
+    @PostMapping("/vinylfuture/manual/buscar")
+    public ResponseEntity<VinylFutureManualPreviewDTO> buscarProductoVinylFuture(
+            @RequestBody VinylFutureManualSearchRequestDTO request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ingresá un enlace de Vinyl Future.");
+        }
+        return ResponseEntity.ok(manualImportService.search(request.url(), request.pendingItemId()));
+    }
+
+    @PostMapping("/vinylfuture/manual/{previewId}/confirmar")
+    public ResponseEntity<VinylFutureManualImportResultDTO> confirmarProductoVinylFuture(
+            @PathVariable String previewId,
+            @RequestBody(required = false) VinylFutureManualConfirmRequestDTO request) {
+        Integer quantity = request == null ? null : request.quantity();
+        return ResponseEntity.ok(manualImportService.confirm(previewId, quantity));
+    }
+
+    @GetMapping("/vinylfuture/manual/pendientes")
+    public ResponseEntity<List<VinylFuturePendingItemDTO>> listarPendientesVinylFuture() {
+        return ResponseEntity.ok(manualImportService.listPendingItems());
+    }
+
+    @GetMapping("/vinylfuture/manual/{previewId}/portada")
+    public ResponseEntity<Resource> descargarPortadaVinylFuture(@PathVariable String previewId) throws IOException {
+        Resource resource = manualImportService.cover(previewId);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"portada-vinylfuture.jpg\"")
+            .contentType(MediaType.parseMediaType(manualImportService.coverContentType(previewId)))
+            .body(resource);
+    }
+
+    @GetMapping("/vinylfuture/manual/{previewId}/zip")
+    public ResponseEntity<StreamingResponseBody> descargarZipProductoVinylFuture(@PathVariable String previewId) {
+        try {
+            Path zipPath = manualImportService.buildSingleZip(previewId);
+            return streamZipResponse(zipPath, "VinylFuture_Producto", true);
+        } catch (Exception ex) {
+            log.warn("No se pudo generar el ZIP individual Vinyl Future {}: {}", previewId, ex.getMessage());
+            return errorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "No se pudo generar el archivo ZIP del producto."
+            );
+        }
+    }
+
+    private void runVinylFutureJob(
+            VinylFutureJobState job,
+            VinylFutureValidationSession session,
+            boolean partialImport) {
         try {
             job.markRunning("Leyendo factura");
             TransactionTemplate tx = new TransactionTemplate(transactionManager);
             ImportProcessingResult result = tx.execute(status -> {
                 try {
-                    return processImport(bytes, filename, job);
+                    return processImport(session, job, partialImport);
                 } catch (IOException ex) {
                     throw new IllegalArgumentException("No se pudo leer el PDF: " + ex.getMessage(), ex);
                 }
@@ -144,22 +301,29 @@ public class ImportController {
             if (result == null) {
                 throw new IllegalStateException("No se pudo completar la importación");
             }
-            job.updateStep("Preparando ZIP", 92);
+            job.updateStep("Generando archivo ZIP", 92);
             String csv = csvExport.buildCsv(result.searchResults());
             String zipRootName = buildZipRootName(result.invoice());
-            Path zipPath = zipBundle.buildZip(csv, result.pageDataMap(), zipRootName);
-            job.updateStep("ZIP listo para descargar", 98);
-            String importId = importBatchService.store(
-                csv,
-                result.pageDataMap(),
-                zipRootName,
-                zipPath
-            );
-            VinylFutureImportSummaryDTO summary = result.summary().withImportId(importId);
+            Path zipPath = null;
+            String zipStatus = "DISPONIBLE";
+            try {
+                zipPath = zipBundle.buildZip(csv, result.pageDataMap(), zipRootName);
+                job.updateStep("ZIP listo para descargar", 98);
+            } catch (Exception zipError) {
+                zipStatus = "FALLIDO";
+                job.addWarning("No se pudo generar el archivo ZIP. La importación al catálogo sí fue guardada.");
+                log.error("No se pudo generar el ZIP del job VinylFuture {}: {}",
+                    job.jobId, zipError.getMessage(), zipError);
+            }
+            String importId = importBatchService.store(csv, result.pageDataMap(), zipRootName, zipPath);
+            VinylFutureImportSummaryDTO summary = result.summary()
+                .withImportId(importId)
+                .withZipStatus(zipStatus);
             job.complete(summary);
         } catch (Exception ex) {
             log.error("Falló job VinylFuture {}: {}", job.jobId, ex.getMessage(), ex);
-            job.fail(ex.getMessage());
+            pedidoService.marcarImportacionVinylFutureFallida(session.parseResult().invoice().numeroFactura());
+            job.fail(safeUserError(ex));
         }
     }
 
@@ -171,7 +335,14 @@ public class ImportController {
     public ResponseEntity<StreamingResponseBody> procesarFactura(@RequestParam MultipartFile file) {
         ImportProcessingResult result;
         try {
-            result = processImport(file.getBytes(), file.getOriginalFilename(), null);
+            VinylFutureValidationSession session = createValidationSession(file);
+            if (session.validation().requiresReview()) {
+                return errorResponse(
+                    HttpStatus.CONFLICT,
+                    "Se detectaron problemas en la factura. Revisá la validación antes de continuar."
+                );
+            }
+            result = processImport(session, null, false);
         } catch (IllegalArgumentException ex) {
             return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
         } catch (IOException e) {
@@ -261,27 +432,38 @@ public class ImportController {
             .body(body);
     }
 
-    private ImportProcessingResult processImport(byte[] bytes, String filename, VinylFutureJobState job) throws IOException {
+    private ImportProcessingResult processImport(
+            VinylFutureValidationSession session,
+            VinylFutureJobState job,
+            boolean partialImport) throws IOException {
+        byte[] bytes = session.pdfBytes();
+        String filename = session.filename();
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Archivo vacío");
         }
 
         log.info("Recibido PDF '{}' ({} bytes). Iniciando importación al catálogo.",
             filename, bytes.length);
-        ParsedInvoice invoice = pdfParser.parseInvoice(bytes);
-        pedidoService.persistirVinylFuture(bytes, filename, invoice);
+        ParsedInvoice invoice = session.parseResult().invoice();
+        Pedido pedido = pedidoService.persistirVinylFuture(
+            bytes,
+            filename,
+            invoice,
+            session.parseResult().sourceRows(),
+            partialImport || session.validation().requiresReview()
+        );
         List<InvoiceItem> invoiceItems = invoice.items();
         if (job != null) {
             job.setInvoice(invoice);
             job.setItems(invoiceItems);
             job.updateStep("Validando productos", 15);
         }
-        if (invoice.numeroFactura() != null && !invoice.numeroFactura().isBlank()
-                && discoRepository.existsByNumeroFacturaCompra(invoice.numeroFactura())) {
-            throw new IllegalArgumentException("La factura " + invoice.numeroFactura()
-                + " ya fue importada. Se bloqueó la importación para evitar duplicados.");
-        }
-        List<InvoiceItem> items = mergeExactRepeatedRows(invoiceItems, job);
+        java.util.Set<String> importedIdentities = pedidoService.identidadesVinylFutureImportadas(pedido.getIdPedido());
+        List<InvoiceItem> items = mergeExactRepeatedRows(invoiceItems, job).stream()
+            .filter(item -> !importedIdentities.contains(
+                vinylFutureIdentityNormalizer.normalize(item.codigoCatalogo())
+            ))
+            .toList();
 
         long searchStarted = System.nanoTime();
         if (job != null) job.updateStep("Buscando metadatos", 25);
@@ -339,6 +521,8 @@ public class ImportController {
         List<Disco> imported = new ArrayList<>();
         int skippedDuplicates = 0;
         int qrEntriesCreated = 0;
+        int importedCopies = 0;
+        int failedImportCopies = 0;
         for (Map.Entry<InvoiceItem, Optional<VinylPageData>> entry : pageDataMap.entrySet()) {
             InvoiceItem item = entry.getKey();
             Optional<VinylPageData> pageData = entry.getValue();
@@ -346,23 +530,26 @@ public class ImportController {
                 .filter(value -> !value.isBlank())
                 .orElse(item.codigoCatalogo());
             try {
-                Optional<Disco> existing = findExistingDisco(item, pageData.orElse(null), catalogCode);
-                Disco disco = existing
-                    .map(existingDisco -> mergeDisco(existingDisco, item, pageData.orElse(null), catalogCode, invoice))
-                    .orElseGet(() -> buildDisco(item, pageData.orElse(null), catalogCode, invoice));
-                disco = discoRepository.save(disco);
                 int purchasedQuantity = item.cantidad() != null ? item.cantidad() : 1;
-                List<com.sonograma.entity.DiscoQrCopy> copies = qrCopyService.synchronize(disco);
-                qrEntriesCreated += existing.isPresent()
-                    ? purchasedQuantity
-                    : copies.size();
+                VinylFutureCatalogStockService.Resolution catalogResult = catalogStockService.addStock(
+                    catalogCode,
+                    purchasedQuantity,
+                    () -> buildDisco(item, pageData.orElse(null), catalogCode, invoice),
+                    existing -> mergeDisco(existing, item, pageData.orElse(null), catalogCode, invoice)
+                );
+                Disco disco = catalogResult.disco();
+                boolean existing = catalogResult.status() == VinylFutureCatalogStockService.ProductStatus.EXISTING;
+                qrEntriesCreated += catalogResult.addedCopies();
                 Disco savedDisco = disco;
                 pageData.ifPresent(page ->
                     audioPreviewService.guardarDesdeTracks(savedDisco.getIdDisco(), page.tracks()));
-                disco = discoRepository.save(disco);
                 preVentaCodeMatcher.linkPendingPreSales(disco);
+                pedidoService.marcarProductoVinylFutureImportado(
+                    pedido.getIdPedido(), catalogCode, disco
+                );
                 imported.add(disco);
-                if (existing.isPresent() && job != null) {
+                importedCopies += purchasedQuantity;
+                if (existing && job != null) {
                     skippedDuplicates++;
                     job.addWarning("Stock actualizado sobre disco existente: " + itemReference(item)
                         + " +" + purchasedQuantity + " copia(s)");
@@ -384,7 +571,8 @@ public class ImportController {
                     youtubeCount
                 );
             } catch (Exception ex) {
-                if (job != null) job.errorItem(item, ex.getMessage());
+                failedImportCopies += item.cantidad() != null ? item.cantidad() : 1;
+                if (job != null) job.errorItem(item, safeUserError(ex));
                 log.warn("No se pudo guardar en BD: {} - {}: {}",
                     item.artista(), item.album(), ex.getMessage());
             }
@@ -409,6 +597,10 @@ public class ImportController {
             .distinct()
             .toList();
 
+        int validationPendingCopies = session.validation().pendingPhysicalQuantity();
+        int totalPendingCopies = validationPendingCopies + failedImportCopies;
+        boolean completedPartially = session.validation().requiresReview() || failedImportCopies > 0;
+        pedidoService.finalizarImportacionVinylFuture(pedido.getIdPedido(), completedPartially);
         VinylFutureImportSummaryDTO summary = new VinylFutureImportSummaryDTO(
             null,
             invoiceItems.size(),
@@ -423,7 +615,14 @@ public class ImportController {
             failedLinks.size(),
             skippedDuplicates,
             0,
-            failedLinks
+            failedLinks,
+            invoice.numeroFactura(),
+            invoice.cantidadTotalPdf(),
+            importedCopies,
+            totalPendingCopies,
+            session.validation().unparsedRows(),
+            completedPartially,
+            "PENDIENTE"
         );
         log.info(
             "Resumen Vinyl Future: detectados={}, importados={}, portadasEncontradas={}, portadasDescargadas={}, "
@@ -480,37 +679,6 @@ public class ImportController {
         return disco;
     }
 
-    private Optional<Disco> findExistingDisco(InvoiceItem item, VinylPageData page, String catalogCode) {
-        if (!blank(catalogCode)) {
-            Optional<Disco> byCode = discoRepository.findByCodigoInterno(catalogCode);
-            if (byCode.isPresent()) {
-                return byCode;
-            }
-        }
-        String artist = firstNonBlank(page != null ? page.artist() : null, item.artista());
-        String album = firstNonBlank(page != null ? page.title() : null, item.album());
-        if (blank(artist) || blank(album)) {
-            return Optional.empty();
-        }
-        String normalizedFormat = normalize(firstNonBlank(page != null ? page.format() : null, item.formato()));
-        String normalizedLabel = normalize(page != null ? page.label() : null);
-        return discoRepository.findByArtistaAndAlbumIgnoreCase(artist, album).stream()
-            .filter(candidate -> matchesByFallback(candidate, normalizedFormat, normalizedLabel))
-            .findFirst();
-    }
-
-    private boolean matchesByFallback(Disco candidate, String normalizedFormat, String normalizedLabel) {
-        String candidateFormat = normalize(candidate.getFormato());
-        String candidateLabel = normalize(candidate.getSelloDiscografico());
-        boolean formatMatches = normalizedFormat.isBlank()
-            || candidateFormat.isBlank()
-            || candidateFormat.equals(normalizedFormat);
-        boolean labelMatches = normalizedLabel.isBlank()
-            || candidateLabel.isBlank()
-            || candidateLabel.equals(normalizedLabel);
-        return formatMatches && labelMatches;
-    }
-
     private Disco mergeDisco(Disco disco, InvoiceItem item, VinylPageData page, String catalogCode, ParsedInvoice invoice) {
         String format = firstNonBlank(page != null ? page.format() : null, item.formato(), disco.getFormato());
         java.math.BigDecimal cost = item.precioUnitario() != null
@@ -533,8 +701,6 @@ public class ImportController {
         if (disco.getCondicion() == null) {
             disco.setCondicion(parseCondition(page != null ? page.condition() : null));
         }
-        disco.setCantidadCopias(Math.max(0, (disco.getCantidadCopias() == null ? 0 : disco.getCantidadCopias())
-            + (item.cantidad() == null ? 1 : item.cantidad())));
         if (disco.getCosto() == null) {
             disco.setCosto(cost);
         }
@@ -604,7 +770,7 @@ public class ImportController {
     }
 
     private String mergeKey(InvoiceItem item) {
-        return normalize(item.codigoCatalogo()) + "|"
+        return firstNonBlank(vinylFutureIdentityNormalizer.normalize(item.codigoCatalogo()), "") + "|"
             + normalize(item.artista()) + "|"
             + normalize(item.album()) + "|"
             + (item.precioUnitario() == null ? "" : item.precioUnitario().stripTrailingZeros().toPlainString());
@@ -619,11 +785,13 @@ public class ImportController {
     }
 
     private boolean strongMatch(InvoiceItem item, VinylPageData page, String sourceUrl) {
-        String code = normalize(item.codigoCatalogo());
-        String pageCode = normalize(page.code());
-        String decodedUrl = normalize(sourceUrl == null ? "" : java.net.URLDecoder.decode(sourceUrl, StandardCharsets.UTF_8));
-        if (!code.isBlank() && (code.equals(pageCode) || decodedUrl.contains(code))) {
-            return true;
+        String code = vinylFutureIdentityNormalizer.normalize(item.codigoCatalogo());
+        String pageCode = vinylFutureIdentityNormalizer.normalize(page.code());
+        if (code != null) {
+            String decodedUrl = sourceUrl == null ? "" : java.net.URLDecoder.decode(sourceUrl, StandardCharsets.UTF_8);
+            String normalizedUrl = java.text.Normalizer.normalize(decodedUrl, java.text.Normalizer.Form.NFKC)
+                .toUpperCase(java.util.Locale.ROOT);
+            return code.equals(pageCode) || normalizedUrl.contains(code);
         }
         String artist = normalize(item.artista());
         String album = normalize(item.album());
@@ -695,6 +863,14 @@ public class ImportController {
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap
     ) {}
 
+    private record VinylFutureValidationSession(
+        byte[] pdfBytes,
+        String filename,
+        InvoiceParseResult parseResult,
+        VinylFutureInvoiceValidationDTO validation,
+        Instant createdAt
+    ) {}
+
     private record AssetProcessingResult(
         Map<InvoiceItem, Optional<VinylPageData>> pageDataMap,
         int coversDownloaded,
@@ -723,6 +899,7 @@ public class ImportController {
         private final List<String> warnings = Collections.synchronizedList(new ArrayList<>());
         private final List<String> errors = Collections.synchronizedList(new ArrayList<>());
         private final List<VinylFutureImportJobItemDTO> items = Collections.synchronizedList(new ArrayList<>());
+        private final List<InvoiceSourceRowDTO> sourceRows = Collections.synchronizedList(new ArrayList<>());
 
         private VinylFutureJobState(String jobId) {
             this.jobId = jobId;
@@ -743,12 +920,24 @@ public class ImportController {
         private synchronized void setInvoice(ParsedInvoice invoice) {
             invoiceNumber = invoice.numeroFactura();
             invoiceDate = invoice.fechaFactura();
-            totalItems = invoice.items().size();
-            totalQuantity = invoice.items().stream()
-                .map(InvoiceItem::cantidad)
-                .filter(java.util.Objects::nonNull)
-                .mapToInt(Integer::intValue)
-                .sum();
+            if (totalItems == null) totalItems = invoice.items().size();
+            if (totalQuantity == null) {
+                totalQuantity = invoice.items().stream()
+                    .map(InvoiceItem::cantidad)
+                    .filter(java.util.Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sum();
+            }
+        }
+
+        private synchronized void setValidation(VinylFutureInvoiceValidationDTO validation) {
+            invoiceNumber = validation.invoiceNumber();
+            invoiceDate = validation.invoiceDate();
+            totalItems = validation.detectedSourceRows();
+            totalQuantity = validation.declaredQuantity();
+            sourceRows.clear();
+            sourceRows.addAll(validation.sourceRows());
+            warnings.addAll(validation.warnings());
         }
 
         private synchronized void setItems(List<InvoiceItem> invoiceItems) {
@@ -794,7 +983,9 @@ public class ImportController {
             status = errors.isEmpty() && warnings.isEmpty()
                 ? VinylFutureImportJobStatus.COMPLETED
                 : VinylFutureImportJobStatus.COMPLETED_WITH_ERRORS;
-            currentStep = status == VinylFutureImportJobStatus.COMPLETED ? "Completado" : "Completado con errores";
+            currentStep = completedSummary.partialImport()
+                ? "Importación completada con elementos pendientes"
+                : (status == VinylFutureImportJobStatus.COMPLETED ? "Completado" : "Completado con advertencias");
             progressPercent = 100;
             completedAt = LocalDateTime.now();
         }
@@ -830,7 +1021,8 @@ public class ImportController {
                 summary,
                 List.copyOf(warnings),
                 List.copyOf(errors),
-                List.copyOf(items)
+                List.copyOf(items),
+                List.copyOf(sourceRows)
             );
         }
 
@@ -961,6 +1153,89 @@ public class ImportController {
 
     private String itemReference(InvoiceItem item) {
         return firstNonBlank(item.codigoCatalogo(), item.artista() + " - " + item.album());
+    }
+
+    private VinylFutureInvoiceValidationDTO buildValidation(InvoiceParseResult parseResult) {
+        ParsedInvoice invoice = parseResult.invoice();
+        int parsedQuantity = invoice.items().stream()
+            .map(InvoiceItem::cantidad)
+            .filter(java.util.Objects::nonNull)
+            .mapToInt(Integer::intValue)
+            .sum();
+        int unparsedRows = (int) parseResult.sourceRows().stream()
+            .filter(row -> row.parsedItem() == null)
+            .count();
+        int estimatedPending = parseResult.sourceRows().stream()
+            .filter(row -> row.parsedItem() == null)
+            .map(InvoiceSourceRowDTO::estimatedQuantity)
+            .filter(java.util.Objects::nonNull)
+            .mapToInt(Integer::intValue)
+            .sum();
+        Integer declared = invoice.cantidadTotalPdf();
+        int discrepancy = declared == null ? 0 : Math.abs(declared - parsedQuantity);
+        int pendingQuantity = Math.max(discrepancy, estimatedPending);
+        boolean consistent = declared != null
+            && declared == parsedQuantity
+            && unparsedRows == 0
+            && parseResult.errors().isEmpty();
+
+        List<InvoiceProductConsolidationDTO> consolidations = buildConsolidations(parseResult.sourceRows());
+        return new VinylFutureInvoiceValidationDTO(
+            null,
+            invoice.numeroFactura(),
+            invoice.fechaFactura(),
+            declared,
+            parseResult.sourceRows().size(),
+            invoice.items().size(),
+            unparsedRows,
+            parsedQuantity,
+            pendingQuantity,
+            consistent,
+            parseResult.warnings(),
+            parseResult.errors(),
+            parseResult.sourceRows(),
+            consolidations
+        );
+    }
+
+    private List<InvoiceProductConsolidationDTO> buildConsolidations(List<InvoiceSourceRowDTO> rows) {
+        Map<String, List<InvoiceSourceRowDTO>> grouped = rows.stream()
+            .filter(row -> row.parsedItem() != null)
+            .collect(Collectors.groupingBy(
+                row -> mergeKey(row.parsedItem()),
+                LinkedHashMap::new,
+                Collectors.toList()
+            ));
+        List<InvoiceProductConsolidationDTO> result = new ArrayList<>();
+        for (List<InvoiceSourceRowDTO> group : grouped.values()) {
+            InvoiceItem item = group.getFirst().parsedItem();
+            result.add(new InvoiceProductConsolidationDTO(
+                item.codigoCatalogo(),
+                item.artista(),
+                item.album(),
+                group.stream().map(InvoiceSourceRowDTO::sourceRowNumber).toList(),
+                group.stream().map(row -> safeQuantity(row.parsedItem())).toList(),
+                group.stream().mapToInt(row -> safeQuantity(row.parsedItem())).sum()
+            ));
+        }
+        return List.copyOf(result);
+    }
+
+    private String safeUserError(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getMessage() != null
+                && current.getMessage().startsWith(current.getCause().getClass().getName())) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message != null && (message.startsWith("La factura ")
+                || message.startsWith("Esta factura ")
+                || message.startsWith("Archivo vacío")
+                || message.startsWith("No se pudo leer el PDF")
+                || message.startsWith("No se pudo completar la importación"))) {
+            return message;
+        }
+        return "Ocurrió un error inesperado durante la importación.";
     }
 
     @GetMapping("/vinylfuture/discos/{idDisco}/media-validation")

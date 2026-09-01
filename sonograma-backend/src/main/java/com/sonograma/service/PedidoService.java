@@ -6,6 +6,7 @@ import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PedidoItem;
 import com.sonograma.enums.*;
 import com.sonograma.exception.RecursoNoEncontradoException;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.PedidoItemRepository;
 import com.sonograma.repository.PedidoRepository;
@@ -43,6 +44,8 @@ public class PedidoService {
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final CatalogPricingService catalogPricingService;
+    private final VinylFutureIdentityNormalizer vinylFutureIdentityNormalizer;
+    private final VinylFutureCatalogStockService vinylFutureCatalogStockService;
 
     private final ExecutorService enrichPool = Executors.newFixedThreadPool(3);
 
@@ -142,13 +145,29 @@ public class PedidoService {
     /** Stores the invoice before optional VinylFuture enrichment and catalog work. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Pedido persistirVinylFuture(byte[] pdfBytes, String filename, ParsedInvoice invoice) {
+        return persistirVinylFuture(pdfBytes, filename, invoice, List.of(), false);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Pedido persistirVinylFuture(
+            byte[] pdfBytes,
+            String filename,
+            ParsedInvoice invoice,
+            List<InvoiceSourceRowDTO> sourceRows,
+            boolean partialImport) {
         String invoiceNumber = ImportMetadataNormalizer.blankToNull(invoice.numeroFactura());
         if (invoiceNumber == null) {
             throw new IllegalArgumentException("La factura VinylFuture no contiene número de factura");
         }
-        if (pedidoRepository.findByOrigenImportacionAndNumeroFactura("vinylfuture", invoiceNumber).isPresent()) {
-            throw new IllegalArgumentException("La factura " + invoiceNumber
-                + " ya fue importada. Se bloqueó la importación para evitar duplicados.");
+        String operationKey = vinylFutureIdentityNormalizer.operationKey(invoiceNumber);
+        Pedido existing = pedidoRepository.findVinylFutureOperationForUpdate(operationKey)
+            .or(() -> findLegacyVinylFutureOrder(invoiceNumber))
+            .orElse(null);
+        if (existing != null) {
+            assertVinylFutureOrderCanResume(existing, invoiceNumber);
+            existing.setVinylFutureOperationKey(operationKey);
+            existing.setImportStatus(ImportStatus.IMPORTING_TO_CATALOG);
+            return pedidoRepository.save(existing);
         }
 
         Pedido pedido = Pedido.builder()
@@ -156,6 +175,7 @@ public class PedidoService {
             .fechaFactura(invoice.fechaFactura())
             .proveedor("VinylFuture")
             .origenImportacion("vinylfuture")
+            .vinylFutureOperationKey(operationKey)
             .envio(invoice.envio())
             .pago(invoice.pago())
             .unidadPeso(invoice.unidadPeso())
@@ -176,33 +196,144 @@ public class PedidoService {
             .iva19(invoice.iva19())
             .total(invoice.total())
             .cantidadTotalPdf(invoice.cantidadTotalPdf())
-            .importStatus(ImportStatus.PARSED)
+            .importStatus(ImportStatus.IMPORTING_TO_CATALOG)
             .build();
         pedido.setPdfStoragePath(guardarPdfOriginal(pdfBytes, filename));
         pedido.setPdfUploadedAt(java.time.LocalDateTime.now());
         pedido = pedidoRepository.save(pedido);
 
-        for (int index = 0; index < invoice.items().size(); index++) {
-            InvoiceItem inv = invoice.items().get(index);
+        List<InvoiceSourceRowDTO> rows = sourceRows == null || sourceRows.isEmpty()
+            ? legacySourceRows(invoice.items())
+            : sourceRows;
+        for (InvoiceSourceRowDTO row : rows) {
+            InvoiceItem inv = row.parsedItem();
             PedidoItem item = PedidoItem.builder()
                 .pedido(pedido)
-                .codigo(inv.codigoCatalogo())
-                .artista(inv.artista())
-                .titulo(inv.album())
-                .descripcionOriginal(descripcionOriginal(inv))
-                .formato(inv.formato())
-                .precioUnitarioEur(inv.precioUnitario())
-                .cantidad(inv.cantidad())
-                .totalLineaEur(calcLineTotal(inv))
-                .lineaFactura(index + 1)
-                .enrichStatus(EnrichStatus.PENDING)
+                .codigo(inv != null ? inv.codigoCatalogo() : null)
+                .artista(inv != null ? inv.artista() : null)
+                .titulo(inv != null ? inv.album() : null)
+                .descripcionOriginal(inv != null ? descripcionOriginal(inv) : row.sourceText())
+                .formato(inv != null ? inv.formato() : null)
+                .precioUnitarioEur(inv != null ? inv.precioUnitario() : null)
+                .cantidad(inv != null ? inv.cantidad() : null)
+                .totalLineaEur(inv != null ? calcLineTotal(inv) : null)
+                .lineaFactura(row.sourceRowNumber())
+                .paginaFuente(row.pageNumber())
+                .textoFuente(row.sourceText())
+                .estadoLectura(row.status())
+                .motivoRevision(row.reason())
+                .cantidadEstimada(row.estimatedQuantity())
+                .enrichStatus(inv != null ? EnrichStatus.PENDING : EnrichStatus.FAILED)
                 .build();
-            calcularItem(item);
+            if (inv != null) calcularItem(item);
             pedido.getItems().add(item);
         }
         pedidoRepository.save(pedido);
         log.info("Pedido VinylFuture {} creado: {} líneas", pedido.getIdPedido(), pedido.getItems().size());
         return pedido;
+    }
+
+    @Transactional(readOnly = true)
+    public void verificarFacturaVinylFutureImportable(String invoiceNumber) {
+        String normalized = ImportMetadataNormalizer.blankToNull(invoiceNumber);
+        if (normalized == null) return;
+        String operationKey = vinylFutureIdentityNormalizer.operationKey(normalized);
+        Pedido existing = pedidoRepository.findByVinylFutureOperationKey(operationKey)
+            .or(() -> findLegacyVinylFutureOrder(normalized))
+            .orElse(null);
+        if (existing != null) assertVinylFutureOrderCanResume(existing, normalized);
+        if (existing == null && discoRepository.existsByNumeroFacturaCompra(normalized)) {
+            throw new ConflictoNegocioException("Esta factura ya fue importada.");
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.Set<String> identidadesVinylFutureImportadas(Long pedidoId) {
+        return pedidoItemRepository.findByPedidoIdPedido(pedidoId).stream()
+            .filter(item -> item.getDisco() != null)
+            .map(PedidoItem::getCodigo)
+            .map(vinylFutureIdentityNormalizer::normalize)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.toSet());
+    }
+
+    public void marcarProductoVinylFutureImportado(Long pedidoId, String supplierCode, Disco disco) {
+        String identity = vinylFutureIdentityNormalizer.normalize(supplierCode);
+        if (identity == null) return;
+        List<PedidoItem> matches = pedidoItemRepository.findByPedidoIdPedido(pedidoId).stream()
+            .filter(item -> item.getDisco() == null)
+            .filter(item -> identity.equals(vinylFutureIdentityNormalizer.normalize(item.getCodigo())))
+            .toList();
+        for (PedidoItem item : matches) {
+            item.setDisco(disco);
+            item.setEnrichStatus(EnrichStatus.IMPORTED);
+            if (!"REVIEW_REQUIRED".equals(item.getEstadoLectura())) item.setEstadoLectura("IMPORTADO");
+        }
+        pedidoItemRepository.saveAll(matches);
+    }
+
+    private java.util.Optional<Pedido> findLegacyVinylFutureOrder(String invoiceNumber) {
+        List<Pedido> matches = pedidoRepository.findByOrigenImportacionAndNumeroFactura(
+            "vinylfuture", invoiceNumber
+        );
+        if (matches.size() > 1) {
+            throw new ConflictoNegocioException(
+                "La factura tiene registros históricos duplicados. Revisalos antes de volver a importarla."
+            );
+        }
+        return matches.stream().findFirst();
+    }
+
+    private void assertVinylFutureOrderCanResume(Pedido pedido, String invoiceNumber) {
+        if (pedido.getImportStatus() == ImportStatus.COMPLETED) {
+            throw new ConflictoNegocioException("Esta factura ya fue importada.");
+        }
+        if (pedido.getImportStatus() == ImportStatus.IMPORTING_TO_CATALOG) {
+            throw new ConflictoNegocioException("Esta factura ya se está importando.");
+        }
+        boolean hasCatalogLinks = pedido.getItems() != null && pedido.getItems().stream()
+            .anyMatch(item -> item.getDisco() != null);
+        boolean legacyCatalogImport = !hasCatalogLinks
+            && pedido.getImportStatus() != ImportStatus.FAILED
+            && discoRepository.existsByNumeroFacturaCompra(invoiceNumber);
+        if (legacyCatalogImport) {
+            throw new ConflictoNegocioException(
+                pedido.getImportStatus() == ImportStatus.PARTIALLY_COMPLETED
+                    ? "Esta factura ya fue importada parcialmente. Resolvé los elementos pendientes manualmente."
+                    : "Esta factura ya fue importada."
+            );
+        }
+    }
+
+    public void finalizarImportacionVinylFuture(Long pedidoId, boolean partial) {
+        Pedido pedido = pedidoRepository.findById(pedidoId)
+            .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", pedidoId));
+        pedido.setImportStatus(partial ? ImportStatus.PARTIALLY_COMPLETED : ImportStatus.COMPLETED);
+        pedidoRepository.save(pedido);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void marcarImportacionVinylFutureFallida(String invoiceNumber) {
+        String operationKey = vinylFutureIdentityNormalizer.operationKey(invoiceNumber);
+        if (operationKey == null) return;
+        pedidoRepository.findByVinylFutureOperationKey(operationKey).ifPresent(pedido -> {
+            if (pedido.getImportStatus() == ImportStatus.IMPORTING_TO_CATALOG) {
+                pedido.setImportStatus(ImportStatus.FAILED);
+                pedidoRepository.save(pedido);
+            }
+        });
+    }
+
+    private List<InvoiceSourceRowDTO> legacySourceRows(List<InvoiceItem> items) {
+        List<InvoiceSourceRowDTO> rows = new ArrayList<>();
+        for (int index = 0; index < items.size(); index++) {
+            InvoiceItem item = items.get(index);
+            rows.add(new InvoiceSourceRowDTO(
+                index + 1, 0, descripcionOriginal(item), "PARSED",
+                item.cantidad(), null, item
+            ));
+        }
+        return rows;
     }
 
     private BigDecimal calcLineTotal(InvoiceItem inv) {
@@ -402,6 +533,16 @@ public class PedidoService {
         }
 
         VinylPageData scraped = enrichmentService.deserializarPageData(item.getPageDataJson()).orElse(null);
+        if ("vinylfuture".equalsIgnoreCase(pedido.getOrigenImportacion())) {
+            String supplierCode = firstNonBlank(item.getCodigo(), scraped != null ? scraped.code() : null);
+            int quantity = item.getCantidad() != null ? item.getCantidad() : 1;
+            return vinylFutureCatalogStockService.addStock(
+                supplierCode,
+                quantity,
+                () -> buildVinylFuturePedidoProduct(item, scraped),
+                existing -> enrichVinylFuturePedidoProduct(existing, item, scraped)
+            ).disco();
+        }
         Disco disco = item.getCodigo() != null && !item.getCodigo().isBlank()
             ? discoRepository.findByCodigoInterno(item.getCodigo()).orElse(null)
             : null;
@@ -451,6 +592,56 @@ public class PedidoService {
         disco = discoRepository.save(disco);
         qrCopyService.synchronize(disco);
         return discoRepository.save(disco);
+    }
+
+    private Disco buildVinylFuturePedidoProduct(PedidoItem item, VinylPageData scraped) {
+        Disco disco = new Disco();
+        disco.setCodigoQr(UUID.randomUUID().toString());
+        disco.setCodigoInterno(firstNonBlank(item.getCodigo(), scraped != null ? scraped.code() : null));
+        disco.setArtista(firstNonBlank(item.getArtista(), scraped != null ? scraped.artist() : null, "Desconocido"));
+        disco.setAlbum(firstNonBlank(item.getTitulo(), scraped != null ? scraped.title() : null, "Sin título"));
+        disco.setEstado(EstadoDisco.DISPONIBLE);
+        disco.setProcedencia(ImportMetadataNormalizer.SOURCE_FUTURE);
+        disco.setTipoDisco(mapTipo(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null), null));
+        disco.setCondicion(mapCondicion(scraped != null ? scraped.condition() : null, null));
+        BigDecimal purchasePrice = firstNonNull(item.getPrecioUnitarioEur(), scraped != null ? scraped.purchasePrice() : null);
+        disco.setCosto(purchasePrice);
+        disco.setCostoMoneda("EUR");
+        disco.setFormato(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null));
+        disco.setPrecioVenta(item.getPrecioFinalUyu());
+        disco.setPricingMode(PricingMode.AUTO);
+        enrichVinylFuturePedidoProduct(disco, item, scraped);
+        return disco;
+    }
+
+    private void enrichVinylFuturePedidoProduct(Disco disco, PedidoItem item, VinylPageData scraped) {
+        setIfMissing(disco.getArtista(), disco::setArtista,
+            firstNonBlank(item.getArtista(), scraped != null ? scraped.artist() : null));
+        setIfMissing(disco.getAlbum(), disco::setAlbum,
+            firstNonBlank(item.getTitulo(), scraped != null ? scraped.title() : null));
+        if (disco.getTipoDisco() == null) {
+            disco.setTipoDisco(mapTipo(firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null), null));
+        }
+        if (disco.getCondicion() == null) {
+            disco.setCondicion(mapCondicion(scraped != null ? scraped.condition() : null, null));
+        }
+        setIfMissing(disco.getFormato(), disco::setFormato,
+            firstNonBlank(item.getFormato(), scraped != null ? scraped.format() : null));
+        setIfMissing(disco.getImagenUrl(), disco::setImagenUrl,
+            firstNonBlank(item.getPortadaUrl(), scraped != null ? scraped.frontImageUrl() : null));
+        if (scraped == null) return;
+        setIfMissing(disco.getSelloDiscografico(), disco::setSelloDiscografico, scraped.label());
+        setIfMissing(disco.getGenero(), disco::setGenero, scraped.genre());
+        setIfMissing(disco.getPais(), disco::setPais, scraped.country());
+        setIfMissing(disco.getDescripcion(), disco::setDescripcion, scraped.description());
+        if (disco.getAnio() == null) disco.setAnio(scraped.year());
+        if (isBlank(disco.getTracklist()) && scraped.tracks() != null && !scraped.tracks().isEmpty()) {
+            disco.setTracklist(scraped.tracks().stream()
+                .map(track -> String.join(" ", nonBlank(track.label(), track.name())))
+                .filter(value -> !value.isBlank())
+                .reduce((first, second) -> first + "\n" + second)
+                .orElse(null));
+        }
     }
 
     private TipoDisco mapTipo(String value, TipoDisco existing) {
@@ -584,7 +775,12 @@ public class PedidoService {
             i.getPrecioFinalUyu(),
             i.getPortadaUrl(),
             i.getDisco() != null ? i.getDisco().getIdDisco() : null,
-            i.getEnrichStatus() != null ? i.getEnrichStatus().name() : null
+            i.getEnrichStatus() != null ? i.getEnrichStatus().name() : null,
+            i.getPaginaFuente(),
+            i.getTextoFuente(),
+            i.getEstadoLectura(),
+            i.getMotivoRevision(),
+            i.getCantidadEstimada()
         );
     }
 
