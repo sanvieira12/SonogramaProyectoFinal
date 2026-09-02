@@ -16,12 +16,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +63,13 @@ class PedidoServiceVinylFutureIdempotencyTest {
 
     @Test
     void completedInvoiceIsBlockedBeforeAnyStockOperation() {
+        LocalDateTime existingUpdate = LocalDateTime.of(2026, 8, 31, 14, 53);
+        Disco existingProduct = Disco.builder()
+            .idDisco(699L)
+            .artista("Raxon")
+            .album("Speicher 138")
+            .fechaActualizacion(existingUpdate)
+            .build();
         Pedido completed = Pedido.builder()
             .numeroFactura("0036-188471")
             .origenImportacion("vinylfuture")
@@ -72,6 +83,8 @@ class PedidoServiceVinylFutureIdempotencyTest {
             .isInstanceOf(ConflictoNegocioException.class)
             .hasMessage("Esta factura ya fue importada.");
         verify(discoRepository, never()).existsByNumeroFacturaCompra("0036-188471");
+        verify(catalogStockService, never()).addStock(anyString(), anyInt(), any(), any());
+        assertThat(existingProduct.getFechaActualizacion()).isEqualTo(existingUpdate);
     }
 
     @Test

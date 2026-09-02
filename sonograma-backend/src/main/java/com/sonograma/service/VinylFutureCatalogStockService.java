@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -54,6 +55,11 @@ public class VinylFutureCatalogStockService {
         int previousStock = isNew ? 0 : availableStock(disco);
         if (!isNew && existingProductEnricher != null) existingProductEnricher.accept(disco);
         disco.setCantidadCopias(previousStock + incomingQuantity);
+        if (!isNew) {
+            // Receiving physical Vinyl Future copies is a catalogue update. Keep
+            // fechaIngreso intact and timestamp only the stock mutation itself.
+            disco.setFechaActualizacion(LocalDateTime.now());
+        }
         disco = discoRepository.save(disco);
         qrCopyService.synchronizeAvailableCopies(disco, previousStock + incomingQuantity);
         disco = discoRepository.save(disco);

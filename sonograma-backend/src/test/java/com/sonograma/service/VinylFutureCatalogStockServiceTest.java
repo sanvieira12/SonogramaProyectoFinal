@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -62,6 +63,10 @@ class VinylFutureCatalogStockServiceTest {
         existing.setIdDisco(20L);
         existing.setCantidadCopias(2);
         existing.setVinylFutureSupplierCodeNormalized("OYSTER80");
+        LocalDateTime originalCreation = LocalDateTime.of(2026, 7, 8, 21, 21);
+        LocalDateTime oldUpdate = LocalDateTime.of(2026, 8, 1, 10, 0);
+        existing.setFechaIngreso(originalCreation);
+        existing.setFechaActualizacion(oldUpdate);
         when(discoRepository.findVinylFutureByIdentityForUpdate("OYSTER80"))
             .thenReturn(Optional.of(existing));
         when(qrCopyService.hasCopyInventory(20L)).thenReturn(false);
@@ -75,6 +80,8 @@ class VinylFutureCatalogStockServiceTest {
         assertThat(result.resultingStock()).isEqualTo(6);
         assertThat(existing.getCantidadCopias()).isEqualTo(6);
         assertThat(existing.getGenero()).isEqualTo("House");
+        assertThat(existing.getFechaIngreso()).isEqualTo(originalCreation);
+        assertThat(existing.getFechaActualizacion()).isAfter(oldUpdate);
         verify(qrCopyService).synchronizeAvailableCopies(existing, 6);
     }
 
@@ -135,12 +142,15 @@ class VinylFutureCatalogStockServiceTest {
     void previewNeverChangesStockOrQrCopies() {
         Disco existing = newProduct();
         existing.setVinylFutureSupplierCodeNormalized("PREVIEW-1");
+        LocalDateTime oldUpdate = LocalDateTime.of(2026, 8, 1, 10, 0);
+        existing.setFechaActualizacion(oldUpdate);
         when(discoRepository.findByVinylFutureSupplierCodeNormalized("PREVIEW-1"))
             .thenReturn(Optional.of(existing));
 
         var result = service.preview("preview-1");
 
         assertThat(result.status()).isEqualTo(VinylFutureCatalogStockService.ProductStatus.EXISTING);
+        assertThat(existing.getFechaActualizacion()).isEqualTo(oldUpdate);
         verify(qrCopyService, never()).synchronizeAvailableCopies(any(), any(Integer.class));
     }
 

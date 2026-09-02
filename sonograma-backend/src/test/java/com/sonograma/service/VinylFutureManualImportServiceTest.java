@@ -19,6 +19,7 @@ import org.springframework.core.io.ByteArrayResource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -151,7 +152,10 @@ class VinylFutureManualImportServiceTest {
 
     @Test
     void availableCoverAndSingleProductZipReuseStoredAssets() throws Exception {
-        stubSearch(page, null);
+        Disco existing = product(35L, 2);
+        LocalDateTime existingUpdate = LocalDateTime.of(2026, 8, 31, 14, 53);
+        existing.setFechaActualizacion(existingUpdate);
+        stubSearch(page, existing);
         var preview = service.search(URL, null);
         when(assetService.relativePath(page.frontImageUrl())).thenReturn("TEST-1/cover.jpg");
         when(assetService.load("TEST-1/cover.jpg")).thenReturn(new ByteArrayResource("cover".getBytes()));
@@ -162,6 +166,8 @@ class VinylFutureManualImportServiceTest {
 
         assertThat(service.cover(preview.previewId()).contentLength()).isGreaterThan(0);
         assertThat(service.buildSingleZip(preview.previewId())).isEqualTo(zip);
+        assertThat(existing.getFechaActualizacion()).isEqualTo(existingUpdate);
+        verify(catalogStockService, never()).addStock(anyString(), anyInt(), any(), any());
     }
 
     @Test
