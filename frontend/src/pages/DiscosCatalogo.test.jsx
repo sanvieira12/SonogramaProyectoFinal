@@ -50,6 +50,19 @@ const disco = {
   fechaIngreso: '2026-08-03T10:00:00',
 }
 
+function catalogDisco(overrides = {}) {
+  const id = overrides.idDisco ?? 999999
+  return {
+    ...disco,
+    idDisco: id,
+    codigoInterno: `CAT-${id}`,
+    artista: `Artist ${id}`,
+    album: `Album ${id}`,
+    condicion: 'NUEVO',
+    ...overrides,
+  }
+}
+
 describe('Catalog permanent deletion flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -132,5 +145,82 @@ describe('Catalog permanent deletion flow', () => {
     fireEvent.click(screen.getAllByText('Deletion Artist')[0])
     expect(await screen.findByText('Categoría')).toBeInTheDocument()
     expect(screen.getAllByText('USADO').length).toBeGreaterThan(0)
+  })
+
+  it('keeps a sold new product visible and orders by update date with entry-date fallback', async () => {
+    discoService.getAll.mockResolvedValue([
+      catalogDisco({
+        idDisco: 1210,
+        artista: 'Various',
+        album: 'PACHA IBIZA CLASSICS LP 3x12"',
+        estado: 'VENDIDO',
+        cantidadCopias: 0,
+        totalCopias: 1,
+        fechaIngreso: '2026-08-31T14:53:34',
+        fechaActualizacion: '2026-09-02T04:30:27',
+      }),
+      catalogDisco({
+        idDisco: 1449,
+        artista: 'Señor Coconut',
+        fechaIngreso: '2026-09-01T09:00:00',
+      }),
+      catalogDisco({
+        idDisco: 1437,
+        artista: 'Invisible',
+        fechaIngreso: '2026-09-02T03:00:00',
+        fechaActualizacion: null,
+      }),
+      catalogDisco({
+        idDisco: 999,
+        artista: 'Used Artist',
+        condicion: 'USADO',
+        fechaIngreso: '2026-09-03T00:00:00',
+      }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByText('Various')
+
+    fireEvent.click(screen.getByRole('button', { name: /Nuevos/i }))
+    expect(screen.getByText('PACHA IBIZA CLASSICS LP 3x12"')).toBeInTheDocument()
+    expect(screen.queryByText('Used Artist')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Fecha importación/i }))
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('Various')
+    expect(rows[0]).toHaveTextContent('Vendido')
+    expect(rows[1]).toHaveTextContent('Invisible')
+    expect(rows[2]).toHaveTextContent('Señor Coconut')
+  })
+
+  it('preserves state filters, search, and pagination behavior', async () => {
+    const pageRecords = Array.from({ length: 21 }, (_, index) => catalogDisco({
+      idDisco: index + 1,
+      artista: `Paged Artist ${String(index + 1).padStart(2, '0')}`,
+      estado: index === 20 ? 'VENDIDO' : 'DISPONIBLE',
+    }))
+    discoService.getAll.mockResolvedValue(pageRecords)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByText('Paged Artist 01')
+    expect(screen.getByText('Mostrando 1–20 de 21 registros')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByText('Paged Artist 21')).toBeInTheDocument()
+    expect(screen.queryByText('Paged Artist 01')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Vendido/ }))
+    expect(screen.getByText('Paged Artist 21')).toBeInTheDocument()
+    expect(screen.queryByText('Paged Artist 20')).not.toBeInTheDocument()
+
+    const searchResult = catalogDisco({ idDisco: 88, artista: 'Search Result Artist' })
+    discoService.buscar.mockResolvedValue([searchResult])
+    fireEvent.click(screen.getAllByRole('button', { name: /^Todos/ })[0])
+    fireEvent.change(screen.getByPlaceholderText('Buscar disco, artista o código...'), {
+      target: { value: 'Search Result' },
+    })
+
+    await waitFor(() => expect(discoService.buscar).toHaveBeenCalledWith('Search Result'), { timeout: 1000 })
+    expect(await screen.findByText('Search Result Artist')).toBeInTheDocument()
   })
 })
