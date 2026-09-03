@@ -6,6 +6,7 @@ import com.sonograma.dto.DiscogsZipStatusDTO;
 import com.sonograma.dto.TrackInfo;
 import com.sonograma.entity.DiscogsImportJob;
 import com.sonograma.entity.DiscogsImportRow;
+import com.sonograma.entity.Disco;
 import com.sonograma.enums.DiscogsCatalogImportStatus;
 import com.sonograma.enums.DiscogsCoverStatus;
 import com.sonograma.enums.DiscogsImportJobStatus;
@@ -13,6 +14,7 @@ import com.sonograma.enums.DiscogsImportRowStatus;
 import com.sonograma.enums.DiscogsMetadataStatus;
 import com.sonograma.enums.DiscogsYoutubeStatus;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
@@ -36,6 +38,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.zip.ZipFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +76,9 @@ class DiscogsImportJobServiceTest {
     private DiscoRepository discoRepository;
 
     @Autowired
+    private DiscoQrCopyRepository qrCopyRepository;
+
+    @Autowired
     private DiscogsCoverService coverService;
 
     @MockBean
@@ -90,7 +97,7 @@ class DiscogsImportJobServiceTest {
     }
 
     @Test
-    void rateLimitKeepsTheJobAndRowsAvailableForRetry() throws Exception {
+    void rateLimitKeepsTheJobAndRowsOutOfCatalogueUntilRetry() throws Exception {
         when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
         when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
                 .thenReturn(DiscogsApiClient.FetchResult.failure(true, 1, "HTTP 429"));
@@ -113,15 +120,12 @@ class DiscogsImportJobServiceTest {
         });
 
         DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
-        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getImported()).isZero();
         assertThat(imported.getRows()).singleElement().satisfies(row -> {
-            assertThat(row.getImportedCatalogProductId()).isNotNull();
+            assertThat(row.getImportedCatalogProductId()).isNull();
             assertThat(row.getWarningMessage()).contains("RATE_LIMITED");
         });
-        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
-            assertThat(disco.getCondicion().name()).isEqualTo("USADO");
-            assertThat(disco.getPrecioVenta()).isNull();
-        });
+        assertThat(discoRepository.findAll()).isEmpty();
     }
 
     @Test
@@ -256,7 +260,7 @@ class DiscogsImportJobServiceTest {
                         assertThat(master.getDiscogsId()).isEqualTo(100L);
                         assertThat(master.getResolvedReleaseId()).isNull();
                         assertThat(master.getMetadataErrorCode()).isEqualTo("MASTER_RESOLUTION_FAILED");
-                        assertThat(master.getCatalogImportStatus()).isEqualTo("ready");
+                        assertThat(master.getCatalogImportStatus()).isEqualTo("manual_review");
                         assertThat(master.getWarningMessage()).contains("MASTER_RESOLUTION_REVIEW_REQUIRED");
                     },
                     release -> {
@@ -306,6 +310,8 @@ class DiscogsImportJobServiceTest {
                         assertThat(missing.getRawPrice()).isEqualTo("SP");
                         assertThat(missing.getMetadataStatus()).isEqualTo("missing_link");
                         assertThat(missing.getMetadataErrorCode()).isEqualTo("MISSING_DISCOGS_LINK");
+                        // Parser status remains compatible, but Phase 2's
+                        // metadata gate makes this row ineligible for receipt.
                         assertThat(missing.getCatalogImportStatus()).isEqualTo("ready");
                         assertThat(missing.getWarningMessage()).contains("MISSING_DISCOGS_LINK");
                     },
@@ -317,16 +323,10 @@ class DiscogsImportJobServiceTest {
         });
 
         DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
-        assertThat(imported.getRowsImported()).isEqualTo(2);
+        assertThat(imported.getRowsImported()).isEqualTo(1);
         assertThat(imported.getRowsTechnicallyImpossible()).isEqualTo(1);
-        assertThat(discoRepository.findAll()).hasSize(2).allSatisfy(disco ->
+        assertThat(discoRepository.findAll()).hasSize(1).allSatisfy(disco ->
                 assertThat(disco.getCondicion().name()).isEqualTo("USADO"));
-        assertThat(discoRepository.findAll()).filteredOn(disco -> disco.getDiscogsUrl() == null)
-                .singleElement().satisfies(disco -> {
-                    assertThat(disco.getArtista()).isEqualTo("Nina tastswi");
-                    assertThat(disco.getPrecioVenta()).isNull();
-                    assertThat(disco.getNotas()).contains("MISSING_DISCOGS_LINK", "PRICE_REQUIRES_REVIEW");
-                });
     }
 
     @Test
@@ -486,6 +486,83 @@ class DiscogsImportJobServiceTest {
     }
 
     @Test
+    void existingProductReceivesAdditionalBulkCopyAndReportsReuse() {
+        DiscogsImportJob job = completedJob("existing-product.xlsx");
+        DiscogsImportRow row = parsedRow(job, 2, 111L);
+        rowRepository.save(row);
+
+        discoRepository.save(Disco.builder()
+                .codigoInterno("existing")
+                .codigoQr(UUID.randomUUID().toString())
+                .artista("Existing Artist")
+                .album("Existing Album")
+                .discogsReleaseId(111L)
+                .discogsUrl("https://www.discogs.com/release/111")
+                .cantidadCopias(1)
+                .build());
+
+        DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getNewProducts()).isZero();
+        assertThat(imported.getExistingProducts()).isEqualTo(1);
+        assertThat(imported.getPhysicalCopiesImported()).isEqualTo(1);
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(2);
+            assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(2);
+        });
+    }
+
+    @Test
+    void interruptedJobCanResumeWithoutRecreatingMetadataRow() {
+        when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
+        when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
+                .thenReturn(successResult(901L));
+
+        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("interrupted.xlsx")
+                .nombreHoja("Links")
+                .status(DiscogsImportJobStatus.PROCESSING)
+                .build());
+        DiscogsImportRow row = parsedRow(job, 2, 901L);
+        row.setStatus(DiscogsImportRowStatus.FETCHING_DISCOGS);
+        row.setMetadataStatus(DiscogsMetadataStatus.PROCESSING);
+        rowRepository.saveAndFlush(row);
+
+        service.resumeJob(job.getIdDiscogsImportJob());
+
+        await().atMost(Duration.ofSeconds(8)).untilAsserted(() ->
+                assertThat(service.getJob(job.getIdDiscogsImportJob()).getMetadataFetched()).isEqualTo(1));
+        assertThat(rowRepository.findById(row.getIdDiscogsImportRow()).orElseThrow().getStatus())
+                .isEqualTo(DiscogsImportRowStatus.PARSED);
+    }
+
+    @Test
+    void concurrentCatalogRetriesReceiveTheSamePersistedRowOnlyOnce() throws Exception {
+        DiscogsImportJob job = completedJob("concurrent-retry.xlsx");
+        rowRepository.save(parsedRow(job, 2, 902L));
+
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        try {
+            var first = callers.submit(() -> service.importParsedRows(job.getIdDiscogsImportJob()));
+            var second = callers.submit(() -> service.importParsedRows(job.getIdDiscogsImportJob()));
+            first.get();
+            second.get();
+        } finally {
+            callers.shutdownNow();
+        }
+
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+            assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(1);
+        });
+        assertThat(rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(
+                job.getIdDiscogsImportJob())).singleElement()
+                .extracting(DiscogsImportRow::getStatus)
+                .isEqualTo(DiscogsImportRowStatus.IMPORTED);
+    }
+
+    @Test
     void importsFiveHundredDifferentReleasesSharingSingleLetterCodeWithoutLimitOrMerging() {
         DiscogsImportJob job = completedJob("five-hundred-releases.xlsx");
         List<DiscogsImportRow> rows = new ArrayList<>();
@@ -568,11 +645,14 @@ class DiscogsImportJobServiceTest {
             assertThat(current.getTotalRowsRead()).isEqualTo(44);
             assertThat(current.getMetadataFetched()).isEqualTo(44);
             assertThat(current.getReadyToImport()).isEqualTo(44);
+            assertThat(current.getResolvedConcreteReleases()).isEqualTo(43);
+            assertThat(current.getPhysicalCopiesToReceive()).isEqualTo(44);
         });
 
         DiscogsImportJobDTO imported = service.importParsedRows(created.getId());
 
         assertThat(imported.getImported()).isEqualTo(44);
+        assertThat(imported.getPhysicalCopiesImported()).isEqualTo(44);
         assertThat(imported.getRows()).filteredOn(row -> "imported".equals(row.getStatus())).hasSize(44);
         assertThat(imported.getRows()).filteredOn(row -> "sold".equals(row.getStatus())).isEmpty();
         assertThat(imported.getRows()).filteredOn(row -> "ignored".equals(row.getStatus())).isEmpty();

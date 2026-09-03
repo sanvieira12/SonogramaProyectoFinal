@@ -53,6 +53,13 @@ public class DiscogsImportJobDTO {
     private int rowsDetected;
     private int rowsImported;
     private int catalogProductsAffected;
+    private int newProducts;
+    private int existingProducts;
+    private int physicalCopiesImported;
+    private int physicalCopiesToReceive;
+    private int resolvedConcreteReleases;
+    private int pendingRows;
+    private int errorRows;
     private int rowsRequiringReview;
     private int rowsWithFullMetadata;
     private int rowsWithWarnings;

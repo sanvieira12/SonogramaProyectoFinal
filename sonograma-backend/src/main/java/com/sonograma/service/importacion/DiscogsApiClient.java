@@ -9,9 +9,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -32,6 +36,7 @@ public class DiscogsApiClient {
             "SonogramaApp/1.0 +https://github.com/sanvieira12/SonogramaProyectoFinal";
     private static final long AUTHENTICATED_MIN_DELAY_MS = 1_100;
     private static final long UNAUTHENTICATED_MIN_DELAY_MS = 2_600;
+    private static final int MAX_RETRIES = 5;
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -113,7 +118,8 @@ public class DiscogsApiClient {
     private FetchResult fetchMaster(ImportSession session, long masterId) {
         HttpResult masterResponse = request("/masters/" + masterId);
         if (!masterResponse.success()) {
-            return FetchResult.failure(masterResponse.rateLimited(), masterResponse.retryAfterMs(),
+            return FetchResult.failure(masterResponse.rateLimited(), masterResponse.retryable(),
+                    masterResponse.retryAfterMs(),
                     masterResponse.message());
         }
         try {
@@ -140,7 +146,8 @@ public class DiscogsApiClient {
         }
         HttpResult response = request("/releases/" + releaseId);
         if (!response.success()) {
-            return FetchResult.failure(response.rateLimited(), response.retryAfterMs(), response.message());
+            return FetchResult.failure(response.rateLimited(), response.retryable(),
+                    response.retryAfterMs(), response.message());
         }
         try {
             JsonNode json = objectMapper.readTree(response.body());
@@ -173,14 +180,15 @@ public class DiscogsApiClient {
 
     private HttpResult request(String path) {
         HttpResult last = null;
-        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+        int retries = Math.min(MAX_RETRIES, Math.max(0, maxRetries));
+        for (int attempt = 0; attempt <= retries; attempt++) {
             last = requestOnce(path);
-            if (!last.rateLimited() || attempt == maxRetries) {
+            if ((!last.rateLimited() && !last.retryable()) || attempt == retries) {
                 return last;
             }
             long delay = retryDelay(last.retryAfterMs(), attempt + 1);
-            log.warn("Discogs HTTP 429 en {}. Reintento {}/{} en {} ms",
-                    path, attempt + 1, maxRetries, delay);
+            log.warn("Fallo transitorio Discogs en {}. Reintento {}/{} en {} ms",
+                    path, attempt + 1, retries, delay);
             sleep(delay);
         }
         return last == null ? HttpResult.failure("No se pudo consultar Discogs") : last;
@@ -212,7 +220,10 @@ public class DiscogsApiClient {
                         "Discogs limitó temporalmente las solicitudes (HTTP 429)");
             }
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                return HttpResult.failure("Discogs devolvió HTTP " + response.statusCode());
+                String message = "Discogs devolvió HTTP " + response.statusCode();
+                return isRetryableStatus(response.statusCode())
+                        ? HttpResult.retryableFailure(retryAfterMs, message)
+                        : HttpResult.failure(message);
             }
             return HttpResult.success(response.body());
         } catch (InterruptedException ex) {
@@ -220,12 +231,30 @@ public class DiscogsApiClient {
             return HttpResult.failure("Consulta a Discogs interrumpida");
         } catch (Exception ex) {
             log.warn("Error consultando Discogs {}: {}", path, ex.getMessage());
-            return HttpResult.failure("Error al consultar Discogs: " + ex.getMessage());
+            String message = "Error al consultar Discogs: " + ex.getMessage();
+            return isRetryableException(ex)
+                    ? HttpResult.retryableFailure(0, message)
+                    : HttpResult.failure(message);
         } finally {
             if (acquired) {
                 concurrency.release();
             }
         }
+    }
+
+    private boolean isRetryableStatus(int statusCode) {
+        return statusCode >= 500 && statusCode <= 599;
+    }
+
+    static boolean isRetryableException(Throwable error) {
+        if (error instanceof HttpTimeoutException
+                || error instanceof SocketTimeoutException
+                || error instanceof ConnectException
+                || error instanceof IOException) {
+            return true;
+        }
+        Throwable cause = error == null ? null : error.getCause();
+        return cause != null && cause != error && isRetryableException(cause);
     }
 
     private long retryDelay(long headerDelay, int retryCount) {
@@ -446,20 +475,25 @@ public class DiscogsApiClient {
     private record HttpResult(
             boolean success,
             boolean rateLimited,
+            boolean retryable,
             long retryAfterMs,
             String body,
             String message
     ) {
         static HttpResult success(String body) {
-            return new HttpResult(true, false, 0, body, null);
+            return new HttpResult(true, false, false, 0, body, null);
         }
 
         static HttpResult failure(String message) {
-            return new HttpResult(false, false, 0, null, message);
+            return new HttpResult(false, false, false, 0, null, message);
         }
 
         static HttpResult rateLimited(long retryAfterMs, String message) {
-            return new HttpResult(false, true, retryAfterMs, null, message);
+            return new HttpResult(false, true, true, retryAfterMs, null, message);
+        }
+
+        static HttpResult retryableFailure(long retryAfterMs, String message) {
+            return new HttpResult(false, false, true, retryAfterMs, null, message);
         }
     }
 
@@ -483,23 +517,41 @@ public class DiscogsApiClient {
             String imageUrl,
             String previewUrl,
             String tracklist,
-            List<TrackInfo> tracks
+            List<TrackInfo> tracks,
+            boolean retryable
     ) {
+        public FetchResult(boolean success, boolean rateLimited, boolean cacheHit, long retryAfterMs,
+                           String errorMessage, Long masterId, Long resolvedReleaseId, String artist,
+                           String title, Integer year, String genre, String label, String catalogNumber,
+                           String country, String style, String format, String imageUrl, String previewUrl,
+                           String tracklist, List<TrackInfo> tracks) {
+            this(success, rateLimited, cacheHit, retryAfterMs, errorMessage, masterId, resolvedReleaseId,
+                    artist, title, year, genre, label, catalogNumber, country, style, format, imageUrl,
+                    previewUrl, tracklist, tracks, false);
+        }
+
         static FetchResult failure(boolean rateLimited, long retryAfterMs, String message) {
+            return failure(rateLimited, false, retryAfterMs, message);
+        }
+
+        static FetchResult failure(boolean rateLimited, boolean retryable,
+                                   long retryAfterMs, String message) {
             return new FetchResult(false, rateLimited, false, retryAfterMs, message,
-                    null, null, null, null, null, null, null, null, null, null, null, null, null, null, List.of());
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                    List.of(),
+                    retryable);
         }
 
         FetchResult withCacheHit() {
             return new FetchResult(success, rateLimited, true, retryAfterMs, errorMessage,
                     masterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
-                    country, style, format, imageUrl, previewUrl, tracklist, tracks);
+                    country, style, format, imageUrl, previewUrl, tracklist, tracks, retryable);
         }
 
         FetchResult withMaster(Long newMasterId) {
             return new FetchResult(success, rateLimited, cacheHit, retryAfterMs, errorMessage,
                     newMasterId, resolvedReleaseId, artist, title, year, genre, label, catalogNumber,
-                    country, style, format, imageUrl, previewUrl, tracklist, tracks);
+                    country, style, format, imageUrl, previewUrl, tracklist, tracks, retryable);
         }
     }
 

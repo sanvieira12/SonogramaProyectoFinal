@@ -48,6 +48,7 @@ public class DiscogsImportRowDTO {
     private String youtubeErrorCode;
     private String catalogImportStatus;
     private String catalogImportErrorCode;
+    private String catalogProductResult;
     private String warningMessage;
     private String status;
     private String errorMessage;

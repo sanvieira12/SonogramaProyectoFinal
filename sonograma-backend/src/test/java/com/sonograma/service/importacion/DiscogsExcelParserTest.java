@@ -343,6 +343,28 @@ class DiscogsExcelParserTest {
     }
 
     @Test
+    void classifiesAdministrativeRowsAsIgnoredWithoutAffectingDiscogsRows() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Discogs URL");
+            header.createCell(1).setCellValue("Notas");
+            sheet.createRow(1).createCell(1).setCellValue("TOTAL GENERAL");
+            sheet.createRow(2).createCell(0).setCellValue("https://discogs.com/release/123");
+            workbook.write(output);
+
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "administrative.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).hasSize(2);
+            assertThat(parsed.rows().get(0).status()).isEqualTo(DiscogsImportRowStatus.IGNORED);
+            assertThat(parsed.rows().get(1).status()).isEqualTo(DiscogsImportRowStatus.PARSED);
+        }
+    }
+
+    @Test
     void parsesTheRealFedePintosWorkbookEndToEndAtParserBoundary() throws Exception {
         try (InputStream workbook = getClass().getResourceAsStream(
                 "/discogs/DISCOS FEDE PINTOS.xlsx")) {

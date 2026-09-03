@@ -2,8 +2,10 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.DiscoImportPreviewDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.DiscogsCoverDownloadDTO;
 import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.dto.DiscogsZipStatusDTO;
+import com.sonograma.dto.ManualDiscogsImportResultDTO;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
@@ -90,9 +92,28 @@ public class ImportacionController {
     }
 
     @PostMapping("/discogs/guardar")
-    public ResponseEntity<DiscoResponseDTO> discogsGuardar(
+    public ResponseEntity<ManualDiscogsImportResultDTO> discogsGuardar(
             @RequestBody DiscoImportPreviewDTO preview) {
         return ResponseEntity.ok(discogsImportService.guardar(preview));
+    }
+
+    @PostMapping("/discogs/manual/cover")
+    public ResponseEntity<DiscogsCoverDownloadDTO> discogsManualCover(
+            @RequestBody DiscoImportPreviewDTO preview) {
+        return ResponseEntity.ok(discogsImportService.descargarPortada(preview));
+    }
+
+    @PostMapping("/discogs/manual/zip")
+    public ResponseEntity<StreamingResponseBody> downloadDiscogsManualZip(
+            @RequestBody DiscoImportPreviewDTO preview) {
+        String releaseId = preview == null || preview.getDiscogsReleaseId() == null
+                ? "release" : preview.getDiscogsReleaseId().toString();
+        StreamingResponseBody body = output -> discogsImportService.escribirZip(preview, output);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"discogs-release-" + releaseId + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(body);
     }
 
     // ── Discogs — Excel con links ─────────────────────────────────────────────
@@ -121,6 +142,11 @@ public class ImportacionController {
     @PostMapping("/discogs/jobs/{jobId}/retry-pending")
     public ResponseEntity<DiscogsImportJobDTO> discogsRetryPending(@PathVariable Long jobId) {
         return ResponseEntity.ok(discogsImportJobService.retryPendingRows(jobId));
+    }
+
+    @PostMapping("/discogs/jobs/{jobId}/resume")
+    public ResponseEntity<DiscogsImportJobDTO> discogsResume(@PathVariable Long jobId) {
+        return ResponseEntity.accepted().body(discogsImportJobService.resumeJob(jobId));
     }
 
     @PostMapping("/discogs/jobs/{jobId}/importar")

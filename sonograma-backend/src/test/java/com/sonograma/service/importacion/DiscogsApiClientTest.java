@@ -6,7 +6,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
+import java.net.ConnectException;
 import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,6 +76,53 @@ class DiscogsApiClientTest {
         assertThat(recovered.success()).isTrue();
         assertThat(requests).hasValue(2);
         assertThat(elapsedMs).isGreaterThanOrEqualTo(900);
+    }
+
+    @Test
+    void retriesTemporaryServerFailureAndHonorsRetryAfter() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/releases/701", exchange -> {
+            if (requests.incrementAndGet() == 1) {
+                exchange.getResponseHeaders().add("Retry-After", "1");
+                respond(exchange, 503, "{}");
+            } else {
+                respond(exchange, 200, "{\"title\":\"Recovered\",\"artists\":[{\"name\":\"Artist\"}]}");
+            }
+        });
+        server.start();
+
+        DiscogsApiClient client = client();
+        long started = System.nanoTime();
+        var recovered = client.fetch("release", 701);
+
+        assertThat(recovered.success()).isTrue();
+        assertThat(requests).hasValue(2);
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+                .isGreaterThanOrEqualTo(900);
+    }
+
+    @Test
+    void permanentHttpFailureDoesNotRetry() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/releases/702", exchange -> {
+            requests.incrementAndGet();
+            respond(exchange, 404, "{}");
+        });
+        server.start();
+
+        var result = client().fetch("release", 702);
+
+        assertThat(result.success()).isFalse();
+        assertThat(requests).hasValue(1);
+    }
+
+    @Test
+    void recognizesTransientTimeoutAndConnectionFailures() {
+        assertThat(DiscogsApiClient.isRetryableException(new HttpTimeoutException("timeout"))).isTrue();
+        assertThat(DiscogsApiClient.isRetryableException(new ConnectException("reset"))).isTrue();
+        assertThat(DiscogsApiClient.isRetryableException(new IllegalArgumentException("bad request"))).isFalse();
     }
 
     private DiscogsApiClient client() {

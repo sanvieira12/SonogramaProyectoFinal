@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/sonograma'
 import DiscogsTab from './DiscogsTab'
@@ -15,6 +15,8 @@ vi.mock('../../api/sonograma', () => ({
       discogsCoversZip: vi.fn(),
       discogsDesdeLink: vi.fn(),
       discogsGuardar: vi.fn(),
+      discogsManualCover: vi.fn(),
+      discogsManualZip: vi.fn(),
     },
   },
 }))
@@ -69,6 +71,20 @@ const completedJob = {
   }],
 }
 
+const existingPreview = {
+  operationId: '0f8fad5b-d9cb-469f-a165-70867728950e',
+  discogsReleaseId: 456,
+  discogsUrl: 'https://www.discogs.com/release/456',
+  artista: 'Example Artist',
+  album: 'Example Album',
+  formato: 'VINILO',
+  condicion: 'USADO',
+  cantidadCopias: 1,
+  productoExistente: true,
+  copiasDisponibles: 2,
+  errores: [],
+}
+
 describe('DiscogsTab Excel import', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -80,6 +96,7 @@ describe('DiscogsTab Excel import', () => {
     render(<DiscogsTab />)
 
     expect(await screen.findByText('Filas detectadas')).toBeInTheDocument()
+    expect(screen.getByText('Importación completada con elementos pendientes')).toBeInTheDocument()
     expect(screen.getByText('Estado Excel: vendidos')).toBeInTheDocument()
     expect(screen.getByText('Catálogo: USADO')).toBeInTheDocument()
     expect(screen.getByText('Copias importadas en esta carga')).toBeInTheDocument()
@@ -89,5 +106,34 @@ describe('DiscogsTab Excel import', () => {
     expect(screen.getByRole('button', {
       name: 'Importar todas las filas identificables (1)',
     })).toBeEnabled()
+  })
+})
+
+describe('DiscogsTab manual import', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.removeItem('sonograma:discogs-excel-job:v1')
+  })
+
+  it('shows existing stock and disables confirmation while one operation is saving', async () => {
+    let resolveSave
+    api.importaciones.discogsDesdeLink.mockResolvedValue(existingPreview)
+    api.importaciones.discogsGuardar.mockImplementation(() => new Promise(resolve => { resolveSave = resolve }))
+
+    render(<DiscogsTab />)
+    fireEvent.change(screen.getByPlaceholderText('https://www.discogs.com/release/12345'), {
+      target: { value: 'https://www.discogs.com/release/456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }))
+
+    expect(await screen.findByText('Producto ya existente')).toBeInTheDocument()
+    expect(screen.getByText('Actualmente tiene 2 copias disponibles. Se agregará 1 copia nueva.')).toBeInTheDocument()
+    const save = screen.getByRole('button', { name: 'Agregar copia' })
+    fireEvent.click(save)
+    expect(save).toBeDisabled()
+    expect(api.importaciones.discogsGuardar).toHaveBeenCalledWith(existingPreview)
+
+    resolveSave({ resultType: 'EXISTING_PRODUCT', copiesAdded: 1, availableCopies: 3, alreadyProcessed: false })
+    expect(await screen.findByText(/Producto ya existente: se agregó 1 copia al stock\./)).toBeInTheDocument()
   })
 })

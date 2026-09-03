@@ -14,7 +14,7 @@ function Spinner({ text }) {
   )
 }
 
-function PreviewCard({ preview, onChange, onGuardar, saving }) {
+function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, mediaBusy }) {
   if (!preview) return null
   const tieneErrores = preview.errores?.length > 0
 
@@ -109,12 +109,43 @@ function PreviewCard({ preview, onChange, onGuardar, saving }) {
         </div>
       )}
 
+      {preview.productoExistente ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+          <p className="font-medium">Producto ya existente</p>
+          <p>Actualmente tiene {preview.copiasDisponibles ?? 0} copias disponibles. Se agregará {preview.cantidadCopias || 1} copia nueva.</p>
+        </div>
+      ) : !tieneErrores && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <p className="font-medium">Producto nuevo</p>
+          <p>Se agregará {preview.cantidadCopias || 1} copia al catálogo.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => onCover(preview)}
+          disabled={!preview.operationId || mediaBusy}
+          className="px-3 py-2 rounded-lg border border-slate-300 dark:border-stone-700 text-slate-700 dark:text-stone-200 text-sm disabled:opacity-40"
+        >
+          {mediaBusy === 'cover' ? 'Descargando…' : 'Descargar portada'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onZip(preview)}
+          disabled={!preview.operationId || mediaBusy}
+          className="px-3 py-2 rounded-lg border border-slate-300 dark:border-stone-700 text-slate-700 dark:text-stone-200 text-sm disabled:opacity-40"
+        >
+          {mediaBusy === 'zip' ? 'Preparando…' : 'Descargar ZIP'}
+        </button>
+      </div>
+
       <button
         onClick={() => onGuardar(preview)}
         disabled={saving || tieneErrores || !preview.artista || !preview.album}
         className="w-full px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
       >
-        {saving ? 'Guardando…' : 'Guardar en catálogo'}
+        {saving ? 'Guardando…' : preview.productoExistente ? 'Agregar copia' : 'Guardar producto'}
       </button>
     </div>
   )
@@ -127,6 +158,8 @@ function LinkSingle() {
   const [estado, setEstado] = useState('idle') // idle | loading | preview | saving | done | error
   const [preview, setPreview] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [result, setResult] = useState(null)
+  const [mediaBusy, setMediaBusy] = useState('')
 
   async function fetchLink() {
     if (!url.trim()) return
@@ -144,16 +177,45 @@ function LinkSingle() {
 
   async function guardar(p) {
     setEstado('saving')
+    setErrorMsg('')
     try {
-      await api.importaciones.discogsGuardar(p)
+      const response = await api.importaciones.discogsGuardar(p)
+      setResult(response)
       setEstado('done')
     } catch (err) {
-      setErrorMsg(err.message || 'Error al guardar')
+      setErrorMsg(err.message || 'No se pudo guardar la importación. Podés volver a intentarlo sin duplicar el stock.')
       setEstado('error')
     }
   }
 
-  function reset() { setUrl(''); setPreview(null); setEstado('idle'); setErrorMsg('') }
+  async function downloadCover(p) {
+    setMediaBusy('cover')
+    setErrorMsg('')
+    try {
+      const response = await api.importaciones.discogsManualCover(p)
+      if (response.imagenUrl) setPreview(current => ({ ...current, imagenUrl: response.imagenUrl }))
+      if (response.warning) setErrorMsg(`Portada: ${response.warning}`)
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo descargar la portada.')
+    } finally {
+      setMediaBusy('')
+    }
+  }
+
+  async function downloadZip(p) {
+    setMediaBusy('zip')
+    setErrorMsg('')
+    try {
+      const file = await api.importaciones.discogsManualZip(p)
+      downloadBlob(file.blob, file.filename, file.contentDisposition)
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo generar el ZIP.')
+    } finally {
+      setMediaBusy('')
+    }
+  }
+
+  function reset() { setUrl(''); setPreview(null); setResult(null); setEstado('idle'); setErrorMsg('') }
 
   return (
     <div className="space-y-4">
@@ -185,18 +247,32 @@ function LinkSingle() {
 
       {estado === 'loading' && <Spinner text="Consultando Discogs API…" />}
 
-      {(estado === 'preview' || estado === 'saving') && preview && (
+      {(estado === 'preview' || estado === 'saving' || estado === 'error') && preview && (
         <PreviewCard
           preview={preview}
           onChange={setPreview}
           onGuardar={guardar}
+          onCover={downloadCover}
+          onZip={downloadZip}
           saving={estado === 'saving'}
+          mediaBusy={mediaBusy}
         />
       )}
 
       {estado === 'done' && (
         <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">✓ Disco guardado en el catálogo</p>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            ✓ {result?.alreadyProcessed
+              ? 'La importación ya había sido confirmada correctamente.'
+              : result?.resultType === 'EXISTING_PRODUCT'
+                ? `Producto ya existente: se agregó ${result?.copiesAdded || 1} copia al stock.`
+                : 'Producto nuevo importado correctamente.'}
+          </p>
+          {result?.availableCopies !== undefined && <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">Copias disponibles: {result.availableCopies}</p>}
+          {preview && <div className="mt-3 grid grid-cols-2 gap-3">
+            <button onClick={() => downloadCover(preview)} disabled={mediaBusy} className="text-xs underline text-emerald-700 dark:text-emerald-300 disabled:opacity-40">Descargar portada</button>
+            <button onClick={() => downloadZip(preview)} disabled={mediaBusy} className="text-xs underline text-emerald-700 dark:text-emerald-300 disabled:opacity-40">Descargar ZIP</button>
+          </div>}
           <button onClick={reset} className="mt-1 text-xs underline text-emerald-600 dark:text-emerald-400">Buscar otro</button>
         </div>
       )}
@@ -205,7 +281,7 @@ function LinkSingle() {
         <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
           <p className="text-sm font-medium text-red-700 dark:text-red-400">Error</p>
           {errorMsg && <p className="text-xs text-red-600 dark:text-red-300 mt-1">{errorMsg}</p>}
-          <button onClick={reset} className="mt-1 text-xs underline text-red-600 dark:text-red-400">Reintentar</button>
+          {!preview && <button onClick={reset} className="mt-1 text-xs underline text-red-600 dark:text-red-400">Reintentar</button>}
         </div>
       )}
     </div>
@@ -261,19 +337,54 @@ function stepLabel(job, estado, processing) {
   return labels[job.stage] || 'Procesando importación'
 }
 
+function jobStatusLabel(status) {
+  const labels = {
+    pending: 'pendiente',
+    processing: 'en curso',
+    completed: 'completado',
+    completed_with_warnings: 'completado con elementos pendientes',
+    completed_with_errors: 'completado con errores',
+    failed: 'fallido — revisable',
+  }
+  return labels[status] || status || '—'
+}
+
 function statusLabel(row) {
   if (row.catalogImportStatus === 'already_imported') return 'Ya importada'
   if (row.catalogImportStatus === 'imported') return 'Importada'
+  if (row.status === 'ignored') return 'Ignorada — no es un producto'
   if (row.catalogImportStatus === 'manual_review') return 'Importación técnicamente imposible — revisión manual'
   if (row.metadataStatus === 'missing_link') return 'Sin link — lista para importar con revisión'
   if (row.metadataStatus === 'rate_limited') return 'Reintentos automáticos agotados'
+  if (row.metadataStatus === 'failed_retryable') return 'Fallo transitorio — pendiente de reintento'
   if (row.metadataStatus === 'processing') return 'Consultando Discogs'
   if (row.metadataStatus === 'failed') return row.metadataErrorCode === 'MASTER_RESOLUTION_FAILED'
     ? 'No se pudo resolver el master'
     : 'Metadata fallida'
   if (row.metadataStatus === 'success' && row.coverStatus !== 'success') return 'Metadata OK · portada no disponible'
   if (row.metadataStatus === 'success') return 'Metadata OK'
-  return row.status || '—'
+  const labels = {
+    pending: 'Pendiente',
+    parsed: 'Lista para importar',
+    fetching_discogs: 'Consultando Discogs',
+    fetching_metadata: 'Obteniendo metadata',
+    failed: 'Falló la importación',
+  }
+  return labels[row.status] || row.status || '—'
+}
+
+function urlSourceLabel(source) {
+  const labels = {
+    hyperlink: 'hipervínculo',
+    hyperlink_formula: 'fórmula de hipervínculo',
+    fallback_hyperlink: 'hipervínculo en otra columna',
+    fallback_hyperlink_formula: 'fórmula en otra columna',
+    visible: 'texto visible',
+    visible_r_id: 'texto visible (release)',
+    visible_m_id: 'texto visible (master)',
+    visible_discogs_text: 'texto Discogs',
+  }
+  return labels[source] || source || '—'
 }
 
 function ExcelLinks() {
@@ -297,6 +408,7 @@ function ExcelLinks() {
       if (filter === 'sold') return row.sourceStatus === 'VENDIDO'
       if (filter === 'reserved') return row.sourceStatus === 'RESERVADO'
       if (filter === 'invalid') return row.metadataStatus === 'missing_link'
+      if (filter === 'ignored') return row.status === 'ignored'
       if (filter === 'pending') return ['pending', 'processing', 'rate_limited', 'failed_retryable'].includes(row.metadataStatus)
       if (filter === 'failed') return row.metadataStatus === 'failed' || ['failed', 'failed_retryable', 'missing_local_file'].includes(row.coverStatus)
       if (filter === 'imported') return ['imported', 'already_imported'].includes(row.catalogImportStatus)
@@ -457,7 +569,7 @@ function ExcelLinks() {
             <div>
               <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{job.nombreArchivo}</p>
               <p className="text-xs text-slate-500 dark:text-stone-500">
-                Hoja {job.nombreHoja} · Estado: {job.status === 'completed_with_warnings' ? 'completado con advertencias' : job.status}
+                Hoja {job.nombreHoja} · Estado: {jobStatusLabel(job.status)}
               </p>
             </div>
             {processing && <Spinner text="Enriqueciendo…" />}
@@ -475,11 +587,21 @@ function ExcelLinks() {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-2">
             {[
+              ['Filas fuente', job.realRowsRead ?? job.totalRowsRead],
               ['Filas detectadas', job.rowsDetected ?? job.realRowsRead ?? job.totalRowsRead],
+              ['Filas Discogs válidas', job.linksDetected],
+              ['Ignoradas / no producto', job.ignored],
               ['Filas asociadas al catálogo', job.rowsImported],
               ['Copias importadas en esta carga', job.imported],
+              ['Copias físicas importadas', job.physicalCopiesImported ?? job.imported],
               ['Productos de catálogo afectados', job.catalogProductsAffected],
+              ['Productos nuevos', job.newProducts],
+              ['Productos existentes reutilizados', job.existingProducts],
+              ['Releases concretos resueltos', job.resolvedConcreteReleases],
+              ['Copias físicas a recibir', job.physicalCopiesToReceive ?? job.readyToImport],
               ['Requieren revisión', job.rowsRequiringReview],
+              ['Filas pendientes', job.pendingRows ?? job.pending],
+              ['Filas con error', job.errorRows ?? job.failed],
               ['Metadata completa', job.rowsWithFullMetadata],
               ['Con advertencias', job.rowsWithWarnings],
               ['Imposibles de importar', job.rowsTechnicallyImpossible],
@@ -553,6 +675,7 @@ function ExcelLinks() {
               ['sold', 'Estado Excel: vendido'],
               ['reserved', 'Estado Excel: reservado'],
               ['invalid', 'Sin link'],
+              ['ignored', 'No producto'],
               ['pending', 'Metadata pendiente'],
               ['failed', 'Con fallas de enriquecimiento'],
               ['imported', 'Importadas'],
@@ -594,7 +717,7 @@ function ExcelLinks() {
                         </a>
                       ) : '—'}
                     </td>
-                    <td className="px-3 py-2">{row.urlSource || '—'}</td>
+                    <td className="px-3 py-2">{urlSourceLabel(row.urlSource)}</td>
                     <td className="px-3 py-2 font-mono">
                       {row.discogsType ? `${row.discogsType}/${row.discogsId}` : '—'}
                       {row.masterId && row.resolvedReleaseId && (
@@ -631,7 +754,7 @@ function ExcelLinks() {
                       {row.errorMessage || row.warningMessage || '—'}
                     </td>
                     <td className="px-3 py-2">
-                      {(['failed', 'rate_limited'].includes(row.metadataStatus)
+                      {(['failed', 'rate_limited', 'failed_retryable'].includes(row.metadataStatus)
                         || ['failed_retryable', 'missing_local_file'].includes(row.coverStatus)) && (
                         <button onClick={() => retryRow(row.id)}
                           className="text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">
@@ -650,7 +773,9 @@ function ExcelLinks() {
               ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
               : 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
               <p className="font-semibold">
-                {job.warnings > 0 ? 'Importación completada con advertencias.' : 'Importación completada.'}
+                {(job.warnings > 0 || job.rowsRequiringReview > 0 || job.pendingRows > 0 || job.errorRows > 0)
+                  ? 'Importación completada con elementos pendientes'
+                  : 'Importación completada'}
               </p>
               <div className="mt-2 grid sm:grid-cols-2 gap-1">
                 <span>✓ Excel analizado: {job.realRowsRead ?? job.totalRowsRead} filas</span>
@@ -661,6 +786,8 @@ function ExcelLinks() {
                 <span>✓ Copias físicas importadas en esta carga: {job.imported || 0}</span>
                 <span>✓ Filas asociadas al catálogo: {job.rowsImported || 0}</span>
                 <span>✓ Productos de catálogo afectados: {job.catalogProductsAffected || 0}</span>
+                <span>✓ Productos nuevos: {job.newProducts || 0}</span>
+                <span>✓ Productos existentes reutilizados: {job.existingProducts || 0}</span>
                 <span>✓ Requieren revisión: {job.rowsRequiringReview || 0}</span>
               </div>
               {(job.rows || []).some(row => row.errorMessage || row.warningMessage) && (

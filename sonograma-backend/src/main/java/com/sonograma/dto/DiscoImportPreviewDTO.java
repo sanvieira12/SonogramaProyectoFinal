@@ -27,6 +27,12 @@ public class DiscoImportPreviewDTO {
     private String imagenUrl;
     private String previewUrl;
     private String discogsUrl;
+    /** Concrete resolved Discogs release id; never a master id. */
+    private Long discogsReleaseId;
+    /** Server-persisted identity of this one manual confirmation. */
+    private String operationId;
+    private Boolean productoExistente;
+    private Integer copiasDisponibles;
     private String tracklist;
     private List<TrackInfo> tracks;
     private BigDecimal precioVenta;

@@ -160,6 +160,10 @@ public class DiscogsImportRow {
     @Column(name = "catalog_import_error_code", length = 80)
     private String catalogImportErrorCode;
 
+    /** Records whether this row created or reused the catalogue product. */
+    @Column(name = "catalog_product_result", length = 30)
+    private String catalogProductResult;
+
     @Column(name = "warning_message", columnDefinition = "TEXT")
     private String warningMessage;
 

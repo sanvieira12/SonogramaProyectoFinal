@@ -494,6 +494,22 @@ export const api = {
     discogsGuardar: (preview) =>
       request('POST', '/importaciones/discogs/guardar', preview),
 
+    discogsManualCover: (preview) =>
+      request('POST', '/importaciones/discogs/manual/cover', preview),
+
+    discogsManualZip: async (preview) => {
+      const res = await fetch(`${BASE}/importaciones/discogs/manual/zip`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(preview),
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      return readZipResponse(res, {
+        fallbackFilename: `discogs-release-${preview.discogsReleaseId || 'export'}.zip`,
+        fallbackError: 'No se pudo generar el ZIP de este release',
+      })
+    },
+
     discogsDesdeExcel: async (file) => {
       const fd = new FormData()
       fd.append('file', file)

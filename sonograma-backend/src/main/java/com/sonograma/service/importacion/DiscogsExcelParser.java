@@ -13,6 +13,7 @@ import java.text.Normalizer;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 @Component
 @RequiredArgsConstructor
@@ -114,6 +115,31 @@ public class DiscogsExcelParser {
                     internalCode,
                     DiscogsImportRowStatus.PARSED,
                     joinWarnings(warnings, price.warning())
+            );
+        }
+
+        if (isNonProductRow(row, columns, evaluator, artist, title, rawCondition, rawPrice,
+                manualGenre, internalCode, buyer, observation)) {
+            return new ParsedRow(
+                    excelRowNumber,
+                    firstNonBlank(visibleCellValue, firstCellValue(row, evaluator, warnings)),
+                    hyperlinkUrl,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    rawCondition,
+                    manualCondition,
+                    rawPrice,
+                    price.value(),
+                    manualGenre,
+                    observation,
+                    sourceStatus,
+                    internalCode,
+                    DiscogsImportRowStatus.IGNORED,
+                    "Fila ignorada: encabezado, nota o fila administrativa sin producto Discogs identificable."
             );
         }
 
@@ -248,8 +274,7 @@ public class DiscogsExcelParser {
     private boolean rowHasMeaningfulData(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator) {
         if (row == null) return false;
         for (Cell cell : row) {
-            if (cell.getHyperlink() != null) return true;
-            if (formulaHyperlinkTarget(cell) != null) return true;
+            if (cell.getHyperlink() != null || formulaHyperlinkTarget(cell) != null) return true;
         }
         for (String field : List.of("url", "artist", "title", "condition", "price", "genre", "status", "observation", "buyer")) {
             Integer column = columns.get(field);
@@ -258,6 +283,59 @@ public class DiscogsExcelParser {
             }
         }
         return false;
+    }
+
+    private boolean isNonProductRow(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator,
+                                    String artist, String title, String condition, String price,
+                                    String genre, String code, String buyer, String observation) {
+        if (!blank(artist) || !blank(title)) return false;
+
+        String explicitStatus = value(row, columns.get("status"), evaluator, new ArrayList<>());
+        boolean hasMappedProductData = Stream.of(condition, price, genre, code, buyer, explicitStatus, observation)
+                .anyMatch(value -> !blank(value));
+        List<String> values = new ArrayList<>();
+        for (Cell cell : row) {
+            String value = cellValue(cell, evaluator, new ArrayList<>()).value().trim();
+            if (!value.isBlank()) values.add(value);
+        }
+        if (values.isEmpty()) return true;
+
+        Set<String> headerValues = Set.of(
+                "artista", "artist", "autor", "album", "titulo", "title", "discogs",
+                "linkdiscogs", "linkdediscogs", "discogsurl", "urldiscogs", "link", "url",
+                "condicion", "condition", "precio", "price", "genero", "genre", "estado", "status",
+                "codigo", "sku", "code", "comprador", "buyer", "notas", "observaciones"
+        );
+        boolean repeatedHeader = (values.size() >= 2 || values.size() == 1) && values.stream()
+                .map(this::normalize)
+                .allMatch(headerValues::contains);
+        boolean administrativeMarker = values.stream()
+                .map(this::normalize)
+                .anyMatch(value -> value.equals("total") || value.equals("subtotal")
+                        || value.equals("totalgeneral") || value.equals("resumen")
+                        || value.equals("administracion") || value.equals("administrativo"));
+        boolean noteOnly = !blank(observation)
+                && Stream.of(condition, price, genre, code, buyer, explicitStatus).allMatch(this::blank);
+        boolean onlyUnmappedData = !hasMappedProductData && rowHasNoMappedValue(row, columns, evaluator);
+        return repeatedHeader || administrativeMarker || noteOnly || onlyUnmappedData;
+    }
+
+    private boolean rowHasNoMappedValue(Row row, Map<String, Integer> columns, FormulaEvaluator evaluator) {
+        for (Integer column : columns.values()) {
+            if (column != null && !cellValue(row.getCell(column), evaluator, new ArrayList<>()).value().isBlank()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String firstCellValue(Row row, FormulaEvaluator evaluator, List<String> warnings) {
+        if (row == null) return null;
+        for (Cell cell : row) {
+            String value = cellValue(cell, evaluator, warnings).value().trim();
+            if (!value.isBlank()) return value;
+        }
+        return null;
     }
 
     private String value(Row row, Integer column, FormulaEvaluator evaluator, List<String> warnings) {

@@ -62,6 +62,17 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
     @Query("SELECT d FROM Disco d WHERE d.discogsUrl = :discogsUrl AND d.catalogDeletedAt IS NULL")
     Optional<Disco> findByDiscogsUrl(@Param("discogsUrl") String discogsUrl);
 
+    @Query("SELECT d FROM Disco d WHERE d.discogsReleaseId = :releaseId AND d.catalogDeletedAt IS NULL")
+    List<Disco> findAllByDiscogsReleaseId(@Param("releaseId") Long releaseId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Disco d WHERE d.discogsReleaseId = :releaseId AND d.catalogDeletedAt IS NULL")
+    List<Disco> findAllByDiscogsReleaseIdForUpdate(@Param("releaseId") Long releaseId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Disco d WHERE d.discogsUrl = :discogsUrl AND d.catalogDeletedAt IS NULL")
+    List<Disco> findAllByDiscogsUrlForUpdate(@Param("discogsUrl") String discogsUrl);
+
     @Query("SELECT d FROM Disco d WHERE d.catalogDeletedAt IS NULL AND LOWER(d.artista) = LOWER(:artista) AND LOWER(d.album) = LOWER(:album)")
     List<Disco> findByArtistaAndAlbumIgnoreCase(@Param("artista") String artista, @Param("album") String album);
 

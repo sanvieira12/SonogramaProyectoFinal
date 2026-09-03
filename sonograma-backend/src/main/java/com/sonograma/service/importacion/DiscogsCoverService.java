@@ -1,6 +1,8 @@
 package com.sonograma.service.importacion;
 
 import com.sonograma.dto.DiscogsCoverZipRow;
+import com.sonograma.dto.DiscoImportPreviewDTO;
+import com.sonograma.dto.TrackInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -71,6 +73,39 @@ public class DiscogsCoverService {
             log.warn("No se pudo descargar portada Discogs release={} url={}: {}",
                     releaseId, imageUrl, ex.getMessage());
             return CoverResult.failure(imageUrl, ex.getMessage());
+        }
+    }
+
+    /** Reuses an already downloaded individual cover without opening the network. */
+    public CoverResult existing(String publicUrl) {
+        Path path = localPath(publicUrl);
+        try {
+            if (path != null && Files.isRegularFile(path) && Files.size(path) > 0) {
+                return CoverResult.success(publicUrl(path), path, false);
+            }
+        } catch (IOException ignored) {
+            // The caller may still try the original remote URL.
+        }
+        return CoverResult.missing("La portada aún no está disponible localmente.");
+    }
+
+    /** Writes metadata, permitted links and an available cover; never stock or audio media. */
+    public void writeManualReleaseZip(OutputStream output, DiscoImportPreviewDTO preview) throws IOException {
+        Set<String> usedNames = new HashSet<>();
+        try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(output))) {
+            CoverResult cover = existing(preview.getImagenUrl());
+            if (!cover.available()) cover = download(preview.getImagenUrl(), preview.getDiscogsReleaseId());
+            if (cover.available() && cover.localPath() != null && Files.isRegularFile(cover.localPath())) {
+                zip.putNextEntry(new ZipEntry(uniqueZipEntryName("cover" + extensionWithDot(cover.localPath()), usedNames)));
+                Files.copy(cover.localPath(), zip);
+                zip.closeEntry();
+            }
+            zip.putNextEntry(new ZipEntry(uniqueZipEntryName("release.json", usedNames)));
+            zip.write(manualReleaseJson(preview).getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry(uniqueZipEntryName("tracks-and-links.txt", usedNames)));
+            zip.write(manualTracks(preview).getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
         }
     }
 
@@ -376,6 +411,41 @@ public class DiscogsCoverService {
         String sanitized = fallback.replaceAll("[/\\\\:*?\"<>|]", "_").strip();
         return sanitized.length() > 100 ? sanitized.substring(0, 100).strip() : sanitized;
     }
+
+    private String manualReleaseJson(DiscoImportPreviewDTO preview) {
+        return "{\n"
+                + "  \"discogsReleaseId\": " + preview.getDiscogsReleaseId() + ",\n"
+                + "  \"discogsUrl\": \"" + json(preview.getDiscogsUrl()) + "\",\n"
+                + "  \"artist\": \"" + json(preview.getArtista()) + "\",\n"
+                + "  \"title\": \"" + json(preview.getAlbum()) + "\",\n"
+                + "  \"year\": " + (preview.getAnio() == null ? "null" : preview.getAnio()) + ",\n"
+                + "  \"label\": \"" + json(preview.getSello()) + "\",\n"
+                + "  \"format\": \"" + json(preview.getFormato()) + "\",\n"
+                + "  \"genre\": \"" + json(preview.getGenero()) + "\",\n"
+                + "  \"style\": \"" + json(preview.getEstilo()) + "\"\n"
+                + "}\n";
+    }
+
+    private String manualTracks(DiscoImportPreviewDTO preview) {
+        StringBuilder text = new StringBuilder("Tracklist\n")
+                .append(preview.getTracklist() == null ? "" : preview.getTracklist()).append("\n\nLinks\n");
+        if (preview.getTracks() != null) {
+            for (TrackInfo track : preview.getTracks()) {
+                text.append(nullToEmpty(track.label())).append(" ").append(nullToEmpty(track.name()));
+                if (track.youtubeUrl() != null) text.append(" | YouTube: ").append(track.youtubeUrl());
+                if (track.mp3Url() != null) text.append(" | Preview: ").append(track.mp3Url());
+                text.append('\n');
+            }
+        }
+        return text.toString();
+    }
+
+    private String json(String value) {
+        return nullToEmpty(value).replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "");
+    }
+
+    private String nullToEmpty(String value) { return value == null ? "" : value; }
 
     public record CoverResult(
             boolean available,

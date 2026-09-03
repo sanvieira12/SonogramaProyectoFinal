@@ -124,6 +124,14 @@ public class Disco {
     @Column(name = "discogs_url")
     private String discogsUrl;
 
+    /**
+     * Concrete Discogs release identity. This is deliberately nullable while
+     * historical catalogue rows are reconciled; a master id is never stored
+     * here.
+     */
+    @Column(name = "discogs_release_id")
+    private Long discogsReleaseId;
+
     @Column(name = "fecha_ingreso")
     private LocalDateTime fechaIngreso;
 

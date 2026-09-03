@@ -16,10 +16,13 @@ import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.DiscogsCatalogStockService;
 import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -54,6 +57,7 @@ public class DiscogsImportJobService {
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
+    private final DiscogsCatalogStockService catalogStockService;
     private final ExecutorService jobExecutor = Executors.newSingleThreadExecutor();
 
     public DiscogsImportJobDTO createJob(MultipartFile file) {
@@ -146,6 +150,60 @@ public class DiscogsImportJobService {
         return toDto(job);
     }
 
+    /** Reanuda sólo trabajo persistido que quedó a mitad de una llamada externa. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void resumeInterruptedJobs() {
+        jobRepository.findByStatusIn(List.of(
+                        DiscogsImportJobStatus.PENDING,
+                        DiscogsImportJobStatus.PROCESSING
+                )).forEach(job -> {
+                    recoverInterruptedState(job.getIdDiscogsImportJob());
+                    jobExecutor.submit(() -> processJob(job.getIdDiscogsImportJob()));
+                });
+    }
+
+    public DiscogsImportJobDTO resumeJob(Long jobId) {
+        DiscogsImportJob job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new NegocioException("Importación Discogs no encontrada: " + jobId));
+        if (Set.of(
+                DiscogsImportJobStatus.COMPLETED,
+                DiscogsImportJobStatus.COMPLETED_WITH_WARNINGS,
+                DiscogsImportJobStatus.COMPLETED_WITH_ERRORS
+        ).contains(job.getStatus())) {
+            throw new NegocioException("La importación Discogs ya finalizó");
+        }
+        recoverInterruptedState(jobId);
+        updateJobStatus(jobId, DiscogsImportJobStatus.PROCESSING, null);
+        jobExecutor.submit(() -> processJob(jobId));
+        return getJob(jobId);
+    }
+
+    private void recoverInterruptedState(Long jobId) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            DiscogsImportJob job = jobRepository.findById(jobId).orElseThrow();
+            for (DiscogsImportRow row : job.getRows()) {
+                if (row.getStatus() == DiscogsImportRowStatus.FETCHING_DISCOGS
+                        || row.getMetadataStatus() == DiscogsMetadataStatus.PROCESSING) {
+                    row.setStatus(DiscogsImportRowStatus.PARSED);
+                    row.setMetadataStatus(DiscogsMetadataStatus.PENDING);
+                    row.setMetadataErrorCode(null);
+                    row.setErrorMessage(null);
+                    rowRepository.save(row);
+                }
+                if (row.getCoverStatus() == DiscogsCoverStatus.DOWNLOADING) {
+                    row.setCoverStatus(DiscogsCoverStatus.FAILED_RETRYABLE);
+                    row.setCoverErrorCode("COVER_DOWNLOAD_INTERRUPTED");
+                    appendWarning(row, "COVER_UNAVAILABLE — Descarga interrumpida; se puede reintentar.");
+                    rowRepository.save(row);
+                }
+            }
+            if (job.getStatus() == DiscogsImportJobStatus.PENDING) {
+                job.setStatus(DiscogsImportJobStatus.PROCESSING);
+                jobRepository.save(job);
+            }
+        });
+    }
+
     public DiscogsImportJobDTO retryRow(Long jobId, Long rowId) {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         tx.executeWithoutResult(status -> {
@@ -216,9 +274,9 @@ public class DiscogsImportJobService {
                     .map(DiscogsImportRow::getIdDiscogsImportRow)
                     .toList());
         for (Long rowId : Optional.ofNullable(rowIds).orElse(List.of())) {
-            try {
-                new TransactionTemplate(transactionManager).executeWithoutResult(status ->
-                        importRow(rowRepository.findById(rowId).orElseThrow()));
+                try {
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                        importRow(rowRepository.findByIdForUpdate(rowId).orElseThrow()));
             } catch (RuntimeException ex) {
                 markImportFailure(rowId, ex);
             }
@@ -240,6 +298,11 @@ public class DiscogsImportJobService {
 
     private void importRow(DiscogsImportRow row) {
         try {
+            if (row.getImportedCatalogProduct() != null
+                    || row.getStatus() == DiscogsImportRowStatus.IMPORTED
+                    || row.getStatus() == DiscogsImportRowStatus.ALREADY_IMPORTED) {
+                return;
+            }
             List<DiscogsImportRow> priorImports = rowRepository.findPriorImportedPhysicalRows(
                     row.getJob().getSourceFingerprint(),
                     row.getJob().getIdDiscogsImportJob(),
@@ -250,6 +313,7 @@ public class DiscogsImportJobService {
                 row.setStatus(DiscogsImportRowStatus.ALREADY_IMPORTED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.ALREADY_IMPORTED);
                 row.setCatalogImportErrorCode(null);
+                row.setCatalogProductResult("ALREADY_IMPORTED");
                 rowRepository.save(row);
                 return;
             }
@@ -263,21 +327,18 @@ public class DiscogsImportJobService {
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
                 row.setCatalogImportErrorCode(null);
+                row.setCatalogProductResult("EXISTING_PRODUCT");
                 rowRepository.save(row);
                 return;
             }
-            Optional<Disco> existing = findExistingDisco(row);
-            Disco disco = existing
-                    .map(found -> mergeDisco(found, row))
-                    .orElseGet(() -> toDisco(row));
-            discoRepository.save(disco);
-            preVentaCodeMatcher.linkPendingPreSales(disco);
-            qrCopyService.synchronize(disco);
+            DiscogsCatalogStockService.ReceiptResult receipt = catalogStockService.receive(toReceiptCommand(row));
+            Disco disco = receipt.disco();
             storeOptionalTracks(row, disco, parseTracks(row.getTracksJson()));
             row.setImportedCatalogProduct(disco);
             row.setStatus(DiscogsImportRowStatus.IMPORTED);
             row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
             row.setCatalogImportErrorCode(null);
+            row.setCatalogProductResult(receipt.productStatus().name());
             row.setErrorMessage(null);
             rowRepository.save(row);
         } catch (NegocioException ex) {
@@ -490,12 +551,17 @@ public class DiscogsImportJobService {
             List<Long> rowIds = new TransactionTemplate(transactionManager).execute(status ->
                     rowRepository.findByJobIdDiscogsImportJobAndStatusInOrderBySourceExcelRowNumber(
                                     jobId,
-                                    List.of(
+                            List.of(
                                             DiscogsImportRowStatus.PARSED,
                                             DiscogsImportRowStatus.SOLD,
-                                            DiscogsImportRowStatus.RESERVED
+                                    DiscogsImportRowStatus.RESERVED
                                     )
                             ).stream()
+                            .filter(row -> Set.of(
+                                    DiscogsMetadataStatus.PENDING,
+                                    DiscogsMetadataStatus.PROCESSING,
+                                    DiscogsMetadataStatus.FAILED_RETRYABLE
+                            ).contains(row.getMetadataStatus()))
                             .map(DiscogsImportRow::getIdDiscogsImportRow)
                             .toList()
             );
@@ -540,6 +606,9 @@ public class DiscogsImportJobService {
 
     private void processRow(Long rowId, DiscogsApiClient.ImportSession session) {
         RowSource source = markMetadataProcessing(rowId);
+        if (source == null) {
+            return;
+        }
         updateJobStage(source.jobId(), "master".equals(source.discogsType())
                 ? DiscogsImportStage.RESOLVING_DISCOGS
                 : DiscogsImportStage.FETCHING_METADATA);
@@ -551,6 +620,12 @@ public class DiscogsImportJobService {
                     session, source.discogsType(), source.discogsId());
             if (!result.success()) {
                 handleMetadataFailure(rowId, source, result);
+                return;
+            }
+            String invalidMetadata = invalidMetadataReason(result);
+            if (invalidMetadata != null) {
+                handleMetadataFailure(rowId, source,
+                        DiscogsApiClient.FetchResult.failure(false, 0, invalidMetadata));
                 return;
             }
             updateJobStage(source.jobId(), DiscogsImportStage.FETCHING_YOUTUBE);
@@ -572,8 +647,13 @@ public class DiscogsImportJobService {
 
     private RowSource markMetadataProcessing(Long rowId) {
         return new TransactionTemplate(transactionManager).execute(transactionStatus -> {
-            DiscogsImportRow row = rowRepository.findById(rowId)
+            DiscogsImportRow row = rowRepository.findByIdForUpdate(rowId)
                     .orElseThrow(() -> new NegocioException("Fila Discogs no encontrada: " + rowId));
+            if (row.getImportedCatalogProduct() != null
+                    || row.getMetadataStatus() == DiscogsMetadataStatus.SUCCESS
+                    || row.getStatus() == DiscogsImportRowStatus.IGNORED) {
+                return null;
+            }
             row.setStatus(DiscogsImportRowStatus.FETCHING_DISCOGS);
             row.setMetadataStatus(DiscogsMetadataStatus.PROCESSING);
             row.setMetadataErrorCode(null);
@@ -593,16 +673,22 @@ public class DiscogsImportJobService {
                                        DiscogsApiClient.FetchResult result) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             DiscogsImportRow row = rowRepository.findById(rowId).orElseThrow();
-            if (result.rateLimited()) {
+            if (result.rateLimited() || result.retryable()) {
                 row.setRetryCount(row.getRetryCount() + 1);
                 row.setStatus(DiscogsImportRowStatus.PENDING_RETRY);
-                row.setMetadataStatus(DiscogsMetadataStatus.RATE_LIMITED);
-                row.setMetadataErrorCode("RATE_LIMITED");
+                boolean rateLimited = result.rateLimited();
+                row.setMetadataStatus(rateLimited
+                        ? DiscogsMetadataStatus.RATE_LIMITED
+                        : DiscogsMetadataStatus.FAILED_RETRYABLE);
+                row.setMetadataErrorCode(rateLimited ? "RATE_LIMITED" : "DISCOGS_TRANSIENT_FAILURE");
                 row.setErrorMessage(null);
-                appendWarning(row, "MANUAL_REVIEW_REQUIRED — RATE_LIMITED — " + RATE_LIMIT_WARNING);
+                appendWarning(row, rateLimited
+                        ? "MANUAL_REVIEW_REQUIRED — RATE_LIMITED — " + RATE_LIMIT_WARNING
+                        : "MANUAL_REVIEW_REQUIRED — DISCOGS_TRANSIENT_FAILURE — "
+                            + firstNonBlank(result.errorMessage(), "Fallo transitorio de Discogs; se puede reintentar."));
                 row.setCoverStatus(DiscogsCoverStatus.PENDING);
                 row.setYoutubeStatus(DiscogsYoutubeStatus.PENDING);
-                row.setCatalogImportStatus(DiscogsCatalogImportStatus.READY);
+                row.setCatalogImportStatus(DiscogsCatalogImportStatus.PENDING);
             } else {
                 String code = "master".equals(source.discogsType())
                         ? "MASTER_RESOLUTION_FAILED"
@@ -613,7 +699,7 @@ public class DiscogsImportJobService {
                 row.setErrorMessage(null);
                 row.setCoverStatus(DiscogsCoverStatus.NOT_APPLICABLE);
                 row.setYoutubeStatus(DiscogsYoutubeStatus.NOT_APPLICABLE);
-                row.setCatalogImportStatus(DiscogsCatalogImportStatus.READY);
+                row.setCatalogImportStatus(DiscogsCatalogImportStatus.MANUAL_REVIEW);
                 appendWarning(row, "master".equals(source.discogsType())
                         ? "MANUAL_REVIEW_REQUIRED — MASTER_RESOLUTION_REVIEW_REQUIRED — "
                             + firstNonBlank(result.errorMessage(), "No se pudo resolver el master a un release.")
@@ -624,7 +710,8 @@ public class DiscogsImportJobService {
         });
         log.warn("DiscogsImport job={} row={} sourceType={} sourceId={} resolvedRelease={} stage=FETCHING_METADATA retry={} failed: {}",
                 source.jobId(), source.rowNumber(), source.discogsType(), source.discogsId(),
-                source.resolvedReleaseId(), source.retryCount() + (result.rateLimited() ? 1 : 0),
+                source.resolvedReleaseId(), source.retryCount()
+                        + ((result.rateLimited() || result.retryable()) ? 1 : 0),
                 result.errorMessage());
     }
 
@@ -675,6 +762,7 @@ public class DiscogsImportJobService {
                 storeOptionalTracks(row, disco, result.tracks());
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
+                row.setCatalogProductResult("EXISTING_PRODUCT");
             } else {
                 row.setStatus(DiscogsImportRowStatus.PARSED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.READY);
@@ -734,7 +822,7 @@ public class DiscogsImportJobService {
             row.setMetadataStatus(DiscogsMetadataStatus.FAILED);
             row.setMetadataErrorCode("DISCOGS_METADATA_FAILED");
             row.setErrorMessage(null);
-            row.setCatalogImportStatus(DiscogsCatalogImportStatus.READY);
+            row.setCatalogImportStatus(DiscogsCatalogImportStatus.MANUAL_REVIEW);
             appendWarning(row, "MANUAL_REVIEW_REQUIRED — DISCOGS_METADATA_UNAVAILABLE — " + conciseError(ex));
             rowRepository.save(row);
         });
@@ -765,9 +853,7 @@ public class DiscogsImportJobService {
                 row.setMetadataStatus(DiscogsMetadataStatus.FAILED);
                 row.setMetadataErrorCode("ROW_PROCESSING_FAILED");
                 row.setErrorMessage(null);
-                row.setCatalogImportStatus(canCreateMeaningfulCatalogProduct(row)
-                        ? DiscogsCatalogImportStatus.READY
-                        : DiscogsCatalogImportStatus.MANUAL_REVIEW);
+                row.setCatalogImportStatus(DiscogsCatalogImportStatus.MANUAL_REVIEW);
                 appendWarning(row, "MANUAL_REVIEW_REQUIRED — ROW_PROCESSING_FAILED — " + conciseError(ex));
                 rowRepository.save(row);
             });
@@ -781,8 +867,17 @@ public class DiscogsImportJobService {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         tx.executeWithoutResult(status -> {
             DiscogsImportJob job = jobRepository.findDetailedByIdDiscogsImportJob(jobId).orElseThrow();
-            boolean warnings = job.getRows().stream().anyMatch(row ->
-                    row.getMetadataStatus() != DiscogsMetadataStatus.SUCCESS
+            boolean inProgress = job.getRows().stream()
+                    .anyMatch(row -> row.getStatus() == DiscogsImportRowStatus.FETCHING_DISCOGS
+                            || row.getMetadataStatus() == DiscogsMetadataStatus.PROCESSING);
+            if (inProgress) {
+                job.setStatus(DiscogsImportJobStatus.PROCESSING);
+                jobRepository.save(job);
+                return;
+            }
+            boolean warnings = job.getRows().stream()
+                    .filter(row -> row.getStatus() != DiscogsImportRowStatus.IGNORED)
+                    .anyMatch(row -> row.getMetadataStatus() != DiscogsMetadataStatus.SUCCESS
                             || row.getCoverStatus() != DiscogsCoverStatus.SUCCESS
                             || row.getYoutubeStatus() == DiscogsYoutubeStatus.NOT_FOUND
                             || row.getYoutubeStatus() == DiscogsYoutubeStatus.PARTIAL
@@ -862,6 +957,23 @@ public class DiscogsImportJobService {
                 .notas(catalogNotes(row))
                 .build();
         return disco;
+    }
+
+    private DiscogsCatalogStockService.ReceiptCommand toReceiptCommand(DiscogsImportRow row) {
+        Long releaseId = releaseIdentity(row);
+        return new DiscogsCatalogStockService.ReceiptCommand(
+                releaseId,
+                1,
+                new DiscogsCatalogStockService.DiscogsMetadata(
+                        row.getArtist(), row.getTitle(), row.getGenre(), row.getLabel(), row.getYear(),
+                        CondicionDisco.USADO, normalizePhysicalCondition(row.getManualCondition()),
+                        parseFormat(row.getFormat()), row.getFormat(), null, row.getManualPriceUyu(),
+                        row.getManualPriceUyu() == null ? PricingMode.AUTO : PricingMode.MANUAL,
+                        row.getCountry(), row.getStyle(), row.getTracklist(), row.getImageUrl(), null,
+                        firstNonBlank(row.getInternalCode(), generateCode(row)),
+                        ImportMetadataNormalizer.SOURCE_DISCOGS, catalogNotes(row)
+                )
+        );
     }
 
     private List<TrackInfo> parseTracks(String json) {
@@ -1113,13 +1225,19 @@ public class DiscogsImportJobService {
     private boolean isReadyToImport(DiscogsImportRow row) {
         return row.getImportedCatalogProduct() == null
                 && row.getCatalogImportStatus() == DiscogsCatalogImportStatus.READY
-                && canCreateMeaningfulCatalogProduct(row);
+                && row.getMetadataStatus() == DiscogsMetadataStatus.SUCCESS
+                && releaseIdentity(row) != null
+                && !blank(row.getArtist())
+                && !blank(row.getTitle());
     }
 
     private boolean isReadyToImport(DiscogsImportRowDTO row) {
         return row.getImportedCatalogProductId() == null
                 && "ready".equals(row.getCatalogImportStatus())
-                && (row.getDiscogsId() != null || !blank(row.getArtist()) || !blank(row.getTitle()));
+                && "success".equals(row.getMetadataStatus())
+                && row.getResolvedReleaseId() != null
+                && !blank(row.getArtist())
+                && !blank(row.getTitle());
     }
 
     private boolean canCreateMeaningfulCatalogProduct(DiscogsImportRow row) {
@@ -1200,16 +1318,31 @@ public class DiscogsImportJobService {
                 .rowsDetected(rows.size())
                 .rowsImported(count(rows, row -> row.getImportedCatalogProductId() != null))
                 .catalogProductsAffected((int) rows.stream()
-                        .filter(row -> "imported".equals(row.getStatus()))
                         .map(DiscogsImportRowDTO::getImportedCatalogProductId)
                         .filter(Objects::nonNull)
                         .distinct()
                         .count())
+                .newProducts(distinctProductCount(rows, "NEW_PRODUCT"))
+                .existingProducts(distinctProductCount(rows, "EXISTING_PRODUCT"))
+                .physicalCopiesImported(countStatus(rows, DiscogsImportRowStatus.IMPORTED))
+                .physicalCopiesToReceive(count(rows, this::isReadyToImport))
+                .resolvedConcreteReleases((int) rows.stream()
+                        .map(DiscogsImportRowDTO::getResolvedReleaseId)
+                        .filter(Objects::nonNull)
+                        .filter(id -> id > 0)
+                        .distinct()
+                        .count())
+                .pendingRows(count(rows, row -> Set.of("pending", "processing", "rate_limited", "failed_retryable")
+                        .contains(row.getMetadataStatus())))
+                .errorRows(count(rows, row -> "failed".equalsIgnoreCase(row.getStatus())
+                        || "failed".equals(row.getMetadataStatus())
+                        || "failed".equals(row.getCatalogImportStatus())))
                 .rowsRequiringReview(count(rows, this::requiresReview))
                 .rowsWithFullMetadata(count(rows, this::hasFullMetadata))
                 .rowsWithWarnings(count(rows, this::requiresReview))
                 .rowsTechnicallyImpossible(count(rows, row ->
                         "manual_review".equals(row.getCatalogImportStatus())
+                                && !"ignored".equals(row.getStatus())
                                 && row.getImportedCatalogProductId() == null
                                 && row.getDiscogsId() == null
                                 && blank(row.getArtist())
@@ -1274,6 +1407,7 @@ public class DiscogsImportJobService {
                 .youtubeErrorCode(row.getYoutubeErrorCode())
                 .catalogImportStatus(enumName(row.getCatalogImportStatus()).toLowerCase(Locale.ROOT))
                 .catalogImportErrorCode(row.getCatalogImportErrorCode())
+                .catalogProductResult(row.getCatalogProductResult())
                 .warningMessage(row.getWarningMessage())
                 .status(row.getStatus().name().toLowerCase(Locale.ROOT))
                 .errorMessage(row.getErrorMessage())
@@ -1292,7 +1426,17 @@ public class DiscogsImportJobService {
         return (int) rows.stream().filter(test).count();
     }
 
+    private int distinctProductCount(List<DiscogsImportRowDTO> rows, String result) {
+        return (int) rows.stream()
+                .filter(row -> result.equals(row.getCatalogProductResult()))
+                .map(DiscogsImportRowDTO::getImportedCatalogProductId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+    }
+
     private boolean requiresReview(DiscogsImportRowDTO row) {
+        if ("ignored".equals(row.getStatus())) return false;
         return !blank(row.getWarningMessage())
                 || !blank(row.getErrorMessage())
                 || !"success".equals(row.getMetadataStatus())
@@ -1307,6 +1451,16 @@ public class DiscogsImportJobService {
                 && "success".equals(row.getCoverStatus())
                 && "success".equals(row.getYoutubeStatus())
                 && !requiresReview(row);
+    }
+
+    private String invalidMetadataReason(DiscogsApiClient.FetchResult result) {
+        if (result.resolvedReleaseId() == null || result.resolvedReleaseId() < 1) {
+            return "No se pudo resolver el enlace a un release concreto de Discogs.";
+        }
+        if (blank(result.artist()) || blank(result.title())) {
+            return "Discogs no devolvió artista y título suficientes para crear un producto.";
+        }
+        return null;
     }
 
     private boolean contains(String value, String needle) {
