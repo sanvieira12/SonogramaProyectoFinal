@@ -47,18 +47,15 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
     );
 
     @Query("""
-            SELECT r FROM DiscogsImportRow r
-            JOIN FETCH r.importedCatalogProduct p
-            JOIN r.job j
-            WHERE j.sourceFingerprint = :fingerprint
-              AND j.idDiscogsImportJob <> :jobId
-              AND r.sourceExcelRowNumber = :rowNumber
-            ORDER BY j.createdAt DESC
+            SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END
+            FROM DiscogsImportRow r
+            WHERE r.job.idDiscogsImportJob = :jobId
+              AND r.importedCatalogProduct.idDisco = :productId
+              AND r.catalogProductResult = 'NEW_PRODUCT'
             """)
-    List<DiscogsImportRow> findPriorImportedPhysicalRows(
-            @Param("fingerprint") String fingerprint,
+    boolean hasNewProductReceiptInJob(
             @Param("jobId") Long jobId,
-            @Param("rowNumber") Integer rowNumber
+            @Param("productId") Long productId
     );
 
     @EntityGraph(attributePaths = "importedCatalogProduct")

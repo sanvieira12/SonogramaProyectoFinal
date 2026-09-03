@@ -303,20 +303,6 @@ public class DiscogsImportJobService {
                     || row.getStatus() == DiscogsImportRowStatus.ALREADY_IMPORTED) {
                 return;
             }
-            List<DiscogsImportRow> priorImports = rowRepository.findPriorImportedPhysicalRows(
-                    row.getJob().getSourceFingerprint(),
-                    row.getJob().getIdDiscogsImportJob(),
-                    row.getSourceExcelRowNumber()
-            );
-            if (!priorImports.isEmpty()) {
-                row.setImportedCatalogProduct(priorImports.get(0).getImportedCatalogProduct());
-                row.setStatus(DiscogsImportRowStatus.ALREADY_IMPORTED);
-                row.setCatalogImportStatus(DiscogsCatalogImportStatus.ALREADY_IMPORTED);
-                row.setCatalogImportErrorCode(null);
-                row.setCatalogProductResult("ALREADY_IMPORTED");
-                rowRepository.save(row);
-                return;
-            }
             row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTING);
             if (row.getImportedCatalogProduct() != null) {
                 updateDisco(row.getImportedCatalogProduct(), row);
@@ -338,7 +324,7 @@ public class DiscogsImportJobService {
             row.setStatus(DiscogsImportRowStatus.IMPORTED);
             row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
             row.setCatalogImportErrorCode(null);
-            row.setCatalogProductResult(receipt.productStatus().name());
+            row.setCatalogProductResult(catalogProductResult(row, receipt));
             row.setErrorMessage(null);
             rowRepository.save(row);
         } catch (NegocioException ex) {
@@ -1098,6 +1084,25 @@ public class DiscogsImportJobService {
         updateDisco(disco, row);
         disco.setCantidadCopias(Math.max(0, Optional.ofNullable(disco.getCantidadCopias()).orElse(0)) + 1);
         return disco;
+    }
+
+    /**
+     * Product reporting is scoped to the current job. A later duplicate row in
+     * the same workbook receives another physical copy, but belongs to the
+     * product first created by that job rather than to a pre-existing product.
+     */
+    private String catalogProductResult(
+            DiscogsImportRow row,
+            DiscogsCatalogStockService.ReceiptResult receipt
+    ) {
+        if (receipt.productStatus() == DiscogsCatalogStockService.ProductStatus.NEW_PRODUCT) {
+            return DiscogsCatalogStockService.ProductStatus.NEW_PRODUCT.name();
+        }
+        boolean createdEarlierInThisJob = rowRepository.hasNewProductReceiptInJob(
+                row.getJob().getIdDiscogsImportJob(), receipt.disco().getIdDisco());
+        return createdEarlierInThisJob
+                ? DiscogsCatalogStockService.ProductStatus.NEW_PRODUCT.name()
+                : DiscogsCatalogStockService.ProductStatus.EXISTING_PRODUCT.name();
     }
 
     private String normalize(String value) {

@@ -330,7 +330,7 @@ class DiscogsImportJobServiceTest {
     }
 
     @Test
-    void reprocessedWorkbookDoesNotDuplicateAnAlreadyImportedPhysicalRow() throws Exception {
+    void sameWorkbookUploadedAsNewJobReceivesAnotherPhysicalCopy() throws Exception {
         when(apiClient.newSession()).thenReturn(new DiscogsApiClient.ImportSession());
         when(apiClient.fetch(any(DiscogsApiClient.ImportSession.class), anyString(), anyLong()))
                 .thenReturn(successResult());
@@ -349,15 +349,21 @@ class DiscogsImportJobServiceTest {
 
         DiscogsImportJobDTO importedAgain = service.importParsedRows(second.getId());
 
-        assertThat(importedAgain.getImported()).isZero();
-        assertThat(importedAgain.getAlreadyImported()).isEqualTo(1);
+        assertThat(importedAgain.getImported()).isEqualTo(1);
+        assertThat(importedAgain.getAlreadyImported()).isZero();
+        assertThat(importedAgain.getNewProducts()).isZero();
+        assertThat(importedAgain.getExistingProducts()).isEqualTo(1);
         assertThat(importedAgain.getRows()).singleElement().satisfies(row -> {
-            assertThat(row.getStatus()).isEqualTo("already_imported");
-            assertThat(row.getCatalogImportStatus()).isEqualTo("already_imported");
+            assertThat(row.getStatus()).isEqualTo("imported");
+            assertThat(row.getCatalogImportStatus()).isEqualTo("imported");
+            assertThat(row.getCatalogProductResult()).isEqualTo("EXISTING_PRODUCT");
             assertThat(row.getImportedCatalogProductId()).isNotNull();
         });
         assertThat(discoRepository.findAll()).singleElement()
-                .satisfies(disco -> assertThat(disco.getCantidadCopias()).isEqualTo(1));
+                .satisfies(disco -> {
+                    assertThat(disco.getCantidadCopias()).isEqualTo(2);
+                    assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(2);
+                });
     }
 
     @Test
@@ -475,6 +481,8 @@ class DiscogsImportJobServiceTest {
         assertThat(imported.getImported()).isEqualTo(2);
         assertThat(imported.getRowsImported()).isEqualTo(2);
         assertThat(imported.getCatalogProductsAffected()).isEqualTo(1);
+        assertThat(imported.getNewProducts()).isEqualTo(1);
+        assertThat(imported.getExistingProducts()).isZero();
         assertThat(imported.getRows())
                 .extracting(DiscogsImportRowDTO::getImportedCatalogProductId)
                 .containsOnly(imported.getRows().get(0).getImportedCatalogProductId());
@@ -510,6 +518,51 @@ class DiscogsImportJobServiceTest {
         assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
             assertThat(disco.getCantidadCopias()).isEqualTo(2);
             assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(2);
+        });
+    }
+
+    @Test
+    void sameWorkbookAsNewJobReceivesAgainInsteadOfReusingHistoricalRowReceipt() {
+        DiscogsImportJob historical = completedJob("pin.xlsx");
+        historical.setSourceFingerprint("same-workbook");
+        jobRepository.save(historical);
+        rowRepository.save(parsedRow(historical, 12, 111L));
+        service.importParsedRows(historical.getIdDiscogsImportJob());
+
+        DiscogsImportJob reimport = completedJob("pin.xlsx");
+        reimport.setSourceFingerprint("same-workbook");
+        jobRepository.save(reimport);
+        rowRepository.save(parsedRow(reimport, 12, 111L));
+
+        DiscogsImportJobDTO imported = service.importParsedRows(reimport.getIdDiscogsImportJob());
+
+        assertThat(imported.getImported()).isEqualTo(1);
+        assertThat(imported.getAlreadyImported()).isZero();
+        assertThat(imported.getNewProducts()).isZero();
+        assertThat(imported.getExistingProducts()).isEqualTo(1);
+        assertThat(imported.getRows()).singleElement().satisfies(row -> {
+            assertThat(row.getStatus()).isEqualTo("imported");
+            assertThat(row.getCatalogProductResult()).isEqualTo("EXISTING_PRODUCT");
+        });
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(2);
+            assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(2);
+        });
+    }
+
+    @Test
+    void retryingTheSamePersistedRowDoesNotReceiveAnotherCopy() {
+        DiscogsImportJob job = completedJob("same-row-retry.xlsx");
+        rowRepository.save(parsedRow(job, 2, 111L));
+
+        DiscogsImportJobDTO first = service.importParsedRows(job.getIdDiscogsImportJob());
+        DiscogsImportJobDTO retry = service.importParsedRows(job.getIdDiscogsImportJob());
+
+        assertThat(first.getPhysicalCopiesImported()).isEqualTo(1);
+        assertThat(retry.getPhysicalCopiesImported()).isEqualTo(1);
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+            assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(1);
         });
     }
 
