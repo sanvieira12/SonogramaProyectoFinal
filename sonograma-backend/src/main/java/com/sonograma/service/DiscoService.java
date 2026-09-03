@@ -2,6 +2,7 @@ package com.sonograma.service;
 
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.EstadoCopiaDisco;
@@ -11,6 +12,7 @@ import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.DiscogsImportRowRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ import java.util.stream.Collectors;
 public class DiscoService {
 
     private final DiscoRepository discoRepository;
+    private final DiscogsImportRowRepository discogsImportRowRepository;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final DiscoEstadoService discoEstadoService;
@@ -69,9 +72,22 @@ public class DiscoService {
     }
 
     public List<DiscoResponseDTO> obtenerTodos() {
-        return discoRepository.findAll().stream()
+        return obtenerTodos(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DiscoResponseDTO> obtenerTodos(Long discogsImportJobId) {
+        List<Disco> discos = discogsImportJobId == null
+                ? discoRepository.findAll()
+                : discogsImportRowRepository.findDistinctActiveCatalogProductsByJobId(discogsImportJobId);
+        return discos.stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<DiscogsCatalogJobFilterDTO> listarFiltrosImportacionDiscogs() {
+        return discogsImportRowRepository.findCatalogJobFilters();
     }
 
     public List<DiscoResponseDTO> obtenerDisponibles() {

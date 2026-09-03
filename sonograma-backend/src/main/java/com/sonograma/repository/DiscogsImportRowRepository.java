@@ -1,6 +1,8 @@
 package com.sonograma.repository;
 
 import com.sonograma.entity.DiscogsImportRow;
+import com.sonograma.entity.Disco;
+import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.enums.DiscogsImportRowStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -62,4 +64,30 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
     List<DiscogsImportRow> findByResolvedReleaseIdAndImportedCatalogProductIsNotNullOrderByIdDiscogsImportRowDesc(
             Long resolvedReleaseId
     );
+
+    @Query("""
+            SELECT DISTINCT p
+            FROM DiscogsImportRow r
+            JOIN r.importedCatalogProduct p
+            WHERE r.job.idDiscogsImportJob = :jobId
+              AND r.status = com.sonograma.enums.DiscogsImportRowStatus.IMPORTED
+              AND p.catalogDeletedAt IS NULL
+            """)
+    List<Disco> findDistinctActiveCatalogProductsByJobId(@Param("jobId") Long jobId);
+
+    @Query("""
+            SELECT new com.sonograma.dto.DiscogsCatalogJobFilterDTO(
+                r.job.idDiscogsImportJob,
+                r.job.nombreArchivo,
+                r.job.createdAt,
+                COUNT(DISTINCT p.idDisco)
+            )
+            FROM DiscogsImportRow r
+            JOIN r.importedCatalogProduct p
+            WHERE r.status = com.sonograma.enums.DiscogsImportRowStatus.IMPORTED
+              AND p.catalogDeletedAt IS NULL
+            GROUP BY r.job.idDiscogsImportJob, r.job.nombreArchivo, r.job.createdAt
+            ORDER BY r.job.createdAt DESC
+            """)
+    List<DiscogsCatalogJobFilterDTO> findCatalogJobFilters();
 }

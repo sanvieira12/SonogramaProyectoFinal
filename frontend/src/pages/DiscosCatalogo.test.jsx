@@ -8,6 +8,8 @@ import { api } from '../api/sonograma'
 vi.mock('../services/discoService', () => ({
   discoService: {
     getAll: vi.fn(),
+    getPorImportacionDiscogs: vi.fn(),
+    listarImportacionesDiscogs: vi.fn(),
     buscar: vi.fn(),
     eliminar: vi.fn(),
     actualizar: vi.fn(),
@@ -72,6 +74,7 @@ describe('Catalog permanent deletion flow', () => {
       removeEventListener: vi.fn(),
     })
     discoService.getAll.mockResolvedValue([disco])
+    discoService.listarImportacionesDiscogs.mockResolvedValue([])
   })
 
   async function openDeleteDialog() {
@@ -222,5 +225,22 @@ describe('Catalog permanent deletion flow', () => {
 
     await waitFor(() => expect(discoService.buscar).toHaveBeenCalledWith('Search Result'), { timeout: 1000 })
     expect(await screen.findByText('Search Result Artist')).toBeInTheDocument()
+  })
+
+  it('filters the catalogue by a Discogs job without relying on product dates', async () => {
+    const reused = catalogDisco({ idDisco: 806, artista: 'Producto reutilizado' })
+    const newlyCreated = catalogDisco({ idDisco: 1450, artista: 'Producto nuevo' })
+    discoService.listarImportacionesDiscogs.mockResolvedValue([
+      { id: 23, nombreArchivo: 'discos PIN.xlsx', productos: 238 },
+    ])
+    discoService.getPorImportacionDiscogs.mockResolvedValue([reused, newlyCreated])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByRole('option', { name: /Job 23.*discos PIN.xlsx.*238 productos/i })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: '23' } })
+
+    await waitFor(() => expect(discoService.getPorImportacionDiscogs).toHaveBeenCalledWith('23'))
+    expect(await screen.findByText('Producto reutilizado')).toBeInTheDocument()
+    expect(screen.getByText('Producto nuevo')).toBeInTheDocument()
   })
 })

@@ -4,6 +4,7 @@ import com.sonograma.dto.AudioPreviewDTO;
 import com.sonograma.dto.AudioPreviewRequestDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.service.AudioPreviewService;
@@ -27,8 +28,14 @@ public class DiscoController {
     private final AudioPreviewService audioPreviewService;
 
     @GetMapping
-    public ResponseEntity<List<DiscoResponseDTO>> obtenerTodos() {
-        return ResponseEntity.ok(discoService.obtenerTodos());
+    public ResponseEntity<List<DiscoResponseDTO>> obtenerTodos(
+            @RequestParam(required = false) Long discogsImportJobId) {
+        return ResponseEntity.ok(discoService.obtenerTodos(discogsImportJobId));
+    }
+
+    @GetMapping("/filtros/importaciones-discogs")
+    public ResponseEntity<List<DiscogsCatalogJobFilterDTO>> listarFiltrosImportacionDiscogs() {
+        return ResponseEntity.ok(discoService.listarFiltrosImportacionDiscogs());
     }
 
     @GetMapping("/disponibles")

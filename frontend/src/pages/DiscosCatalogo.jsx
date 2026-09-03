@@ -634,6 +634,8 @@ export default function DiscosCatalogo() {
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
   const [filtroCondicion, setFiltroCondicion] = useState('TODOS')
+  const [filtroImportacionDiscogs, setFiltroImportacionDiscogs] = useState('')
+  const [importacionesDiscogs, setImportacionesDiscogs] = useState([])
   const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
@@ -651,6 +653,7 @@ export default function DiscosCatalogo() {
 
   useEffect(() => {
     cargarTodos()
+    cargarImportacionesDiscogs()
     window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
     return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
   }, [])
@@ -668,10 +671,38 @@ export default function DiscosCatalogo() {
     }
   }
 
+  async function cargarImportacionesDiscogs() {
+    try {
+      setImportacionesDiscogs(await discoService.listarImportacionesDiscogs())
+    } catch {
+      setImportacionesDiscogs([])
+    }
+  }
+
+  async function cambiarFiltroImportacionDiscogs(event) {
+    const jobId = event.target.value
+    clearTimeout(debounceRef.current)
+    setFiltroImportacionDiscogs(jobId)
+    setPagina(1)
+    setLoading(true)
+    setError('')
+    try {
+      const data = jobId
+        ? await discoService.getPorImportacionDiscogs(jobId)
+        : await discoService.getAll()
+      setDiscos(data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function onBusquedaChange(e) {
     const q = e.target.value
     setBusqueda(q)
     setPagina(1)
+    if (filtroImportacionDiscogs) return
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       if (!q.trim()) { cargarTodos(); return }
@@ -735,9 +766,9 @@ export default function DiscosCatalogo() {
       setDiscoEliminar(null)
       try {
         const query = busqueda.trim()
-        const actualizados = query
-          ? await discoService.buscar(query)
-          : await discoService.getAll()
+        const actualizados = filtroImportacionDiscogs
+          ? await discoService.getPorImportacionDiscogs(filtroImportacionDiscogs)
+          : query ? await discoService.buscar(query) : await discoService.getAll()
         setDiscos(actualizados)
       } catch (refreshError) {
         setError(`El disco fue eliminado, pero no se pudo actualizar el catálogo: ${refreshError.message}`)
@@ -777,7 +808,10 @@ export default function DiscosCatalogo() {
   const discosFiltrados = discos.filter(d => {
     const coincideEstado = filtroEstado === 'TODOS' || d.estado === filtroEstado
     const coincideCondicion = filtroCondicion === 'TODOS' || condicionNormalizada(d) === filtroCondicion
-    return coincideEstado && coincideCondicion
+    const query = busqueda.trim().toLowerCase()
+    const coincideBusqueda = !query || [d.artista, d.album, d.codigoInterno]
+      .some(value => String(value || '').toLowerCase().includes(query))
+    return coincideEstado && coincideCondicion && coincideBusqueda
   })
   const discosOrdenados = sortKey
     ? discosFiltrados
@@ -794,7 +828,8 @@ export default function DiscosCatalogo() {
         .map(({ disco }) => disco)
     : discosFiltrados
   const discosPagina = discosOrdenados.slice((pagina - 1) * porPagina, pagina * porPagina)
-  const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS' || busqueda.trim() !== ''
+  const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS'
+    || filtroImportacionDiscogs !== '' || busqueda.trim() !== ''
 
   return (
     <div className="max-w-[1500px] mx-auto px-4 sm:px-6 py-6 space-y-5">
@@ -822,6 +857,22 @@ export default function DiscosCatalogo() {
             className="input pl-9"
           />
         </div>
+        <label className="flex flex-col gap-1 text-xs text-slate-500 dark:text-stone-400 min-w-[260px]">
+          Importación Discogs
+          <select
+            aria-label="Importación Discogs"
+            value={filtroImportacionDiscogs}
+            onChange={cambiarFiltroImportacionDiscogs}
+            className="input py-2"
+          >
+            <option value="">Todas las importaciones</option>
+            {importacionesDiscogs.map(job => (
+              <option key={job.id} value={job.id}>
+                Job {job.id} — {job.nombreArchivo} ({job.productos} productos)
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="flex gap-2 flex-wrap">
           {FILTROS.map(estado => (
             <button
