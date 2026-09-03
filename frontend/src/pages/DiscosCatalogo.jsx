@@ -635,7 +635,7 @@ export default function DiscosCatalogo() {
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
   const [filtroCondicion, setFiltroCondicion] = useState('TODOS')
   const [filtroImportacionDiscogs, setFiltroImportacionDiscogs] = useState('')
-  const [importacionesDiscogs, setImportacionesDiscogs] = useState([])
+  const [fuentesImportacionDiscogs, setFuentesImportacionDiscogs] = useState([])
   const [discoForm, setDiscoForm] = useState(null)
   const [discoEliminar, setDiscoEliminar] = useState(null)
   const [eliminando, setEliminando] = useState(false)
@@ -653,7 +653,7 @@ export default function DiscosCatalogo() {
 
   useEffect(() => {
     cargarTodos()
-    cargarImportacionesDiscogs()
+    cargarFuentesImportacionDiscogs()
     window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
     return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
   }, [])
@@ -671,24 +671,24 @@ export default function DiscosCatalogo() {
     }
   }
 
-  async function cargarImportacionesDiscogs() {
+  async function cargarFuentesImportacionDiscogs() {
     try {
-      setImportacionesDiscogs(await discoService.listarImportacionesDiscogs())
+      setFuentesImportacionDiscogs(await discoService.listarFuentesImportacionDiscogs())
     } catch {
-      setImportacionesDiscogs([])
+      setFuentesImportacionDiscogs([])
     }
   }
 
   async function cambiarFiltroImportacionDiscogs(event) {
-    const jobId = event.target.value
+    const source = event.target.value
     clearTimeout(debounceRef.current)
-    setFiltroImportacionDiscogs(jobId)
+    setFiltroImportacionDiscogs(source)
     setPagina(1)
     setLoading(true)
     setError('')
     try {
-      const data = jobId
-        ? await discoService.getPorImportacionDiscogs(jobId)
+      const data = source
+        ? await discoService.getPorFuenteImportacionDiscogs(source)
         : await discoService.getAll()
       setDiscos(data)
     } catch (err) {
@@ -767,7 +767,7 @@ export default function DiscosCatalogo() {
       try {
         const query = busqueda.trim()
         const actualizados = filtroImportacionDiscogs
-          ? await discoService.getPorImportacionDiscogs(filtroImportacionDiscogs)
+          ? await discoService.getPorFuenteImportacionDiscogs(filtroImportacionDiscogs)
           : query ? await discoService.buscar(query) : await discoService.getAll()
         setDiscos(actualizados)
       } catch (refreshError) {
@@ -866,9 +866,9 @@ export default function DiscosCatalogo() {
             className="input py-2"
           >
             <option value="">Todas las importaciones</option>
-            {importacionesDiscogs.map(job => (
-              <option key={job.id} value={job.id}>
-                Job {job.id} — {job.nombreArchivo} ({job.productos} productos)
+            {fuentesImportacionDiscogs.map(source => (
+              <option key={source.key} value={source.key}>
+                {source.label} ({source.productos} productos)
               </option>
             ))}
           </select>

@@ -1,6 +1,5 @@
 package com.sonograma.repository;
 
-import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.entity.DiscogsImportJob;
 import com.sonograma.entity.DiscogsImportRow;
 import com.sonograma.entity.Disco;
@@ -43,8 +42,12 @@ class DiscogsCatalogJobFilterRepositoryTest {
     }
 
     @Test
-    void job23Returns238DistinctProductsIncludingReusedRowsAndKeepsUnfilteredCatalogueUnchanged() {
-        DiscogsImportJob job = jobRepository.save(DiscogsImportJob.builder()
+    void logicalPinSourceReturns238DistinctProductsIncludingReusedJob22Rows() {
+        DiscogsImportJob job23 = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("PIN corregido.xlsx")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        DiscogsImportJob job22 = jobRepository.save(DiscogsImportJob.builder()
                 .nombreArchivo("PIN corregido.xlsx")
                 .status(DiscogsImportJobStatus.COMPLETED)
                 .build());
@@ -57,17 +60,22 @@ class DiscogsCatalogJobFilterRepositoryTest {
 
         List<DiscogsImportRow> rows = new ArrayList<>();
         for (int index = 0; index < 238; index++) {
-            rows.add(importedRow(job, jobProducts.get(index), index + 2,
+            rows.add(importedRow(job23, jobProducts.get(index), index + 2,
                     index < 18 ? "EXISTING_PRODUCT" : "NEW_PRODUCT"));
         }
+        // Job 22 is the historical same-source import: its 18 products must not create duplicate cards.
+        for (int index = 0; index < 18; index++) {
+            rows.add(importedRow(job22, jobProducts.get(index), index + 2, "EXISTING_PRODUCT"));
+        }
         // Three repeated releases: one product card, a receipt row per workbook row.
-        rows.add(importedRow(job, jobProducts.get(0), 300, "NEW_PRODUCT"));
-        rows.add(importedRow(job, jobProducts.get(1), 301, "NEW_PRODUCT"));
-        rows.add(importedRow(job, jobProducts.get(2), 302, "NEW_PRODUCT"));
+        rows.add(importedRow(job23, jobProducts.get(0), 300, "NEW_PRODUCT"));
+        rows.add(importedRow(job23, jobProducts.get(1), 301, "NEW_PRODUCT"));
+        rows.add(importedRow(job23, jobProducts.get(2), 302, "NEW_PRODUCT"));
         rowRepository.saveAll(rows);
 
-        List<Disco> filtered = rowRepository.findDistinctActiveCatalogProductsByJobId(job.getIdDiscogsImportJob());
-        List<DiscogsCatalogJobFilterDTO> filters = rowRepository.findCatalogJobFilters();
+        List<Disco> filtered = rowRepository.findDistinctActiveCatalogProductsByJobIds(List.of(
+                job22.getIdDiscogsImportJob(), job23.getIdDiscogsImportJob()
+        ));
 
         assertThat(filtered).hasSize(238);
         assertThat(filtered).extracting(Disco::getIdDisco).doesNotHaveDuplicates();
@@ -76,10 +84,6 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .doesNotContain(unrelatedProduct.getIdDisco());
         assertThat(filtered).extracting(Disco::getIdDisco)
                 .containsAll(jobProducts.subList(0, 18).stream().map(Disco::getIdDisco).toList());
-        assertThat(filters).singleElement().satisfies(filter -> {
-            assertThat(filter.id()).isEqualTo(job.getIdDiscogsImportJob());
-            assertThat(filter.productos()).isEqualTo(238);
-        });
         assertThat(discoRepository.findAll()).hasSize(239);
     }
 

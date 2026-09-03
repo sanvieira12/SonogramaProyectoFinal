@@ -28,9 +28,9 @@ async function request(method, path, body) {
 
 export const discoService = {
   getAll: () => request('GET', '/discos'),
-  getPorImportacionDiscogs: (jobId) =>
-    request('GET', `/discos?discogsImportJobId=${encodeURIComponent(jobId)}`),
-  listarImportacionesDiscogs: () => request('GET', '/discos/filtros/importaciones-discogs'),
+  getPorFuenteImportacionDiscogs: (source) =>
+    request('GET', `/discos?discogsSource=${encodeURIComponent(source)}`),
+  listarFuentesImportacionDiscogs: () => request('GET', '/discos/filtros/fuentes-discogs'),
   getById: (id) => request('GET', `/discos/${id}`),
   buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
   getPorEstado: (estado) => request('GET', `/discos/estado/${estado}`),

@@ -8,8 +8,8 @@ import { api } from '../api/sonograma'
 vi.mock('../services/discoService', () => ({
   discoService: {
     getAll: vi.fn(),
-    getPorImportacionDiscogs: vi.fn(),
-    listarImportacionesDiscogs: vi.fn(),
+    getPorFuenteImportacionDiscogs: vi.fn(),
+    listarFuentesImportacionDiscogs: vi.fn(),
     buscar: vi.fn(),
     eliminar: vi.fn(),
     actualizar: vi.fn(),
@@ -74,7 +74,7 @@ describe('Catalog permanent deletion flow', () => {
       removeEventListener: vi.fn(),
     })
     discoService.getAll.mockResolvedValue([disco])
-    discoService.listarImportacionesDiscogs.mockResolvedValue([])
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([])
   })
 
   async function openDeleteDialog() {
@@ -227,19 +227,20 @@ describe('Catalog permanent deletion flow', () => {
     expect(await screen.findByText('Search Result Artist')).toBeInTheDocument()
   })
 
-  it('filters the catalogue by a Discogs job without relying on product dates', async () => {
+  it('filters the catalogue by a logical Discogs source without exposing job details', async () => {
     const reused = catalogDisco({ idDisco: 806, artista: 'Producto reutilizado' })
     const newlyCreated = catalogDisco({ idDisco: 1450, artista: 'Producto nuevo' })
-    discoService.listarImportacionesDiscogs.mockResolvedValue([
-      { id: 23, nombreArchivo: 'discos PIN.xlsx', productos: 238 },
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
+      { key: 'pin', label: 'Discos PIN', productos: 238 },
     ])
-    discoService.getPorImportacionDiscogs.mockResolvedValue([reused, newlyCreated])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([reused, newlyCreated])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: /Job 23.*discos PIN.xlsx.*238 productos/i })
-    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: '23' } })
+    await screen.findByRole('option', { name: /Discos PIN.*238 productos/i })
+    expect(screen.queryByRole('option', { name: /Job\s*\d+/i })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'pin' } })
 
-    await waitFor(() => expect(discoService.getPorImportacionDiscogs).toHaveBeenCalledWith('23'))
+    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs).toHaveBeenCalledWith('pin'))
     expect(await screen.findByText('Producto reutilizado')).toBeInTheDocument()
     expect(screen.getByText('Producto nuevo')).toBeInTheDocument()
   })
