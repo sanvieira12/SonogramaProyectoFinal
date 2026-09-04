@@ -53,6 +53,7 @@ const completedJob = {
   alreadyImported: 0,
   meaningfulRows: 1,
   identityBearingRows: 1,
+  resolvedConcreteReleases: 1,
   newCopiesToReceive: 1,
   alreadyReceivedRows: 0,
   availableCopiesToReceive: 1,
@@ -112,6 +113,11 @@ describe('DiscogsTab Excel import', () => {
     expect(screen.getByText('Copias importadas en esta carga')).toBeInTheDocument()
     expect(screen.getByText('Productos de catálogo afectados')).toBeInTheDocument()
     expect(screen.getByText('Filas asociadas al catálogo')).toBeInTheDocument()
+    expect(screen.getByText('✓ Filas significativas: 1')).toBeInTheDocument()
+    expect(screen.getByText('✓ Filas con identidad Discogs: 1')).toBeInTheDocument()
+    expect(screen.getByText('✓ Releases concretos únicos: 1')).toBeInTheDocument()
+    expect(screen.getByText('✓ Revisión manual: 0')).toBeInTheDocument()
+    expect(screen.queryByText(/✓ Requieren revisión:/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Vendida — omitida/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Confirmar recepción (1)' })).toBeEnabled()
   })

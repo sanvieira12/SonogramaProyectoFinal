@@ -1400,7 +1400,8 @@ public class DiscogsImportJobService {
                         || "failed".equals(row.getCatalogImportStatus())))
                 .rowsRequiringReview(count(rows, this::requiresReview))
                 .rowsWithFullMetadata(count(rows, this::hasFullMetadata))
-                .rowsWithWarnings(count(rows, this::requiresReview))
+                .rowsWithWarnings(count(rows, row -> !blank(row.getWarningMessage())
+                        || !blank(row.getErrorMessage())))
                 .rowsTechnicallyImpossible(count(rows, row ->
                         "manual_review".equals(row.getCatalogImportStatus())
                                 && !"ignored".equals(row.getStatus())

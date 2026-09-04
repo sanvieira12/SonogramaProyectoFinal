@@ -386,7 +386,7 @@ function ImportConfirmationModal({ job, onConfirm, onCancel, saving, error }) {
   const sold = job.soldCopiesToReceive ?? 0
   const noPrice = job.noPriceReceivableRows ?? 0
   const alreadyReceived = job.alreadyReceivedRows ?? job.alreadyImported ?? 0
-  const manualReview = job.manualReviewRows ?? job.rowsRequiringReview ?? 0
+  const manualReview = job.manualReviewRows ?? 0
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4" role="presentation">
@@ -444,7 +444,10 @@ function ExcelLinks() {
   const soldCopiesToReceive = job?.soldCopiesToReceive ?? 0
   const noPriceRows = job?.noPriceRows ?? 0
   const noPriceReceivableRows = job?.noPriceReceivableRows ?? 0
-  const manualReviewRows = job?.manualReviewRows ?? job?.rowsRequiringReview ?? 0
+  const meaningfulRows = job?.meaningfulRows ?? 0
+  const identityBearingRows = job?.identityBearingRows ?? 0
+  const uniqueConcreteReleases = job?.resolvedConcreteReleases ?? 0
+  const manualReviewRows = job?.manualReviewRows ?? 0
   const canConfirm = job?.canConfirm ?? (newCopiesToReceive > 0 && !processing)
   const filteredRows = useMemo(() => {
     const rows = job?.rows || []
@@ -683,7 +686,7 @@ function ExcelLinks() {
               ['Productos existentes reutilizados', job.existingProducts],
               ['Releases concretos resueltos', job.resolvedConcreteReleases],
               ['Copias físicas a recibir', newCopiesToReceive],
-              ['Requieren revisión', job.rowsRequiringReview],
+              ['Alertas técnicas históricas', job.rowsRequiringReview],
               ['Filas pendientes', job.pendingRows ?? job.pending],
               ['Filas con error', job.errorRows ?? job.failed],
               ['Metadata completa', job.rowsWithFullMetadata],
@@ -861,22 +864,21 @@ function ExcelLinks() {
               ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
               : 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
               <p className="font-semibold">
-                {(job.warnings > 0 || job.rowsRequiringReview > 0 || job.pendingRows > 0 || job.errorRows > 0)
+                {(job.warnings > 0 || manualReviewRows > 0 || job.pendingRows > 0 || job.errorRows > 0)
                   ? 'Importación completada con elementos pendientes'
                   : 'Importación completada'}
               </p>
               <div className="mt-2 grid sm:grid-cols-2 gap-1">
-                <span>✓ Excel analizado: {job.realRowsRead ?? job.totalRowsRead} filas</span>
-                <span>✓ Links Discogs detectados: {job.linksDetected || 0}</span>
-                <span>✓ Metadata obtenida: {job.metadataFetched || 0}</span>
-                <span>✓ Portadas almacenadas: {job.coversDownloaded || 0}</span>
-                <span>✓ Links YouTube: {job.youtubeLinksFound || 0}</span>
-                <span>✓ Copias físicas importadas en esta carga: {job.imported || 0}</span>
-                <span>✓ Filas asociadas al catálogo: {job.rowsImported || 0}</span>
-                <span>✓ Productos de catálogo afectados: {job.catalogProductsAffected || 0}</span>
-                <span>✓ Productos nuevos: {job.newProducts || 0}</span>
-                <span>✓ Productos existentes reutilizados: {job.existingProducts || 0}</span>
-                <span>✓ Requieren revisión: {job.rowsRequiringReview || 0}</span>
+                <span>✓ Filas significativas: {meaningfulRows}</span>
+                <span>✓ Filas con identidad Discogs: {identityBearingRows}</span>
+                <span>✓ Releases concretos únicos: {uniqueConcreteReleases}</span>
+                <span>✓ Copias nuevas a recibir: {newCopiesToReceive}</span>
+                <span>✓ Filas ya recibidas: {alreadyReceivedRows}</span>
+                <span>✓ Copias disponibles: {availableCopiesToReceive}</span>
+                <span>✓ Copias vendidas: {soldCopiesToReceive}</span>
+                <span>✓ Filas SIN PRECIO: {noPriceRows}</span>
+                <span>✓ SIN PRECIO recepcionables: {noPriceReceivableRows}</span>
+                <span>✓ Revisión manual: {manualReviewRows}</span>
               </div>
               {(job.rows || []).some(row => row.errorMessage || row.warningMessage) && (
                 <div className="mt-3 space-y-1">
