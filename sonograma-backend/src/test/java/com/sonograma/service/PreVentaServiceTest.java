@@ -1,7 +1,11 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.PreVentaRequestDTO;
+import com.sonograma.dto.PreVentaPagoUpdateRequestDTO;
 import com.sonograma.entity.*;
+import com.sonograma.enums.EstadoPago;
+import com.sonograma.enums.EstadoVenta;
+import com.sonograma.enums.MedioPago;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +22,8 @@ class PreVentaServiceTest {
     private PreVentaRepository preVentas;
     private VentaRepository ventas;
     private DetalleVentaRepository detalles;
+    private EnvioRepository envios;
+    private DeudaRepository deudas;
     private PreVentaService service;
     private Cliente cliente;
 
@@ -27,7 +33,9 @@ class PreVentaServiceTest {
         DiscoRepository discos = mock(DiscoRepository.class);
         ventas = mock(VentaRepository.class);
         detalles = mock(DetalleVentaRepository.class);
-        service = new PreVentaService(preVentas, clientes, discos, ventas, detalles,
+        envios = mock(EnvioRepository.class);
+        deudas = mock(DeudaRepository.class);
+        service = new PreVentaService(preVentas, clientes, discos, ventas, detalles, envios, deudas,
                 new ProfitCalculationService(ventas,
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class),
@@ -80,6 +88,82 @@ class PreVentaServiceTest {
         PreVenta p = pending(); when(preVentas.findByIdForUpdate(8L)).thenReturn(Optional.of(p));
         service.eliminar(8L);
         verify(preVentas).delete(p); verifyNoInteractions(ventas, detalles);
+    }
+
+    @Test void editarPagoSincronizaPreVentaVentaYDetalleSinTocarDeudaNiStock() {
+        PreVenta p = pending();
+        Venta v = paidVenta(p);
+        when(preVentas.findByIdForUpdate(8L)).thenReturn(Optional.of(p));
+        when(envios.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+        when(deudas.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+        when(ventas.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(detalles.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        PreVentaPagoUpdateRequestDTO request = new PreVentaPagoUpdateRequestDTO();
+        request.setPrecio(new BigDecimal("1800"));
+        request.setCantidad(3);
+        request.setFechaPago(java.time.LocalDateTime.of(2026, 9, 4, 15, 30));
+        request.setMedioPago("TRANSFERENCIA");
+        request.setNumeroRecibo("R-99");
+        request.setObservaciones("Pago corregido");
+
+        service.actualizarPago(8L, request);
+
+        assertThat(p.getEstado()).isEqualTo("PAGADA");
+        assertThat(p.getPrecio()).isEqualByComparingTo("1800");
+        assertThat(p.getCantidad()).isEqualTo(3);
+        assertThat(p.getFechaPago()).isEqualTo(request.getFechaPago());
+        assertThat(v.getTotalFinal()).isEqualByComparingTo("1800");
+        assertThat(v.getMontoPagado()).isEqualByComparingTo("1800");
+        assertThat(v.getMontoDeuda()).isZero();
+        assertThat(v.getEstadoPago()).isEqualTo(EstadoPago.PAGADO);
+        assertThat(v.getMedioPago()).isEqualTo(MedioPago.TRANSFERENCIA);
+        assertThat(v.getNumeroRecibo()).isEqualTo("R-99");
+        assertThat(v.getDetalles()).singleElement().satisfies(d -> {
+            assertThat(d.getCantidad()).isEqualTo(3);
+            assertThat(d.getPrecioUnitario()).isEqualByComparingTo("600");
+        });
+        verify(deudas, never()).save(any());
+    }
+
+    @Test void eliminarPagoBorraVentaYDetalleYDevuelvePreVentaAPendiente() {
+        PreVenta p = pending();
+        p.setEstado("PAGADA");
+        p.setFechaPago(java.time.LocalDateTime.of(2026, 9, 4, 15, 30));
+        Venta v = paidVenta(p);
+        p.setVentaPago(v);
+        when(preVentas.findByIdForUpdate(8L)).thenReturn(Optional.of(p));
+        when(envios.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+        when(deudas.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+
+        service.eliminarPago(8L);
+
+        assertThat(p.getEstado()).isEqualTo("PENDIENTE");
+        assertThat(p.getFechaPago()).isNull();
+        assertThat(p.getVentaPago()).isNull();
+        assertThat(v.getIdPreVentaOrigen()).isNull();
+        verify(detalles).deleteAll(anyList());
+        verify(detalles).flush();
+        verify(ventas).delete(v);
+        verify(ventas).flush();
+    }
+
+    private Venta paidVenta(PreVenta p) {
+        DetalleVenta detalle = DetalleVenta.builder()
+                .disco(null).precioUnitario(new BigDecimal("600")).cantidad(2).manualItem(true)
+                .build();
+        Venta v = Venta.builder().idVenta(44L).cliente(cliente).fechaVenta(p.getFechaPago())
+                .total(new BigDecimal("1200")).totalFinal(new BigDecimal("1200"))
+                .precioVenta(new BigDecimal("1200")).subtotal(new BigDecimal("1200"))
+                .montoPagado(new BigDecimal("1200")).montoDeuda(BigDecimal.ZERO)
+                .estado(EstadoVenta.COMPLETADA).estadoPago(EstadoPago.PAGADO)
+                .origen("PRE_VENTA").idPreVentaOrigen(8L).build();
+        detalle.setVenta(v);
+        v.getDetalles().add(detalle);
+        p.setEstado("PAGADA");
+        p.setFechaPago(v.getFechaVenta());
+        p.setVentaPago(v);
+        return v;
     }
 
     private PreVentaRequestDTO request() {

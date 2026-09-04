@@ -201,6 +201,9 @@ public class VentaService {
         if (venta.getEstado() == EstadoVenta.CANCELADA) {
             throw new NegocioException("No se puede editar una venta cancelada");
         }
+        if ("PRE_VENTA".equals(venta.getOrigen())) {
+            throw new NegocioException("El cobro de una pre-venta debe editarse desde Pre-ventas");
+        }
 
         // Keep the immutable historical cost when the same catalog item remains
         // in the edited sale. The new entered price is always used below.

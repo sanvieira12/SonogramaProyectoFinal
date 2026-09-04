@@ -12,6 +12,10 @@ vi.mock('../api/sonograma', () => ({
     ventas: {
       resumenMensual: vi.fn(),
     },
+    preVentas: {
+      actualizarPago: vi.fn(),
+      eliminarPago: vi.fn(),
+    },
     discos: {
       porId: vi.fn(),
     },
@@ -112,6 +116,31 @@ const movements = [
   },
 ]
 
+const preVentaMovement = {
+  idVenta: 10,
+  idPreVentaOrigen: 20,
+  tipoMovimiento: 'PRE_VENTA',
+  descripcionMovimiento: 'Cobro de pre-venta',
+  clienteNombreSnapshot: 'Lucía Silva',
+  fechaVenta: '2026-07-17T10:00:00',
+  medioPago: 'OTRO',
+  totalFinal: 1200,
+  montoMovimiento: 1200,
+  montoPagado: 1200,
+  montoDeuda: 0,
+  estadoPago: 'PAGADO',
+  observaciones: 'Cobro de pre-venta #20',
+  detalles: [{
+    idDetalle: 20,
+    artista: 'Artista PV',
+    album: 'Álbum PV',
+    cantidad: 2,
+    precioUnitario: 600,
+    manualItem: true,
+    estadoGanancia: 'UNAVAILABLE',
+  }],
+}
+
 function rowContaining(table, text) {
   return within(table).getAllByRole('row').find(row => row.textContent.includes(text))
 }
@@ -169,6 +198,45 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(rowContaining(table, 'Diego Soto'))
     expect(screen.getByText('Ganancia no disponible')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('exposes dedicated edit and permanent delete actions for pre-sale payments', async () => {
+    api.libro.listar.mockResolvedValue([...movements, preVentaMovement])
+    api.preVentas.actualizarPago.mockResolvedValue({})
+    api.preVentas.eliminarPago.mockResolvedValue(undefined)
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Lucía Silva'))
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Eliminar' })).toBeInTheDocument()
+    expect(screen.queryByText(/Movimiento protegido/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    fireEvent.change(screen.getByDisplayValue('1200'), { target: { value: '1500' } })
+    fireEvent.change(screen.getByDisplayValue('2026-07-17T10:00'), { target: { value: '2026-07-18T11:30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(api.preVentas.actualizarPago).toHaveBeenCalledWith(20, expect.objectContaining({
+      precio: 1500,
+      cantidad: 2,
+      fechaPago: '2026-07-18T11:30',
+    })))
+
+    fireEvent.click(rowContaining(table, 'Lucía Silva'))
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
+    expect(screen.getByText(/eliminar permanentemente este cobro/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar permanentemente' }))
+
+    await waitFor(() => expect(api.preVentas.eliminarPago).toHaveBeenCalledWith(20))
+  })
+
+  it('keeps normal sales on the existing edit/cancel actions', async () => {
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar venta' })).toBeInTheDocument()
   })
 
   it('preserves the compact fixed table layout', async () => {

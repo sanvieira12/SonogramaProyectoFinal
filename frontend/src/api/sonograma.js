@@ -260,6 +260,8 @@ export const api = {
     listar: () => request('GET', '/pre-ventas'),
     crear: (payload) => request('POST', '/pre-ventas', payload),
     marcarPagada: (id) => request('POST', `/pre-ventas/${id}/marcar-pagada`),
+    actualizarPago: (id, payload) => request('PUT', `/pre-ventas/${id}/pago`, payload),
+    eliminarPago: (id) => request('DELETE', `/pre-ventas/${id}/pago`),
     eliminar: (id) => request('DELETE', `/pre-ventas/${id}`),
   },
 

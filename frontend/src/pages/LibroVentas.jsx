@@ -21,7 +21,7 @@ function rangoPeriodo(mes, hoy = fechaInputLocal()) {
   return { desde: `${mes}-01`, hasta }
 }
 
-function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel }) {
+function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel, onDelete }) {
   if (!venta) return null
   const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
   const esPreVenta = venta.tipoMovimiento === 'PRE_VENTA'
@@ -87,11 +87,11 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
         </div>
         )}
         <div className="flex gap-2">
-          {!esPagoDeuda && !esPreVenta && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
+          {!esPagoDeuda && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
           {!esPreVenta && <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
             {esPagoDeuda ? 'Anular pago' : 'Cancelar venta'}
           </button>}
-          {esPreVenta && <p className="text-xs text-slate-400 dark:text-stone-500">Movimiento protegido; su origen se conserva en Pre-ventas.</p>}
+          {esPreVenta && <button onClick={onDelete} className="btn-secondary flex-1 text-red-600 dark:text-red-400">Eliminar</button>}
         </div>
       </div>
     </aside>
@@ -211,6 +211,85 @@ function EditSaleModal({ venta, onClose, onSaved }) {
   )
 }
 
+function fechaHoraInput(value) {
+  return value ? value.slice(0, 16) : ''
+}
+
+function EditPreVentaPaymentModal({ venta, onClose, onSaved }) {
+  const detalle = venta.detalles?.[0]
+  const [form, setForm] = useState({
+    precio: venta.totalFinal ?? venta.montoPagado ?? '',
+    cantidad: detalle?.cantidad ?? 1,
+    fechaPago: fechaHoraInput(venta.fechaVenta),
+    medioPago: venta.medioPago || 'OTRO',
+    numeroRecibo: venta.numeroRecibo || '',
+    observaciones: venta.observaciones || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await onSaved({
+        precio: Number(form.precio),
+        cantidad: Number(form.cantidad),
+        fechaPago: form.fechaPago,
+        medioPago: form.medioPago || null,
+        numeroRecibo: form.numeroRecibo || null,
+        observaciones: form.observaciones || null,
+      })
+    } catch (e) {
+      setError(e.message || 'No se pudo editar el cobro de pre-venta')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <form onSubmit={submit} className="w-full max-w-lg bg-white dark:bg-stone-950 rounded-xl border border-slate-200 dark:border-stone-800 shadow-2xl p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-slate-900 dark:text-white">Editar cobro de pre-venta</h2>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+        {error && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-xs text-slate-500 dark:text-stone-400">Importe total
+            <input required type="number" min="0.01" step="0.01" className="input w-full mt-1" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} />
+          </label>
+          <label className="block text-xs text-slate-500 dark:text-stone-400">Cantidad
+            <input required type="number" min="1" step="1" className="input w-full mt-1" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} />
+          </label>
+          <label className="block text-xs text-slate-500 dark:text-stone-400">Fecha de pago
+            <input required type="datetime-local" className="input w-full mt-1" value={form.fechaPago} onChange={e => setForm(f => ({ ...f, fechaPago: e.target.value }))} />
+          </label>
+          <label className="block text-xs text-slate-500 dark:text-stone-400">Número de recibo
+            <input className="input w-full mt-1" value={form.numeroRecibo} onChange={e => setForm(f => ({ ...f, numeroRecibo: e.target.value }))} />
+          </label>
+        </div>
+        <label className="block text-xs text-slate-500 dark:text-stone-400">Método de pago
+          <select className="input w-full mt-1" value={form.medioPago} onChange={e => setForm(f => ({ ...f, medioPago: e.target.value }))}>
+            <option value="">Sin definir</option>
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+            <option value="MERCADOPAGO">Mercado Pago</option>
+            <option value="TARJETA">Tarjeta</option>
+            <option value="OTRO">Otro</option>
+          </select>
+        </label>
+        <textarea className="input w-full min-h-20 resize-y" value={form.observaciones} onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))} placeholder="Observaciones" />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancelar</button>
+          <button disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function fmt(n) {
   if (n == null) return '—'
   return `UYU $${Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -288,7 +367,7 @@ function discoMovimiento(v) {
 }
 
 function numeroBoletaMovimiento(v) {
-  return v.tipoMovimiento === 'VENTA' || v.tipoMovimiento === 'PAGO_DEUDA'
+  return v.tipoMovimiento === 'VENTA' || v.tipoMovimiento === 'PAGO_DEUDA' || v.tipoMovimiento === 'PRE_VENTA'
     ? (v.numeroRecibo || '—')
     : '—'
 }
@@ -309,6 +388,9 @@ export default function LibroVentas() {
   const [ventaCancelar, setVentaCancelar] = useState(null)
   const [cancelando, setCancelando] = useState(false)
   const [editando, setEditando] = useState(null)
+  const [editandoPreVenta, setEditandoPreVenta] = useState(null)
+  const [eliminandoPreVenta, setEliminandoPreVenta] = useState(null)
+  const [eliminando, setEliminando] = useState(false)
   const [success, setSuccess] = useState('')
 
   const cargar = useCallback(async (params) => {
@@ -402,6 +484,35 @@ export default function LibroVentas() {
       setError(e.message || 'No se pudo cancelar la venta')
     } finally {
       setCancelando(false)
+    }
+  }
+
+  async function guardarPagoPreVenta(payload) {
+    await api.preVentas.actualizarPago(editandoPreVenta.idPreVentaOrigen, payload)
+    await cargar(applied)
+    await cargarResumen(periodo)
+    window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
+    setVentaPanel(null)
+    setEditandoPreVenta(null)
+    setSuccess('Cobro de pre-venta actualizado correctamente.')
+  }
+
+  async function eliminarPagoPreVenta() {
+    if (!eliminandoPreVenta) return
+    setEliminando(true)
+    setError(null)
+    try {
+      await api.preVentas.eliminarPago(eliminandoPreVenta.idPreVentaOrigen)
+      await cargar(applied)
+      await cargarResumen(periodo)
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
+      setVentaPanel(null)
+      setEliminandoPreVenta(null)
+      setSuccess('Cobro de pre-venta eliminado permanentemente.')
+    } catch (e) {
+      setError(e.message || 'No se pudo eliminar el cobro de pre-venta')
+    } finally {
+      setEliminando(false)
     }
   }
 
@@ -582,8 +693,9 @@ export default function LibroVentas() {
         selectedDisk={selectedDisk}
         onDiskClick={seleccionarDiscoDetalle}
         onClose={() => { setVentaPanel(null); setSelectedDisk(null) }}
-        onEdit={() => setEditando(ventaPanel)}
+        onEdit={() => ventaPanel.tipoMovimiento === 'PRE_VENTA' ? setEditandoPreVenta(ventaPanel) : setEditando(ventaPanel)}
         onCancel={() => setVentaCancelar(ventaPanel)}
+        onDelete={() => setEliminandoPreVenta(ventaPanel)}
       />
       {editando && (
         <EditSaleModal
@@ -596,6 +708,13 @@ export default function LibroVentas() {
           }}
         />
       )}
+      {editandoPreVenta && (
+        <EditPreVentaPaymentModal
+          venta={editandoPreVenta}
+          onClose={() => setEditandoPreVenta(null)}
+          onSaved={guardarPagoPreVenta}
+        />
+      )}
       {ventaCancelar && (
         <ConfirmModal
           titulo={ventaCancelar.tipoMovimiento === 'PAGO_DEUDA' ? 'Anular pago de deuda' : 'Cancelar venta'}
@@ -605,6 +724,16 @@ export default function LibroVentas() {
           onConfirmar={cancelarMovimiento}
           onCancelar={() => setVentaCancelar(null)}
           cargando={cancelando}
+        />
+      )}
+      {eliminandoPreVenta && (
+        <ConfirmModal
+          titulo="Eliminar cobro de pre-venta"
+          mensaje="¿Seguro que querés eliminar permanentemente este cobro? Desaparecerá del Libro de Ventas y la pre-venta volverá a quedar pendiente."
+          confirmarTexto="Eliminar permanentemente"
+          onConfirmar={eliminarPagoPreVenta}
+          onCancelar={() => setEliminandoPreVenta(null)}
+          cargando={eliminando}
         />
       )}
     </div>

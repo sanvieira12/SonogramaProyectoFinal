@@ -2,6 +2,8 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.PreVentaRequestDTO;
 import com.sonograma.dto.PreVentaResponseDTO;
+import com.sonograma.dto.PreVentaPagoUpdateRequestDTO;
+import com.sonograma.dto.VentaResponseDTO;
 import com.sonograma.service.PreVentaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,19 @@ public class PreVentaController {
     @PostMapping("/{id}/marcar-pagada")
     public ResponseEntity<PreVentaResponseDTO> marcarPagada(@PathVariable Long id) {
         return ResponseEntity.ok(service.marcarPagada(id));
+    }
+
+    @PutMapping("/{id}/pago")
+    public ResponseEntity<VentaResponseDTO> actualizarPago(
+            @PathVariable Long id,
+            @Valid @RequestBody PreVentaPagoUpdateRequestDTO request) {
+        return ResponseEntity.ok(service.actualizarPago(id, request));
+    }
+
+    @DeleteMapping("/{id}/pago")
+    public ResponseEntity<Void> eliminarPago(@PathVariable Long id) {
+        service.eliminarPago(id);
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{id}")
