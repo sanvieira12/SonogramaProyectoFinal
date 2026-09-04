@@ -109,7 +109,8 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
             SELECT new com.sonograma.dto.DiscogsCatalogSourceDTO(
                 LOWER(TRIM(j.nombreArchivo)),
                 MIN(TRIM(j.nombreArchivo)),
-                COUNT(DISTINCT p.idDisco)
+                COUNT(DISTINCT p.idDisco),
+                MAX(j.createdAt)
             )
             FROM DiscogsImportRow r
             JOIN r.job j

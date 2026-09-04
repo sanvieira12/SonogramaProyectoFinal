@@ -16,6 +16,7 @@ import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DetalleVentaRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
+import com.sonograma.repository.DiscogsManualBatchRepository;
 import com.sonograma.repository.VentaRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
@@ -42,6 +43,7 @@ public class DiscoService {
     private final DetalleVentaRepository detalleVentaRepository;
     private final VentaRepository ventaRepository;
     private final DiscogsImportRowRepository discogsImportRowRepository;
+    private final DiscogsManualBatchRepository discogsManualBatchRepository;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
     private final DiscoEstadoService discoEstadoService;
@@ -89,12 +91,20 @@ public class DiscoService {
 
     @Transactional(readOnly = true)
     public List<DiscoResponseDTO> obtenerTodos(Long discogsImportJobId, String discogsSource) {
-        List<Disco> discos = discogsImportJobId == null
-                ? (discogsSource == null || discogsSource.isBlank()
-                    ? discoRepository.findAll()
-                    : discogsImportRowRepository.findDistinctActiveCatalogProductsBySource(discogsSource))
-                : discogsImportRowRepository.findDistinctActiveCatalogProductsByJobId(discogsImportJobId);
-        return discos.stream()
+        if (discogsImportJobId != null) {
+            return discogsImportRowRepository.findDistinctActiveCatalogProductsByJobId(discogsImportJobId).stream()
+                    .map(this::toDTO)
+                    .collect(Collectors.toList());
+        }
+        if (discogsSource == null || discogsSource.isBlank()) {
+            return discoRepository.findAll().stream()
+                    .map(this::toDTO)
+                    .collect(Collectors.toList());
+        }
+        if (isManualSource(discogsSource)) {
+            return obtenerPorBatchManual(parseManualBatchId(discogsSource));
+        }
+        return discogsImportRowRepository.findDistinctActiveCatalogProductsBySource(excelSourceName(discogsSource)).stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
     }
@@ -106,7 +116,70 @@ public class DiscoService {
 
     @Transactional(readOnly = true)
     public List<DiscogsCatalogSourceDTO> listarFuentesImportacionDiscogs() {
-        return discogsImportRowRepository.findCatalogSources();
+        List<DiscogsCatalogSourceDTO> sources = new java.util.ArrayList<>(discogsImportRowRepository.findCatalogSources());
+        discogsManualBatchRepository.findCatalogSources().stream()
+                .map(this::withManualLabel)
+                .forEach(sources::add);
+        sources.sort(java.util.Comparator.comparing(
+                DiscogsCatalogSourceDTO::createdAt,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        return sources;
+    }
+
+    private List<DiscoResponseDTO> obtenerPorBatchManual(Long batchId) {
+        List<DiscoQrCopy> copies = discoQrCopyRepository.findByManualDiscogsBatchIdOrderByCopyNumber(batchId);
+        if (copies.isEmpty()) return List.of();
+
+        List<Long> productIds = copies.stream()
+                .map(DiscoQrCopy::getIdDisco)
+                .distinct()
+                .toList();
+        java.util.Map<Long, List<DiscoQrCopy>> copiesByProduct = copies.stream()
+                .collect(Collectors.groupingBy(DiscoQrCopy::getIdDisco));
+        return discoRepository.findAllById(productIds).stream()
+                .map(disco -> toDTO(disco, copiesByProduct.getOrDefault(disco.getIdDisco(), List.of())))
+                .collect(Collectors.toList());
+    }
+
+    private DiscoResponseDTO toDTO(Disco disco, List<DiscoQrCopy> batchCopies) {
+        DiscoResponseDTO dto = toDTO(disco);
+        if (batchCopies.size() == 1) {
+            DiscoQrCopy copy = batchCopies.get(0);
+            dto.setManualBatchPrecioVenta(copy.getPrecioVenta());
+            dto.setManualBatchCondicionFisica(copy.getCondicionFisica());
+        }
+        return dto;
+    }
+
+    private DiscogsCatalogSourceDTO withManualLabel(DiscogsCatalogSourceDTO source) {
+        String statusLabel = source.status() == com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED
+                ? "Finalizada" : "En curso";
+        String label = String.format("%s · %d discos · %s", source.customerCode(), source.productos(), statusLabel);
+        return new DiscogsCatalogSourceDTO(
+                source.key(), source.type(), label, source.productos(), source.customerCode(),
+                source.status(), source.batchId(), source.createdAt());
+    }
+
+    private boolean isManualSource(String source) {
+        return source.trim().toLowerCase(Locale.ROOT).startsWith("manual:");
+    }
+
+    private Long parseManualBatchId(String source) {
+        try {
+            long id = Long.parseLong(source.trim().substring("manual:".length()));
+            if (id <= 0) throw new NumberFormatException();
+            return id;
+        } catch (NumberFormatException ex) {
+            throw new NegocioException("La selección de batch Discogs no es válida.");
+        }
+    }
+
+    private String excelSourceName(String source) {
+        String normalized = source.trim();
+        if (normalized.regionMatches(true, 0, "excel:", 0, "excel:".length())) {
+            return normalized.substring("excel:".length()).trim();
+        }
+        return normalized;
     }
 
     public List<DiscoResponseDTO> obtenerDisponibles() {

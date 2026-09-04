@@ -266,6 +266,83 @@ describe('normalizeApiBase', () => {
     )
   })
 
+  it('descarga el Excel de un batch manual Discogs con su nombre y MIME', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const blob = new Blob(['xlsx'], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="JPH_2026-09-04_batch-15.xlsx"',
+      }),
+      blob: () => Promise.resolve(blob),
+    })
+
+    await expect(api.importaciones.discogsManualBatchExcel(15)).resolves.toEqual({
+      blob,
+      filename: 'JPH_2026-09-04_batch-15.xlsx',
+      contentDisposition: 'attachment; filename="JPH_2026-09-04_batch-15.xlsx"',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/importaciones/discogs/manual-batches/15/excel',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
+
+  it('descarga el ZIP de un batch manual Discogs con su nombre y MIME', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const blob = new Blob(['zip'], { type: 'application/zip' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="JPH_2026-09-04_batch-15.zip"',
+      }),
+      blob: () => Promise.resolve(blob),
+    })
+
+    await expect(api.importaciones.discogsManualBatchZip(15)).resolves.toEqual({
+      blob,
+      filename: 'JPH_2026-09-04_batch-15.zip',
+      contentDisposition: 'attachment; filename="JPH_2026-09-04_batch-15.zip"',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/importaciones/discogs/manual-batches/15/zip',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
+
+  it('finaliza un batch manual Discogs con POST y devuelve su estado', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        batchId: 15,
+        status: 'FINALIZED',
+        finalizedAt: '2026-09-04T12:00:00',
+      })),
+    })
+
+    await expect(api.importaciones.discogsManualBatchFinalize(15)).resolves.toEqual({
+      batchId: 15,
+      status: 'FINALIZED',
+      finalizedAt: '2026-09-04T12:00:00',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/importaciones/discogs/manual-batches/15/finalize',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-1' },
+        body: undefined,
+      }),
+    )
+  })
+
   it('starts and reads persisted Discogs ZIP preparation progress', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

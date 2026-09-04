@@ -18,6 +18,8 @@ public interface DiscoQrCopyRepository extends JpaRepository<DiscoQrCopy, Long> 
 
     List<DiscoQrCopy> findByIdDiscoAndEstadoOrderByCopyNumber(Long idDisco, EstadoCopiaDisco estado);
 
+    List<DiscoQrCopy> findByManualDiscogsBatchIdOrderByCopyNumber(Long batchId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM DiscoQrCopy c WHERE c.id = :id")
     Optional<DiscoQrCopy> findByIdForUpdate(@Param("id") Long id);

@@ -71,7 +71,7 @@ function SortHeader({ label, sortKey, activeKey, direction, onSort }) {
 
 function parseSortValue(disco, sortKey) {
   if (sortKey === 'price') {
-    const value = Number(disco.precioVenta)
+    const value = Number(catalogPrice(disco))
     return Number.isFinite(value) ? value : null
   }
   if (sortKey === 'importDate') {
@@ -95,6 +95,26 @@ function formatImportDate(value) {
 
 function sellingPriceLabel(value) {
   return value != null ? `UYU $${Number(value).toLocaleString('es-UY')}` : 'Sin precio'
+}
+
+function catalogPrice(disco) {
+  return disco?.manualBatchPrecioVenta ?? disco?.precioVenta
+}
+
+function catalogCondition(disco) {
+  return disco?.manualBatchCondicionFisica ?? disco?.condicionFisica
+}
+
+function isManualSource(source) {
+  return source?.type === 'MANUAL' || String(source?.key || '').toLowerCase().startsWith('manual:')
+}
+
+function manualSourceLabel(source) {
+  if (!source) return ''
+  if (source.label) return source.label
+  const status = source.status === 'FINALIZED' ? 'Finalizada' : 'En curso'
+  const count = source.copyCount ?? source.productos ?? 0
+  return `${source.customerCode || ''} · ${count} discos · ${status}`
 }
 
 function EmptyState({ hayFiltro }) {
@@ -511,9 +531,9 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               ['Género',        disco.genero],
               ['Sello',         disco.selloDiscografico],
               ['Categoría',     disco.condicion],
-              ['Condición',     disco.condicionFisica],
+              ['Condición',     catalogCondition(disco)],
               ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
-              ['Precio venta',  sellingPriceLabel(disco.precioVenta)],
+              ['Precio venta',  sellingPriceLabel(catalogPrice(disco))],
               ['Stock actual',  disco.cantidadCopias ?? 0],
               ['Código interno', disco.codigoInterno],
             ].map(([label, value]) => (
@@ -594,10 +614,10 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
   const fields = [
     ['Código', disco.codigoInterno],
     ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
-    ['Venta', sellingPriceLabel(disco.precioVenta)],
+    ['Venta', sellingPriceLabel(catalogPrice(disco))],
     ['Stock', disco.cantidadCopias ?? 0],
     ['Categoría', disco.condicion],
-    ['Condición', disco.condicionFisica],
+    ['Condición', catalogCondition(disco)],
     ['Formato', disco.tipoDisco],
     ['Año', disco.anio],
     ['Sello', disco.selloDiscografico],
@@ -691,6 +711,14 @@ export default function DiscosCatalogo() {
   const [porPagina, setPorPagina] = useState(20)
   const [sortKey, setSortKey] = useState(null)
   const [sortDirection, setSortDirection] = useState('desc')
+  const [exportandoExcel, setExportandoExcel] = useState(false)
+  const [excelExportado, setExcelExportado] = useState(false)
+  const [errorExportacionExcel, setErrorExportacionExcel] = useState('')
+  const [exportandoZip, setExportandoZip] = useState(false)
+  const [errorExportacionZip, setErrorExportacionZip] = useState('')
+  const [batchPorFinalizar, setBatchPorFinalizar] = useState(null)
+  const [finalizandoBatch, setFinalizandoBatch] = useState(false)
+  const [errorFinalizacionBatch, setErrorFinalizacionBatch] = useState('')
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -717,7 +745,7 @@ export default function DiscosCatalogo() {
     try {
       setFuentesImportacionDiscogs(await discoService.listarFuentesImportacionDiscogs())
     } catch {
-      setFuentesImportacionDiscogs([])
+      // Preserve the last known selector state when a refresh fails.
     }
   }
 
@@ -725,6 +753,11 @@ export default function DiscosCatalogo() {
     const source = event.target.value
     clearTimeout(debounceRef.current)
     setFiltroImportacionDiscogs(source)
+    setExcelExportado(false)
+    setErrorExportacionExcel('')
+    setErrorExportacionZip('')
+    setBatchPorFinalizar(null)
+    setErrorFinalizacionBatch('')
     setPagina(1)
     setLoading(true)
     setError('')
@@ -737,6 +770,61 @@ export default function DiscosCatalogo() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function exportarBatchExcel() {
+    if (exportandoExcel || !batchManualSeleccionado) return
+    const batchId = batchManualSeleccionado.batchId
+      || String(batchManualSeleccionado.key || '').replace(/^manual:/i, '')
+    setExportandoExcel(true)
+    setErrorExportacionExcel('')
+    try {
+      const result = await api.importaciones.discogsManualBatchExcel(batchId)
+      downloadBlob(result.blob, result.filename || `discogs-manual-${batchId}.xlsx`, result.contentDisposition)
+      setExcelExportado(true)
+    } catch (err) {
+      setErrorExportacionExcel(err.message || 'No se pudo generar el Excel del batch Discogs.')
+    } finally {
+      setExportandoExcel(false)
+    }
+  }
+
+  async function descargarBatchZip() {
+    if (exportandoZip || !batchManualSeleccionado) return
+    const batchId = batchManualSeleccionado.batchId
+      || String(batchManualSeleccionado.key || '').replace(/^manual:/i, '')
+    setExportandoZip(true)
+    setErrorExportacionZip('')
+    try {
+      const result = await api.importaciones.discogsManualBatchZip(batchId)
+      downloadBlob(result.blob, result.filename || `discogs-manual-${batchId}.zip`, result.contentDisposition)
+    } catch (err) {
+      setErrorExportacionZip(err.message || 'No se pudo generar el ZIP del batch Discogs.')
+    } finally {
+      setExportandoZip(false)
+    }
+  }
+
+  async function finalizarBatch() {
+    if (finalizandoBatch || !batchPorFinalizar) return
+    const batchId = batchPorFinalizar.batchId
+      || String(batchPorFinalizar.key || '').replace(/^manual:/i, '')
+    setFinalizandoBatch(true)
+    setErrorFinalizacionBatch('')
+    try {
+      const finalized = await api.importaciones.discogsManualBatchFinalize(batchId)
+      setFuentesImportacionDiscogs(prev => prev.map(source => (
+        source.batchId === batchPorFinalizar.batchId
+          ? { ...source, status: finalized.status || 'FINALIZED', label: null }
+          : source
+      )))
+      setBatchPorFinalizar(null)
+      await cargarFuentesImportacionDiscogs()
+    } catch (err) {
+      setErrorFinalizacionBatch(err.message || 'No se pudo finalizar el batch Discogs.')
+    } finally {
+      setFinalizandoBatch(false)
     }
   }
 
@@ -870,6 +958,8 @@ export default function DiscosCatalogo() {
         .map(({ disco }) => disco)
     : discosFiltrados
   const discosPagina = discosOrdenados.slice((pagina - 1) * porPagina, pagina * porPagina)
+  const fuenteSeleccionada = fuentesImportacionDiscogs.find(source => source.key === filtroImportacionDiscogs)
+  const batchManualSeleccionado = isManualSource(fuenteSeleccionada) ? fuenteSeleccionada : null
   const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS'
     || filtroImportacionDiscogs !== '' || busqueda.trim() !== ''
 
@@ -910,7 +1000,9 @@ export default function DiscosCatalogo() {
             <option value="">Todas las importaciones</option>
             {fuentesImportacionDiscogs.map(source => (
               <option key={source.key} value={source.key}>
-                {source.label} ({source.productos} productos)
+                {isManualSource(source)
+                  ? manualSourceLabel(source)
+                  : `${source.label} (${source.productos} productos)`}
               </option>
             ))}
           </select>
@@ -963,6 +1055,67 @@ export default function DiscosCatalogo() {
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-sm rounded-xl px-4 py-3">
           {error}
           <button onClick={cargarTodos} className="ml-3 underline hover:no-underline">Reintentar</button>
+        </div>
+      )}
+
+      {batchManualSeleccionado && (
+        <div
+          data-testid="manual-batch-summary"
+          className="card px-4 py-3 text-sm text-slate-700 dark:text-stone-300 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+        >
+          <div>
+            <p>{manualSourceLabel(batchManualSeleccionado)}</p>
+            {exportandoExcel && (
+              <div data-testid="manual-batch-export-progress" role="status" className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-stone-400">
+                <span className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-200 dark:bg-stone-800">
+                  <span className="block h-full w-1/2 animate-pulse rounded-full bg-[#7E9FA8]" />
+                </span>
+                Preparando Excel… Generando archivo… Descargando…
+              </div>
+            )}
+            {errorExportacionExcel && (
+              <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{errorExportacionExcel}</p>
+            )}
+            {exportandoZip && (
+              <div data-testid="manual-batch-zip-progress" role="status" className="mt-2 text-xs text-slate-500 dark:text-stone-400">
+                Preparando ZIP… Generando archivo… Descargando…
+              </div>
+            )}
+            {errorExportacionZip && (
+              <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{errorExportacionZip}</p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exportarBatchExcel}
+              disabled={exportandoExcel}
+              className="btn-secondary whitespace-nowrap"
+            >
+              {exportandoExcel ? 'Generando Excel…' : excelExportado ? 'Descargar Excel' : 'Exportar Excel'}
+            </button>
+            <button
+              type="button"
+              onClick={descargarBatchZip}
+              disabled={exportandoZip}
+              className="btn-primary whitespace-nowrap px-5"
+            >
+              {exportandoZip ? 'Generando ZIP…' : 'Descargar ZIP'}
+            </button>
+            {batchManualSeleccionado.status === 'OPEN' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorFinalizacionBatch('')
+                  setBatchPorFinalizar(batchManualSeleccionado)
+                }}
+                disabled={finalizandoBatch}
+                className="btn-secondary whitespace-nowrap border-[#B8975E] text-[#8a6c32] dark:text-[#D6B86A]"
+              >
+                Finalizar importación
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -1052,11 +1205,11 @@ export default function DiscosCatalogo() {
                         </div>
                       </td>
                       <td className="px-3 py-3.5 align-middle text-slate-600 dark:text-stone-400 hidden sm:table-cell">
-                        {d.condicionFisica || <span className="text-slate-300 dark:text-stone-600">—</span>}
+                        {catalogCondition(d) || <span className="text-slate-300 dark:text-stone-600">—</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {d.precioVenta != null
-                          ? `UYU $${Number(d.precioVenta).toLocaleString('es-UY')}`
+                        {catalogPrice(d) != null
+                          ? `UYU $${Number(catalogPrice(d)).toLocaleString('es-UY')}`
                           : <span className="text-slate-400 dark:text-stone-600 font-normal">Sin precio</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
@@ -1201,6 +1354,20 @@ export default function DiscosCatalogo() {
           cargando={eliminando}
           confirmarTexto="Eliminar definitivamente"
           error={errorEliminacion}
+        />
+      )}
+
+      {batchPorFinalizar && (
+        <ConfirmModal
+          titulo="Finalizar importación Discogs"
+          mensaje="¿Finalizar esta importación? Ya no se podrán agregar nuevas copias a este lote. El Excel y el ZIP seguirán disponibles, y una nueva importación con este código creará un lote nuevo."
+          onConfirmar={finalizarBatch}
+          onCancelar={() => { if (!finalizandoBatch) { setBatchPorFinalizar(null); setErrorFinalizacionBatch('') } }}
+          cargando={finalizandoBatch}
+          cargandoTexto="Finalizando…"
+          confirmarTexto="Finalizar importación"
+          confirmarClassName="bg-[#B8975E] hover:bg-[#9f814c]"
+          error={errorFinalizacionBatch}
         />
       )}
     </div>

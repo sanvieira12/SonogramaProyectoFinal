@@ -4,6 +4,7 @@ import com.sonograma.enums.EstadoCopiaDisco;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -41,4 +42,16 @@ public class DiscoQrCopy {
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_discogs_manual_batch")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private DiscogsManualBatch manualDiscogsBatch;
+
+    @Column(name = "precio_venta", precision = 14, scale = 6)
+    private BigDecimal precioVenta;
+
+    @Column(name = "condicion_fisica", columnDefinition = "TEXT")
+    private String condicionFisica;
 }

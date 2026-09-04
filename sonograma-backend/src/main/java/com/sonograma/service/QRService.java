@@ -36,6 +36,14 @@ public class QRService {
         return qrCodeGenerator.generarQRBytes(qrCopyService.content(disco, copy));
     }
 
+    /** Generates the QR for an already selected physical copy without synchronizing aggregate stock. */
+    public byte[] generarQRParaCopia(Disco disco, DiscoQrCopy copy) {
+        if (disco == null || copy == null || !java.util.Objects.equals(disco.getIdDisco(), copy.getIdDisco())) {
+            throw new IllegalArgumentException("El disco y la copia QR no coinciden");
+        }
+        return qrCodeGenerator.generarQRBytes(qrCopyService.content(disco, copy));
+    }
+
     public DiscoResponseDTO obtenerPorQRScaneado(String codigoQr) {
         DiscoQrCopy copy = qrCopyService.findByCode(codigoQr);
         if (copy != null) {

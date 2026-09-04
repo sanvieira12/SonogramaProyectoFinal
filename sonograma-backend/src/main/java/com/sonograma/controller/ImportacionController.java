@@ -12,6 +12,9 @@ import com.sonograma.service.importacion.DiscogsImportJobService;
 import com.sonograma.service.importacion.DiscogsCoverService;
 import com.sonograma.service.importacion.VinylFutureImportService;
 import com.sonograma.service.VinylFutureAssetService;
+import com.sonograma.service.DiscogsManualBatchExcelService;
+import com.sonograma.service.DiscogsManualBatchZipService;
+import com.sonograma.service.DiscogsManualBatchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +44,9 @@ public class ImportacionController {
     private final DiscogsImportJobService discogsImportJobService;
     private final DiscogsCoverService discogsCoverService;
     private final VinylFutureAssetService vinylFutureAssetService;
+    private final DiscogsManualBatchExcelService discogsManualBatchExcelService;
+    private final DiscogsManualBatchZipService discogsManualBatchZipService;
+    private final DiscogsManualBatchService discogsManualBatchService;
 
     // ── VinylFuture Excel ─────────────────────────────────────────────────────
 
@@ -114,6 +120,35 @@ public class ImportacionController {
                         "attachment; filename=\"discogs-release-" + releaseId + ".zip\"")
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
+    }
+
+    @GetMapping("/discogs/manual-batches/{batchId}/excel")
+    public ResponseEntity<byte[]> downloadDiscogsManualBatchExcel(@PathVariable Long batchId) {
+        DiscogsManualBatchExcelService.GeneratedWorkbook workbook =
+                discogsManualBatchExcelService.generate(batchId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + workbook.filename() + "\"")
+                .contentType(MediaType.parseMediaType(DiscogsManualBatchExcelService.XLSX_MEDIA_TYPE))
+                .contentLength(workbook.content().length)
+                .body(workbook.content());
+    }
+
+    @GetMapping("/discogs/manual-batches/{batchId}/zip")
+    public ResponseEntity<byte[]> downloadDiscogsManualBatchZip(@PathVariable Long batchId) {
+        DiscogsManualBatchZipService.GeneratedZip zip = discogsManualBatchZipService.generate(batchId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + zip.filename() + "\"")
+                .contentType(MediaType.parseMediaType(DiscogsManualBatchZipService.ZIP_MEDIA_TYPE))
+                .contentLength(zip.content().length)
+                .body(zip.content());
+    }
+
+    @PostMapping("/discogs/manual-batches/{batchId}/finalize")
+    public ResponseEntity<DiscogsManualBatchService.FinalizedBatch> finalizeDiscogsManualBatch(
+            @PathVariable Long batchId) {
+        return ResponseEntity.ok(discogsManualBatchService.finalizeBatch(batchId));
     }
 
     // ── Discogs — Excel con links ─────────────────────────────────────────────

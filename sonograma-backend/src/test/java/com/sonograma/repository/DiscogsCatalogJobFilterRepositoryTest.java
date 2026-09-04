@@ -10,6 +10,11 @@ import com.sonograma.enums.DiscogsImportRowStatus;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
+import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.DiscogsManualBatch;
+import com.sonograma.enums.DiscogsManualBatchStatus;
+import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.service.DiscoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +24,7 @@ import org.springframework.test.context.ActiveProfiles;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,10 +41,21 @@ class DiscogsCatalogJobFilterRepositoryTest {
     @Autowired
     private DiscoRepository discoRepository;
 
+    @Autowired
+    private DiscoQrCopyRepository copyRepository;
+
+    @Autowired
+    private DiscogsManualBatchRepository manualBatchRepository;
+
+    @Autowired
+    private DiscoService discoService;
+
     @BeforeEach
     void clean() {
         rowRepository.deleteAll();
         jobRepository.deleteAll();
+        copyRepository.deleteAll();
+        manualBatchRepository.deleteAll();
         discoRepository.deleteAll();
     }
 
@@ -128,6 +145,80 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .singleElement().extracting(DiscogsCatalogSourceDTO::productos).isEqualTo(1L);
         assertThat(rowRepository.findDistinctActiveCatalogProductsBySource("jph para catalogo y web.xlsx"))
                 .extracting(Disco::getIdDisco).containsExactly(jphProduct.getIdDisco());
+    }
+
+    @Test
+    void manualSourcesCountPhysicalCopiesAndFilterByExactBatchMembership() {
+        DiscogsManualBatch first = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.OPEN));
+        DiscogsManualBatch second = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.FINALIZED));
+        Disco shared = discoRepository.save(catalogProduct(3000));
+        Disco onlyInSecond = discoRepository.save(catalogProduct(3001));
+
+        copyRepository.saveAll(List.of(
+                copy(shared, first, 1, "first-a", "1000", "VG"),
+                copy(shared, first, 2, "first-b", "2000", "EX"),
+                copy(shared, second, 3, "second-a", "3000", "NM"),
+                copy(onlyInSecond, second, 4, "second-b", "4000", "MINT")
+        ));
+
+        List<DiscogsCatalogSourceDTO> sources = manualBatchRepository.findCatalogSources();
+
+        assertThat(sources).extracting(DiscogsCatalogSourceDTO::key)
+                .containsExactly("manual:" + second.getId(), "manual:" + first.getId());
+        assertThat(sources).extracting(DiscogsCatalogSourceDTO::productos)
+                .containsExactly(2L, 2L);
+        assertThat(discoService.listarFuentesImportacionDiscogs())
+                .filteredOn(source -> source.batchId().equals(first.getId()))
+                .singleElement()
+                .satisfies(source -> {
+                    assertThat(source.label()).isEqualTo("JPH · 2 discos · En curso");
+                    assertThat(source.status()).isEqualTo(DiscogsManualBatchStatus.OPEN);
+                });
+        assertThat(discoService.listarFuentesImportacionDiscogs())
+                .filteredOn(source -> source.batchId().equals(second.getId()))
+                .singleElement()
+                .extracting(DiscogsCatalogSourceDTO::label)
+                .isEqualTo("JPH · 2 discos · Finalizada");
+        assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
+                .extracting(dto -> dto.getIdDisco())
+                .containsExactly(shared.getIdDisco());
+        assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
+                .singleElement()
+                .satisfies(dto -> {
+                    assertThat(dto.getManualBatchPrecioVenta()).isNull();
+                    assertThat(dto.getManualBatchCondicionFisica()).isNull();
+                });
+        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
+                .filteredOn(dto -> dto.getIdDisco().equals(onlyInSecond.getIdDisco()))
+                .singleElement()
+                .satisfies(dto -> {
+                    assertThat(dto.getManualBatchPrecioVenta()).isEqualByComparingTo("4000");
+                    assertThat(dto.getManualBatchCondicionFisica()).isEqualTo("MINT");
+                });
+        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
+                .extracting(dto -> dto.getIdDisco())
+                .containsExactlyInAnyOrder(shared.getIdDisco(), onlyInSecond.getIdDisco());
+    }
+
+    private DiscogsManualBatch manualBatch(String customerCode, DiscogsManualBatchStatus status) {
+        return manualBatchRepository.save(DiscogsManualBatch.builder()
+                .customerCode(customerCode)
+                .normalizedCustomerCode(customerCode)
+                .status(status)
+                .build());
+    }
+
+    private DiscoQrCopy copy(Disco product, DiscogsManualBatch batch, int number, String qr,
+                             String price, String condition) {
+        return DiscoQrCopy.builder()
+                .idDisco(product.getIdDisco())
+                .copyNumber(number)
+                .codigoQr(qr + "-" + UUID.randomUUID())
+                .estado(EstadoCopiaDisco.DISPONIBLE)
+                .manualDiscogsBatch(batch)
+                .precioVenta(new BigDecimal(price))
+                .condicionFisica(condition)
+                .build();
     }
 
     private Disco catalogProduct(int index) {

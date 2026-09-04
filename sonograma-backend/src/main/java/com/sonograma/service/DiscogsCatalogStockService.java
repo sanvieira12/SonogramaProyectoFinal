@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
@@ -58,16 +59,33 @@ public class DiscogsCatalogStockService {
         disco.setCantidadCopias(resultingAvailable);
         if (!isNew) disco.setFechaActualizacion(LocalDateTime.now());
         disco = discoRepository.save(disco);
-        qrCopyService.synchronizeAvailableCopies(disco, resultingAvailable);
-        if (command.incomingCopyState() == EstadoCopiaDisco.VENDIDO) {
-            qrCopyService.addCopies(disco, command.incomingCopies(), EstadoCopiaDisco.VENDIDO);
+        List<DiscoQrCopy> createdCopies;
+        if (command.incomingCopyState() == EstadoCopiaDisco.DISPONIBLE) {
+            DiscoQrCopyService.CopySynchronizationResult synchronization =
+                    qrCopyService.synchronizeAvailableCopiesWithResult(disco, resultingAvailable);
+            createdCopies = copiesCreatedForReceipt(
+                    synchronization.addedCopies(), command.incomingCopies());
+        } else {
+            qrCopyService.synchronizeAvailableCopies(disco, resultingAvailable);
+            createdCopies = qrCopyService.addCopies(
+                    disco, command.incomingCopies(), EstadoCopiaDisco.VENDIDO);
         }
         discoEstadoService.aplicar(disco);
         disco = discoRepository.save(disco);
         preVentaCodeMatcher.linkPendingPreSales(disco);
 
         return new ReceiptResult(disco, isNew ? ProductStatus.NEW_PRODUCT : ProductStatus.EXISTING_PRODUCT,
-                command.incomingCopies(), resultingAvailable);
+                command.incomingCopies(), resultingAvailable, createdCopies);
+    }
+
+    private List<DiscoQrCopy> copiesCreatedForReceipt(List<DiscoQrCopy> addedCopies, int incomingCopies) {
+        if (addedCopies.size() < incomingCopies) {
+            throw new IllegalStateException("El inventario QR no informó todas las copias recibidas.");
+        }
+        // A legacy product can have aggregate stock without QR rows. In that
+        // case synchronization materializes legacy rows first; the incoming
+        // rows are the final entries created by this receipt operation.
+        return List.copyOf(addedCopies.subList(addedCopies.size() - incomingCopies, addedCopies.size()));
     }
 
     private Disco resolveExisting(Long releaseId) {
@@ -188,7 +206,18 @@ public class DiscogsCatalogStockService {
 
     public enum ProductStatus { NEW_PRODUCT, EXISTING_PRODUCT }
 
-    public record ReceiptResult(Disco disco, ProductStatus productStatus, int addedCopies, int resultingAvailableCopies) {}
+    public record ReceiptResult(
+            Disco disco,
+            ProductStatus productStatus,
+            int addedCopies,
+            int resultingAvailableCopies,
+            List<DiscoQrCopy> createdCopies
+    ) {
+        public ReceiptResult(Disco disco, ProductStatus productStatus,
+                             int addedCopies, int resultingAvailableCopies) {
+            this(disco, productStatus, addedCopies, resultingAvailableCopies, List.of());
+        }
+    }
 
     public record ReceiptCommand(
             Long discogsReleaseId,

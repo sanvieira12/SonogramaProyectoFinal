@@ -512,6 +512,49 @@ export const api = {
       })
     },
 
+    discogsManualBatchExcel: async (batchId) => {
+      const res = await fetch(`${BASE}/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/excel`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const disposition = res.headers.get('Content-Disposition') || ''
+      if (!res.ok) throw new Error(await readResponseMessage(res, 'No se pudo generar el Excel del batch Discogs'))
+      const contentType = res.headers.get('Content-Type') || ''
+      if (!/spreadsheetml|octet-stream/i.test(contentType)) {
+        throw new Error(await readResponseMessage(res, 'La respuesta del Excel no es válida'))
+      }
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error('El Excel se generó vacío.')
+      return {
+        blob,
+        filename: filenameFromContentDisposition(disposition) || `discogs-manual-${batchId}.xlsx`,
+        contentDisposition: disposition,
+      }
+    },
+
+    discogsManualBatchZip: async (batchId) => {
+      const res = await fetch(`${BASE}/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/zip`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const disposition = res.headers.get('Content-Disposition') || ''
+      if (!res.ok) throw new Error(await readResponseMessage(res, 'No se pudo generar el ZIP del batch Discogs'))
+      const contentType = res.headers.get('Content-Type') || ''
+      if (!/application\/zip|octet-stream/i.test(contentType)) {
+        throw new Error(await readResponseMessage(res, 'La respuesta del ZIP no es válida'))
+      }
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error('El ZIP se generó vacío.')
+      return {
+        blob,
+        filename: filenameFromContentDisposition(disposition) || `discogs-manual-${batchId}.zip`,
+        contentDisposition: disposition,
+      }
+    },
+
+    discogsManualBatchFinalize: (batchId) =>
+      request('POST', `/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/finalize`),
+
     discogsDesdeExcel: async (file) => {
       const fd = new FormData()
       fd.append('file', file)

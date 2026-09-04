@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, confirmarTexto = 'Confirmar', confirmacionRequerida, error }) {
+export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, cargandoTexto = 'Eliminando...', confirmarTexto = 'Confirmar', confirmarClassName = 'bg-red-600 hover:bg-red-700', confirmacionRequerida, error }) {
   const [confirmacion, setConfirmacion] = useState('')
 
   useEffect(() => {
@@ -53,9 +53,9 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
           <button
             onClick={onConfirmar}
             disabled={cargando || (confirmacionRequerida && confirmacion !== confirmacionRequerida)}
-            className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all duration-200 active:scale-95"
+            className={`flex-1 ${confirmarClassName} disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all duration-200 active:scale-95`}
           >
-            {cargando ? 'Eliminando...' : confirmarTexto}
+            {cargando ? cargandoTexto : confirmarTexto}
           </button>
         </div>
       </div>

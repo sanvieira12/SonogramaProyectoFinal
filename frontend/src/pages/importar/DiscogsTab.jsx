@@ -17,6 +17,7 @@ function Spinner({ text }) {
 function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, mediaBusy }) {
   if (!preview) return null
   const tieneErrores = preview.errores?.length > 0
+  const copySalePrice = preview.copySalePrice ?? preview.precioVenta ?? ''
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-stone-800 p-5 space-y-4">
@@ -77,28 +78,44 @@ function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, med
         />
       </div>
 
+      <div>
+        <p className="text-xs text-slate-400 dark:text-stone-500 mb-1">Código de cliente</p>
+        <input
+          type="text"
+          className="input text-sm w-full"
+          value={preview.customerCode || ''}
+          onChange={e => onChange({ ...preview, customerCode: e.target.value })}
+          placeholder="JPH"
+          required
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <p className="text-xs text-slate-400 dark:text-stone-500 mb-1">Precio venta</p>
           <input
             type="number"
             className="input text-sm w-full"
-            value={preview.precioVenta || ''}
-            onChange={e => onChange({ ...preview, precioVenta: e.target.value ? Number(e.target.value) : null })}
+            value={copySalePrice}
+            onChange={e => {
+              const value = e.target.value ? Number(e.target.value) : null
+              onChange({ ...preview, precioVenta: value, copySalePrice: value })
+            }}
             placeholder="$"
+            min="0"
+            step="0.01"
+            required
           />
         </div>
         <div>
-          <p className="text-xs text-slate-400 dark:text-stone-500 mb-1">Condición</p>
-          <select
+          <p className="text-xs text-slate-400 dark:text-stone-500 mb-1">Condición física</p>
+          <input
+            type="text"
             className="input text-sm w-full"
-            value={preview.condicion || 'USADO'}
-            onChange={e => onChange({ ...preview, condicion: e.target.value })}
-          >
-            {['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO'].map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+            value={preview.physicalCondition || ''}
+            onChange={e => onChange({ ...preview, physicalCondition: e.target.value })}
+            placeholder="VG+, NM, M, G..."
+          />
         </div>
       </div>
 
@@ -142,7 +159,8 @@ function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, med
 
       <button
         onClick={() => onGuardar(preview)}
-        disabled={saving || tieneErrores || !preview.artista || !preview.album}
+        disabled={saving || tieneErrores || !preview.artista || !preview.album
+          || !preview.customerCode?.trim() || copySalePrice === '' || copySalePrice == null}
         className="w-full px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
       >
         {saving ? 'Guardando…' : preview.productoExistente ? 'Agregar copia' : 'Guardar producto'}
@@ -167,7 +185,7 @@ function LinkSingle() {
     setErrorMsg('')
     try {
       const data = await api.importaciones.discogsDesdeLink(url.trim())
-      setPreview(data)
+      setPreview({ ...data, customerCode: preview?.customerCode || data.customerCode || '' })
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'Error al consultar Discogs')
@@ -215,7 +233,14 @@ function LinkSingle() {
     }
   }
 
-  function reset() { setUrl(''); setPreview(null); setResult(null); setEstado('idle'); setErrorMsg('') }
+  function reset() {
+    const retainedCustomerCode = preview?.customerCode?.trim() || ''
+    setUrl('')
+    setPreview(retainedCustomerCode ? { customerCode: retainedCustomerCode } : null)
+    setResult(null)
+    setEstado('idle')
+    setErrorMsg('')
+  }
 
   return (
     <div className="space-y-4">

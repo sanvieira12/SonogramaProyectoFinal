@@ -43,6 +43,9 @@ class DiscogsCatalogStockServiceTest {
 
         assertThat(first.productStatus()).isEqualTo(DiscogsCatalogStockService.ProductStatus.NEW_PRODUCT);
         assertThat(second.productStatus()).isEqualTo(DiscogsCatalogStockService.ProductStatus.EXISTING_PRODUCT);
+        assertThat(first.createdCopies()).hasSize(1);
+        assertThat(second.createdCopies()).hasSize(2)
+                .extracting(DiscoQrCopy::getId).doesNotContain(first.createdCopies().getFirst().getId());
         assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
             assertThat(disco.getIdDisco()).isEqualTo(first.disco().getIdDisco());
             assertThat(disco.getDiscogsReleaseId()).isEqualTo(456L);

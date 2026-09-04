@@ -90,6 +90,10 @@ const existingPreview = {
   album: 'Example Album',
   formato: 'VINILO',
   condicion: 'USADO',
+  customerCode: 'JPH',
+  copySalePrice: 1500,
+  precioVenta: 1500,
+  physicalCondition: 'VG+',
   cantidadCopias: 1,
   productoExistente: true,
   copiasDisponibles: 2,
@@ -219,7 +223,9 @@ describe('DiscogsTab manual import', () => {
 
   it('shows existing stock and disables confirmation while one operation is saving', async () => {
     let resolveSave
-    api.importaciones.discogsDesdeLink.mockResolvedValue(existingPreview)
+    api.importaciones.discogsDesdeLink
+      .mockResolvedValueOnce(existingPreview)
+      .mockResolvedValueOnce({ ...existingPreview, customerCode: '' })
     api.importaciones.discogsGuardar.mockImplementation(() => new Promise(resolve => { resolveSave = resolve }))
 
     render(<DiscogsTab />)
@@ -230,6 +236,8 @@ describe('DiscogsTab manual import', () => {
 
     expect(await screen.findByText('Producto ya existente')).toBeInTheDocument()
     expect(screen.getByText('Actualmente tiene 2 copias disponibles. Se agregará 1 copia nueva.')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('JPH')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('VG+, NM, M, G...')).toHaveValue('VG+')
     const save = screen.getByRole('button', { name: 'Agregar copia' })
     fireEvent.click(save)
     expect(save).toBeDisabled()
@@ -237,5 +245,12 @@ describe('DiscogsTab manual import', () => {
 
     resolveSave({ resultType: 'EXISTING_PRODUCT', copiesAdded: 1, availableCopies: 3, alreadyProcessed: false })
     expect(await screen.findByText(/Producto ya existente: se agregó 1 copia al stock\./)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar otro' }))
+    fireEvent.change(screen.getByPlaceholderText('https://www.discogs.com/release/12345'), {
+      target: { value: 'https://www.discogs.com/release/789' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }))
+    expect(await screen.findByDisplayValue('JPH')).toBeInTheDocument()
   })
 })

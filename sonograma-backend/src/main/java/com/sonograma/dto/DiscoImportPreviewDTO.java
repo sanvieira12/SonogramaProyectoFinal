@@ -36,6 +36,12 @@ public class DiscoImportPreviewDTO {
     private String tracklist;
     private List<TrackInfo> tracks;
     private BigDecimal precioVenta;
+    /** Copy-level price for the persistent manual customer batch workflow. */
+    private BigDecimal copySalePrice;
+    /** Customer code for the persistent manual customer batch workflow. */
+    private String customerCode;
+    /** Free-text physical grade for the exact copy received. */
+    private String physicalCondition;
     private BigDecimal costo;
     private Integer cantidadCopias;
     private String estado;

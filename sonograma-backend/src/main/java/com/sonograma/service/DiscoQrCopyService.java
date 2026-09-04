@@ -35,11 +35,22 @@ public class DiscoQrCopyService {
     }
 
     public List<DiscoQrCopy> synchronizeAvailableCopies(Disco disco, int desiredAvailableCopies) {
+        return synchronizeAvailableCopiesWithResult(disco, desiredAvailableCopies).copies();
+    }
+
+    /**
+     * Synchronizes the available inventory and reports the exact rows created
+     * by this synchronization. Existing callers keep using the list-returning
+     * method above; receipt flows use this result to avoid "latest copy" lookups.
+     */
+    public CopySynchronizationResult synchronizeAvailableCopiesWithResult(
+            Disco disco, int desiredAvailableCopies) {
         if (disco.getIdDisco() == null) {
             throw new IllegalArgumentException("El disco debe estar guardado antes de generar sus QR");
         }
 
         int target = Math.max(0, desiredAvailableCopies);
+        List<DiscoQrCopy> added = new ArrayList<>();
         List<DiscoQrCopy> current = new ArrayList<>(
             repository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())
         );
@@ -57,6 +68,7 @@ public class DiscoQrCopyService {
                 .build());
             current.add(created);
             available.add(created);
+            added.add(created);
         }
 
         while (available.size() < target) {
@@ -68,6 +80,7 @@ public class DiscoQrCopyService {
                 .build());
             current.add(created);
             available.add(created);
+            added.add(created);
         }
 
         if (available.size() > target) {
@@ -88,7 +101,7 @@ public class DiscoQrCopyService {
         } else {
             disco.setCodigoQr(null);
         }
-        return fresh;
+        return new CopySynchronizationResult(List.copyOf(fresh), List.copyOf(added));
     }
 
     /** Adds incoming physical copies in the requested state without creating them as available first. */
@@ -134,6 +147,8 @@ public class DiscoQrCopyService {
                 .map(DiscoQrCopy::getCodigoQr)
                 .orElse(null));
     }
+
+    public record CopySynchronizationResult(List<DiscoQrCopy> copies, List<DiscoQrCopy> addedCopies) {}
 
     @Transactional(readOnly = true)
     public List<DiscoQrCopyDTO> listDtos(Disco disco) {

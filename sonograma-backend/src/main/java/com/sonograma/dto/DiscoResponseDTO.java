@@ -33,6 +33,8 @@ public class DiscoResponseDTO {
     private String numeroFacturaCompra;
     private LocalDate fechaFacturaCompra;
     private BigDecimal precioVenta;
+    private BigDecimal manualBatchPrecioVenta;
+    private String manualBatchCondicionFisica;
     private String pricingMode;
     private String recordType;
     private BigDecimal unitLineTotalEur;

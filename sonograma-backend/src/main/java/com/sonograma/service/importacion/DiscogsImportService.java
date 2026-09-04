@@ -5,12 +5,14 @@ import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscogsCoverDownloadDTO;
 import com.sonograma.dto.ManualDiscogsImportResultDTO;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscogsCatalogStockService;
+import com.sonograma.service.DiscogsManualBatchService;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.ImportMetadataNormalizer;
 import com.sonograma.repository.DiscoRepository;
@@ -27,6 +29,7 @@ import java.util.Optional;
 import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
@@ -41,6 +44,7 @@ public class DiscogsImportService {
     private final DiscoRepository discoRepository;
     private final DiscogsCoverService coverService;
     private final ManualDiscogsReceiptOperationService receiptOperationService;
+    private final DiscogsManualBatchService manualBatchService;
 
     public DiscoImportPreviewDTO fetchDesdeLink(String url) {
         DiscogsEnrichmentService.EnrichmentResult enriched = enrichmentService.enrich(
@@ -57,6 +61,14 @@ public class DiscogsImportService {
 
     @Transactional
     public ManualDiscogsImportResultDTO guardar(DiscoImportPreviewDTO preview) {
+        validateManualBatchFields(preview);
+        return guardarInterno(preview, true);
+    }
+
+    private ManualDiscogsImportResultDTO guardarInterno(
+            DiscoImportPreviewDTO preview,
+            boolean assignToManualBatch
+    ) {
         if (preview == null || preview.getDiscogsReleaseId() == null) {
             throw new com.sonograma.exception.NegocioException("No se pudo identificar el release concreto de Discogs. Volvé a consultarlo.");
         }
@@ -66,6 +78,7 @@ public class DiscogsImportService {
                             preview.getDiscogsReleaseId(), preview.getCantidadCopias(), toMetadata(preview)
                     ));
             audioPreviewService.guardarDesdeTracks(receipt.disco().getIdDisco(), preview.getTracks());
+            if (assignToManualBatch) assignExactCopyToBatch(preview, receipt);
             return receipt;
         });
     }
@@ -76,7 +89,7 @@ public class DiscogsImportService {
         for (DiscoImportPreviewDTO preview : previews) {
             if (preview.getErrores() != null && !preview.getErrores().isEmpty()) continue;
             try {
-                ManualDiscogsImportResultDTO result = guardar(preview);
+                ManualDiscogsImportResultDTO result = guardarInterno(preview, false);
                 if (result.getProductId() != null) {
                     discoRepository.findById(result.getProductId()).ifPresent(disco -> {
                         DiscoResponseDTO dto = com.sonograma.mapper.DiscoMapper.toDTO(disco);
@@ -143,13 +156,44 @@ public class DiscogsImportService {
     }
 
     private DiscogsCatalogStockService.DiscogsMetadata toMetadata(DiscoImportPreviewDTO preview) {
+        BigDecimal salePrice = effectiveCopySalePrice(preview);
         return new DiscogsCatalogStockService.DiscogsMetadata(
                 preview.getArtista(), preview.getAlbum(), preview.getGenero(), preview.getSello(), preview.getAnio(),
                 parseCondition(preview.getCondicion()), null, parseFormat(preview.getFormato()), preview.getFormato(),
-                preview.getCosto(), preview.getPrecioVenta(),
-                preview.getPrecioVenta() != null ? PricingMode.MANUAL : PricingMode.AUTO,
+                preview.getCosto(), salePrice,
+                salePrice != null ? PricingMode.MANUAL : PricingMode.AUTO,
                 preview.getPais(), preview.getEstilo(), preview.getTracklist(), preview.getImagenUrl(), preview.getPreviewUrl(),
                 preview.getCodigoInterno(), preview.getProcedencia(), preview.getNotas());
+    }
+
+    private void validateManualBatchFields(DiscoImportPreviewDTO preview) {
+        if (preview == null || preview.getCustomerCode() == null || preview.getCustomerCode().isBlank()) {
+            throw new com.sonograma.exception.NegocioException("Ingresá un código de cliente para abrir el batch Discogs.");
+        }
+        if (effectiveCopySalePrice(preview) == null) {
+            throw new com.sonograma.exception.NegocioException("Ingresá el precio de venta de la copia.");
+        }
+    }
+
+    private void assignExactCopyToBatch(
+            DiscoImportPreviewDTO preview,
+            DiscogsCatalogStockService.ReceiptResult receipt
+    ) {
+        if (receipt.createdCopies().size() != 1) {
+            throw new com.sonograma.exception.NegocioException(
+                    "La recepción no informó exactamente una copia física nueva para asignar al batch.");
+        }
+        DiscoQrCopy exactCopy = receipt.createdCopies().getFirst();
+        manualBatchService.assignCopyToOpenBatch(
+                preview.getCustomerCode(),
+                exactCopy,
+                effectiveCopySalePrice(preview),
+                preview.getPhysicalCondition());
+    }
+
+    private BigDecimal effectiveCopySalePrice(DiscoImportPreviewDTO preview) {
+        if (preview == null) return null;
+        return preview.getCopySalePrice() != null ? preview.getCopySalePrice() : preview.getPrecioVenta();
     }
 
     private CondicionDisco parseCondition(String condition) {
