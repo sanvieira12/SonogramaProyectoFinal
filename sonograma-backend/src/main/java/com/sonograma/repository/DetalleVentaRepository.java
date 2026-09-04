@@ -11,6 +11,11 @@ import java.util.List;
 public interface DetalleVentaRepository extends JpaRepository<DetalleVenta, Long> {
     List<DetalleVenta> findByVentaIdVenta(Long idVenta);
 
+    @Query("SELECT d FROM DetalleVenta d WHERE d.copyIdsSnapshot IS NOT NULL AND d.copyIdsSnapshot <> ''")
+    List<DetalleVenta> findAllWithCopyIds();
+
+    long countByDiscoIdDisco(Long idDisco);
+
     @Query("""
         SELECT d FROM DetalleVenta d
         JOIN FETCH d.venta v

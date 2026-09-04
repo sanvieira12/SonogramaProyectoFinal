@@ -54,4 +54,8 @@ public class DiscogsImportRowDTO {
     private String errorMessage;
     private Integer retryCount;
     private Long importedCatalogProductId;
+    private String previewOutcome;
+    private String previewReason;
+    private String normalizedPriceStatus;
+    private String resultingCopyState;
 }

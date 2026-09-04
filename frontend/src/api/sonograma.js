@@ -120,6 +120,8 @@ export const api = {
       request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     cambiarEstadoCopia: (idDisco, idCopia, estado) =>
       request('PATCH', `/discos/${idDisco}/copias/${idCopia}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
+    eliminarCopia: (idDisco, idCopia) =>
+      request('DELETE', `/discos/${idDisco}/copias/${idCopia}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
     buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
     previews: {

@@ -36,16 +36,25 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
             WHERE j.sourceFingerprint = :fingerprint
               AND j.idDiscogsImportJob <> :jobId
               AND r.sourceExcelRowNumber = :rowNumber
-              AND r.discogsType = :discogsType
-              AND r.discogsId = :discogsId
+              AND r.importedCatalogProduct IS NOT NULL
             ORDER BY j.createdAt DESC
             """)
     List<DiscogsImportRow> findPriorImportedRows(
             @Param("fingerprint") String fingerprint,
             @Param("jobId") Long jobId,
-            @Param("rowNumber") Integer rowNumber,
-            @Param("discogsType") String discogsType,
-            @Param("discogsId") Long discogsId
+            @Param("rowNumber") Integer rowNumber
+    );
+
+    @Query("""
+            SELECT r.sourceExcelRowNumber FROM DiscogsImportRow r
+            JOIN r.job j
+            WHERE j.sourceFingerprint = :fingerprint
+              AND j.idDiscogsImportJob <> :jobId
+              AND r.importedCatalogProduct IS NOT NULL
+            """)
+    List<Integer> findPriorReceivedSourceRowNumbers(
+            @Param("fingerprint") String fingerprint,
+            @Param("jobId") Long jobId
     );
 
     @Query("""

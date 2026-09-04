@@ -22,6 +22,10 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
     @Query("SELECT d FROM Disco d WHERE d.idDisco = :id AND d.catalogDeletedAt IS NULL")
     Optional<Disco> findById(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Disco d WHERE d.idDisco = :id AND d.catalogDeletedAt IS NULL")
+    Optional<Disco> findByIdForUpdate(@Param("id") Long id);
+
     @Override
     @Query("SELECT d FROM Disco d WHERE d.idDisco IN :ids AND d.catalogDeletedAt IS NULL")
     List<Disco> findAllById(@Param("ids") Iterable<Long> ids);

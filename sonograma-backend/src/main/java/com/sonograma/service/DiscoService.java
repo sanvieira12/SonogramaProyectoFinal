@@ -13,7 +13,10 @@ import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
 import com.sonograma.mapper.DiscoMapper;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.DiscoQrCopyRepository;
+import com.sonograma.repository.DetalleVentaRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
+import com.sonograma.repository.VentaRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +47,9 @@ public class DiscoService {
     );
 
     private final DiscoRepository discoRepository;
+    private final DiscoQrCopyRepository discoQrCopyRepository;
+    private final DetalleVentaRepository detalleVentaRepository;
+    private final VentaRepository ventaRepository;
     private final DiscogsImportRowRepository discogsImportRowRepository;
     private final AudioPreviewService audioPreviewService;
     private final DiscoQrCopyService qrCopyService;
@@ -191,6 +197,52 @@ public class DiscoService {
         disco.setCantidadCopias((int) qrCopyService.countAvailableCopies(idDisco));
         discoEstadoService.aplicar(disco);
         return saveWithQr(disco);
+    }
+
+    /** Removes exactly one physical copy while preserving the parent catalogue record. */
+    public DiscoResponseDTO eliminarCopia(Long idDisco, Long idCopia) {
+        Disco disco = discoRepository.findByIdForUpdate(idDisco)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Disco", idDisco));
+        DiscoQrCopy copy = discoQrCopyRepository.findByIdForUpdate(idCopia)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Copia", idCopia));
+        if (!idDisco.equals(copy.getIdDisco())) {
+            throw new RecursoNoEncontradoException("Copia", idCopia);
+        }
+        if (copyHasHistoricalCommerce(copy, idDisco)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar la copia porque está vinculada a historial de ventas.");
+        }
+
+        discoQrCopyRepository.delete(copy);
+        discoQrCopyRepository.flush();
+        int available = Math.toIntExact(discoQrCopyRepository.countByIdDiscoAndEstado(
+                idDisco, EstadoCopiaDisco.DISPONIBLE));
+        qrCopyService.synchronizeAvailableCopies(disco, available);
+        discoEstadoService.aplicar(disco);
+        discoRepository.saveAndFlush(disco);
+        return toDTO(disco);
+    }
+
+    private boolean copyHasHistoricalCommerce(DiscoQrCopy copy, Long idDisco) {
+        if (copy.getId() == null) return true;
+        if (detalleVentaRepository.findAllWithCopyIds().stream()
+                .anyMatch(detail -> containsCopyId(detail.getCopyIdsSnapshot(), copy.getId()))) {
+            return true;
+        }
+        if (copy.getEstado() != EstadoCopiaDisco.VENDIDO) return false;
+
+        // Older sales may reference only the parent product, not a copy snapshot.
+        // Block sold-copy deletion in that ambiguous case rather than guessing.
+        return ventaRepository.countByDiscoIdDisco(idDisco) > 0
+                || detalleVentaRepository.countByDiscoIdDisco(idDisco) > 0;
+    }
+
+    private boolean containsCopyId(String snapshot, Long copyId) {
+        if (snapshot == null || snapshot.isBlank()) return false;
+        for (String token : snapshot.split(",")) {
+            if (String.valueOf(copyId).equals(token.trim())) return true;
+        }
+        return false;
     }
 
     public void eliminarDisco(Long id, String deletedBy) {

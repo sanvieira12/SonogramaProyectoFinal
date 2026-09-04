@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/sonograma'
 import DiscogsTab from './DiscogsTab'
@@ -51,6 +51,16 @@ const completedJob = {
   youtubeTracksMissing: 1,
   imported: 1,
   alreadyImported: 0,
+  meaningfulRows: 1,
+  identityBearingRows: 1,
+  newCopiesToReceive: 1,
+  alreadyReceivedRows: 0,
+  availableCopiesToReceive: 1,
+  soldCopiesToReceive: 0,
+  noPriceRows: 1,
+  noPriceReceivableRows: 1,
+  manualReviewRows: 0,
+  canConfirm: true,
   warnings: 1,
   rows: [{
     id: 7,
@@ -103,9 +113,95 @@ describe('DiscogsTab Excel import', () => {
     expect(screen.getByText('Productos de catálogo afectados')).toBeInTheDocument()
     expect(screen.getByText('Filas asociadas al catálogo')).toBeInTheDocument()
     expect(screen.queryByText(/Vendida — omitida/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', {
-      name: 'Importar todas las filas identificables (1)',
-    })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Confirmar recepción (1)' })).toBeEnabled()
+  })
+
+  it('shows exact-source replay rows as already received', async () => {
+    api.importaciones.discogsJob.mockResolvedValue({
+      ...completedJob,
+      imported: 0,
+      alreadyImported: 1,
+      readyToImport: 0,
+      newCopiesToReceive: 0,
+      alreadyReceivedRows: 1,
+      availableCopiesToReceive: 0,
+      soldCopiesToReceive: 0,
+      canConfirm: false,
+      rows: [{
+        ...completedJob.rows[0],
+        catalogImportStatus: 'already_imported',
+        status: 'already_imported',
+        catalogImportErrorCode: 'ALREADY_RECEIVED',
+        warningMessage: 'ALREADY_RECEIVED — Esta fila del mismo archivo ya recibió una copia física.',
+      }],
+    })
+
+    render(<DiscogsTab />)
+
+    expect(await screen.findByText('Ya importada')).toBeInTheDocument()
+    expect(screen.getAllByText(/ALREADY_RECEIVED/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Confirmar recepción (0)' })).toBeDisabled()
+  })
+
+  it('renders reconciliation counts and requires final confirmation', async () => {
+    const preview = {
+      ...completedJob,
+      imported: 0,
+      alreadyImported: 4,
+      meaningfulRows: 8,
+      identityBearingRows: 7,
+      newCopiesToReceive: 3,
+      alreadyReceivedRows: 4,
+      availableCopiesToReceive: 2,
+      soldCopiesToReceive: 1,
+      noPriceRows: 2,
+      noPriceReceivableRows: 2,
+      manualReviewRows: 1,
+      canConfirm: true,
+    }
+    api.importaciones.discogsJob.mockResolvedValue(preview)
+    api.importaciones.discogsImportarJob.mockResolvedValue({
+      ...preview,
+      imported: 3,
+      alreadyImported: 4,
+      newCopiesToReceive: 0,
+      alreadyReceivedRows: 7,
+      canConfirm: false,
+    })
+
+    render(<DiscogsTab />)
+
+    expect(await screen.findByText('Nuevas copias')).toBeInTheDocument()
+    expect(screen.getByText('Nuevas copias').parentElement).toHaveTextContent('3')
+    expect(screen.getByText('Revisión manual')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar recepción (3)' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('2 disponibles y 1 vendidas')
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 fila(s) requieren revisión manual')
+    expect(screen.getByRole('dialog')).toHaveTextContent('4 fila(s) ya recibidas')
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar recepción' }))
+
+    await waitFor(() => expect(api.importaciones.discogsImportarJob).toHaveBeenCalledWith(42))
+    expect(await screen.findByText(/Recepción completada: 3 copias nuevas/)).toBeInTheDocument()
+  })
+
+  it('disables confirmation when an exact replay has no new copies', async () => {
+    api.importaciones.discogsJob.mockResolvedValue({
+      ...completedJob,
+      imported: 0,
+      alreadyImported: 113,
+      newCopiesToReceive: 0,
+      alreadyReceivedRows: 113,
+      availableCopiesToReceive: 0,
+      soldCopiesToReceive: 0,
+      manualReviewRows: 1,
+      canConfirm: false,
+    })
+
+    render(<DiscogsTab />)
+
+    expect(await screen.findByText(/Este archivo exacto ya recibió sus copias físicas/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmar recepción (0)' })).toBeDisabled()
+    expect(api.importaciones.discogsImportarJob).not.toHaveBeenCalled()
   })
 })
 

@@ -268,9 +268,12 @@ public class DiscogsImportJobService {
                 .orElseThrow(() -> new NegocioException("Importación Discogs no encontrada: " + jobId));
         ensurePostProcessingReady(job, "importar al catálogo");
         updateJobStage(jobId, DiscogsImportStage.IMPORTING_CATALOG);
+        Set<Integer> priorReceivedRows = priorReceivedSourceRows(job);
         List<Long> rowIds = new TransactionTemplate(transactionManager).execute(status ->
                 rowRepository.findByJobIdDiscogsImportJobOrderBySourceExcelRowNumber(jobId).stream()
-                    .filter(this::isReadyToImport)
+                    .filter(row -> isReadyToImport(row)
+                            || (row.getSourceExcelRowNumber() != null
+                            && priorReceivedRows.contains(row.getSourceExcelRowNumber())))
                     .map(DiscogsImportRow::getIdDiscogsImportRow)
                     .toList());
         for (Long rowId : Optional.ofNullable(rowIds).orElse(List.of())) {
@@ -303,6 +306,9 @@ public class DiscogsImportJobService {
                     || row.getStatus() == DiscogsImportRowStatus.ALREADY_IMPORTED) {
                 return;
             }
+            if (markAlreadyReceivedFromPriorJob(row)) {
+                return;
+            }
             row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTING);
             if (row.getImportedCatalogProduct() != null) {
                 updateDisco(row.getImportedCatalogProduct(), row);
@@ -332,6 +338,49 @@ public class DiscogsImportJobService {
         } catch (RuntimeException ex) {
             throw new NegocioException(importError(row, ex));
         }
+    }
+
+    /**
+     * A fingerprint identifies the uploaded bytes, while the Excel row number
+     * identifies one physical-copy receipt inside those bytes. Product/release
+     * identity is deliberately not part of this replay key: repeated rows can
+     * be legitimate copies, and a new fingerprint may legitimately reuse a
+     * release.
+     *
+     * The job-row lock makes this decision database-backed across application
+     * instances. The persisted product link is the receipt proof and survives
+     * Phase 3 physical-copy deletion, so deleting a QR copy cannot silently
+     * make an exact source row eligible for recreation.
+     */
+    private boolean markAlreadyReceivedFromPriorJob(DiscogsImportRow row) {
+        String fingerprint = row.getJob() == null ? null : row.getJob().getSourceFingerprint();
+        if (blank(fingerprint) || row.getSourceExcelRowNumber() == null) {
+            return false;
+        }
+
+        jobRepository.findBySourceFingerprintForUpdate(fingerprint);
+        List<DiscogsImportRow> priorRows = rowRepository.findPriorImportedRows(
+                fingerprint,
+                row.getJob().getIdDiscogsImportJob(),
+                row.getSourceExcelRowNumber()
+        );
+        if (priorRows.isEmpty()) {
+            return false;
+        }
+
+        DiscogsImportRow prior = priorRows.get(0);
+        row.setImportedCatalogProduct(prior.getImportedCatalogProduct());
+        row.setStatus(DiscogsImportRowStatus.ALREADY_IMPORTED);
+        row.setCatalogImportStatus(DiscogsCatalogImportStatus.ALREADY_IMPORTED);
+        row.setCatalogImportErrorCode("ALREADY_RECEIVED");
+        row.setCatalogProductResult("ALREADY_RECEIVED");
+        row.setErrorMessage(null);
+        appendWarning(row, "ALREADY_RECEIVED — Esta fila del mismo archivo ya recibió una copia física.");
+        rowRepository.save(row);
+        log.info("DiscogsImport job={} row={} protected exact-source replay from job={} product={}",
+                row.getJob().getIdDiscogsImportJob(), row.getSourceExcelRowNumber(),
+                prior.getJob().getIdDiscogsImportJob(), prior.getImportedCatalogProduct().getIdDisco());
+        return true;
     }
 
     public synchronized DiscogsZipStatusDTO prepareCoversZip(Long jobId) {
@@ -947,6 +996,8 @@ public class DiscogsImportJobService {
 
     private DiscogsCatalogStockService.ReceiptCommand toReceiptCommand(DiscogsImportRow row) {
         Long releaseId = releaseIdentity(row);
+        EstadoCopiaDisco incomingCopyState = "VENDIDO".equalsIgnoreCase(row.getSourceStatus())
+                ? EstadoCopiaDisco.VENDIDO : EstadoCopiaDisco.DISPONIBLE;
         return new DiscogsCatalogStockService.ReceiptCommand(
                 releaseId,
                 1,
@@ -958,7 +1009,8 @@ public class DiscogsImportJobService {
                         row.getCountry(), row.getStyle(), row.getTracklist(), row.getImageUrl(), null,
                         firstNonBlank(row.getInternalCode(), generateCode(row)),
                         ImportMetadataNormalizer.SOURCE_DISCOGS, catalogNotes(row)
-                )
+                ),
+                incomingCopyState
         );
     }
 
@@ -1251,7 +1303,11 @@ public class DiscogsImportJobService {
 
     private DiscogsImportJobDTO toDto(DiscogsImportJob job) {
         List<DiscogsImportRow> entityRows = job.getRows();
-        List<DiscogsImportRowDTO> rows = job.getRows().stream().map(this::toRowDto).toList();
+        Set<Integer> priorReceivedRows = priorReceivedSourceRows(job);
+        List<DiscogsImportRowDTO> rows = job.getRows().stream()
+                .map(row -> toRowDto(row, priorReceivedRows))
+                .toList();
+        PreviewSummary preview = previewSummary(entityRows, priorReceivedRows);
         DiscogsZipStatusDTO zip = toZipStatus(job);
         return DiscogsImportJobDTO.builder()
                 .id(job.getIdDiscogsImportJob())
@@ -1316,7 +1372,7 @@ public class DiscogsImportJobService {
                         .values().stream().mapToInt(Integer::intValue).sum())
                 .pending(count(rows, row -> Set.of("pending", "processing", "rate_limited", "failed_retryable")
                         .contains(row.getMetadataStatus())))
-                .readyToImport(count(rows, this::isReadyToImport))
+                .readyToImport(preview.newCopiesToReceive())
                 .warnings(count(rows, row -> !blank(row.getWarningMessage())
                         || !blank(row.getErrorMessage())
                         || "missing_link".equals(row.getMetadataStatus())))
@@ -1330,7 +1386,7 @@ public class DiscogsImportJobService {
                 .newProducts(distinctProductCount(rows, "NEW_PRODUCT"))
                 .existingProducts(distinctProductCount(rows, "EXISTING_PRODUCT"))
                 .physicalCopiesImported(countStatus(rows, DiscogsImportRowStatus.IMPORTED))
-                .physicalCopiesToReceive(count(rows, this::isReadyToImport))
+                .physicalCopiesToReceive(preview.newCopiesToReceive())
                 .resolvedConcreteReleases((int) rows.stream()
                         .map(DiscogsImportRowDTO::getResolvedReleaseId)
                         .filter(Objects::nonNull)
@@ -1352,6 +1408,20 @@ public class DiscogsImportJobService {
                                 && row.getDiscogsId() == null
                                 && blank(row.getArtist())
                                 && blank(row.getTitle())))
+                .meaningfulRows(preview.meaningfulRows())
+                .identityBearingRows(preview.identityBearingRows())
+                .newCopiesToReceive(preview.newCopiesToReceive())
+                .alreadyReceivedRows(preview.alreadyReceivedRows())
+                .availableCopiesToReceive(preview.availableCopiesToReceive())
+                .soldCopiesToReceive(preview.soldCopiesToReceive())
+                .noPriceRows(preview.noPriceRows())
+                .noPriceReceivableRows(preview.noPriceReceivableRows())
+                .manualReviewRows(preview.manualReviewRows())
+                .unresolvedRows(preview.unresolvedRows())
+                .metadataErrorRows(preview.metadataErrorRows())
+                .blockedIdentityRows(preview.blockedIdentityRows())
+                .readyRows(preview.newCopiesToReceive())
+                .canConfirm(preview.canConfirm(job))
                 .zipStatus(zip.getZipStatus())
                 .zipTotalCovers(zip.getZipTotalCovers())
                 .zipProcessedCovers(zip.getZipProcessedCovers())
@@ -1371,7 +1441,140 @@ public class DiscogsImportJobService {
                 .build();
     }
 
-    private DiscogsImportRowDTO toRowDto(DiscogsImportRow row) {
+    private Set<Integer> priorReceivedSourceRows(DiscogsImportJob job) {
+        if (job == null || blank(job.getSourceFingerprint()) || job.getIdDiscogsImportJob() == null) {
+            return Set.of();
+        }
+        return new HashSet<>(rowRepository.findPriorReceivedSourceRowNumbers(
+                job.getSourceFingerprint(), job.getIdDiscogsImportJob()));
+    }
+
+    private PreviewSummary previewSummary(List<DiscogsImportRow> rows, Set<Integer> priorReceivedRows) {
+        int identityBearing = 0;
+        int newCopies = 0;
+        int alreadyReceived = 0;
+        int available = 0;
+        int sold = 0;
+        int noPrice = 0;
+        int noPriceReceivable = 0;
+        int manualReview = 0;
+        int unresolved = 0;
+        int metadataErrors = 0;
+        int blockedIdentity = 0;
+
+        for (DiscogsImportRow row : rows) {
+            RowPreview preview = classifyPreview(row, priorReceivedRows);
+            boolean identity = isIdentityBearing(row);
+            if (identity) identityBearing++;
+            if (isUndefinedPrice(row)) noPrice++;
+            if ("NEW_COPY".equals(preview.outcome())) {
+                newCopies++;
+                if ("VENDIDO".equalsIgnoreCase(row.getSourceStatus())) sold++;
+                else available++;
+            } else if ("ALREADY_RECEIVED".equals(preview.outcome())) {
+                alreadyReceived++;
+            } else if (identity) {
+                blockedIdentity++;
+            }
+            if (isUndefinedPrice(row) && identity
+                    && Set.of("NEW_COPY", "ALREADY_RECEIVED").contains(preview.outcome())) {
+                noPriceReceivable++;
+            }
+            if ("MANUAL_REVIEW".equals(preview.outcome())) manualReview++;
+            if (identity && row.getResolvedReleaseId() == null) unresolved++;
+            if (isMetadataError(row)) metadataErrors++;
+        }
+        return new PreviewSummary(
+                rows.size(), identityBearing, newCopies, alreadyReceived, available, sold,
+                noPrice, noPriceReceivable, manualReview, unresolved, metadataErrors,
+                blockedIdentity);
+    }
+
+    private RowPreview classifyPreview(DiscogsImportRow row, Set<Integer> priorReceivedRows) {
+        boolean alreadyReceived = row.getImportedCatalogProduct() != null
+                || (row.getSourceExcelRowNumber() != null
+                && priorReceivedRows.contains(row.getSourceExcelRowNumber()));
+        if (alreadyReceived) {
+            return new RowPreview("ALREADY_RECEIVED", "ALREADY_RECEIVED — Esta fila ya recibió una copia física.");
+        }
+        if (!isIdentityBearing(row)) {
+            if (row.getStatus() == DiscogsImportRowStatus.IGNORED) {
+                return new RowPreview("BLOCKED_ERROR", firstNonBlank(row.getErrorMessage(), "Fila ignorada."));
+            }
+            return new RowPreview("MANUAL_REVIEW", firstNonBlank(
+                    row.getWarningMessage(), "MISSING_DISCOGS_LINK — Falta una identidad Discogs."));
+        }
+        if (isReadyToImport(row)) {
+            return new RowPreview("NEW_COPY", "Se recibirá una copia física.");
+        }
+        return new RowPreview("BLOCKED_ERROR", firstNonBlank(
+                row.getErrorMessage(), firstNonBlank(row.getWarningMessage(),
+                        firstNonBlank(row.getMetadataErrorCode(), "La fila aún no está lista para recibirse."))));
+    }
+
+    private boolean isIdentityBearing(DiscogsImportRow row) {
+        return row.getDiscogsId() != null && !blank(row.getDiscogsType());
+    }
+
+    private boolean isUndefinedPrice(DiscogsImportRow row) {
+        if (row.getManualPriceUyu() != null) return false;
+        String raw = Optional.ofNullable(row.getRawPrice()).orElse("").trim();
+        return raw.isBlank() || Set.of("SIN PRECIO", "S/P").contains(raw.toUpperCase(Locale.ROOT));
+    }
+
+    private boolean isMetadataError(DiscogsImportRow row) {
+        return Set.of(DiscogsMetadataStatus.FAILED, DiscogsMetadataStatus.FAILED_RETRYABLE,
+                        DiscogsMetadataStatus.RATE_LIMITED)
+                .contains(row.getMetadataStatus());
+    }
+
+    private String normalizedPriceStatus(DiscogsImportRow row) {
+        if (row.getManualPriceUyu() != null) return "DEFINED";
+        if (isUndefinedPrice(row)) return "UNDEFINED";
+        return "REQUIRES_REVIEW";
+    }
+
+    private String resultingCopyState(DiscogsImportRow row) {
+        if (!isIdentityBearing(row)) return null;
+        return "VENDIDO".equalsIgnoreCase(row.getSourceStatus())
+                ? EstadoCopiaDisco.VENDIDO.name()
+                : EstadoCopiaDisco.DISPONIBLE.name();
+    }
+
+    private String previewReason(DiscogsImportRow row, RowPreview preview) {
+        if (!blank(row.getErrorMessage())) return row.getErrorMessage();
+        if (!blank(row.getWarningMessage())) return row.getWarningMessage();
+        return preview.reason();
+    }
+
+    private record RowPreview(String outcome, String reason) {}
+
+    private record PreviewSummary(
+            int meaningfulRows,
+            int identityBearingRows,
+            int newCopiesToReceive,
+            int alreadyReceivedRows,
+            int availableCopiesToReceive,
+            int soldCopiesToReceive,
+            int noPriceRows,
+            int noPriceReceivableRows,
+            int manualReviewRows,
+            int unresolvedRows,
+            int metadataErrorRows,
+            int blockedIdentityRows
+    ) {
+        boolean canConfirm(DiscogsImportJob job) {
+            return newCopiesToReceive > 0
+                    && Set.of(DiscogsImportJobStatus.COMPLETED,
+                            DiscogsImportJobStatus.COMPLETED_WITH_WARNINGS,
+                            DiscogsImportJobStatus.COMPLETED_WITH_ERRORS).contains(job.getStatus())
+                    && !Set.of(DiscogsImportStage.IMPORTING_CATALOG,
+                            DiscogsImportStage.PREPARING_ZIP).contains(job.getStage());
+        }
+    }
+
+    private DiscogsImportRowDTO toRowDto(DiscogsImportRow row, Set<Integer> priorReceivedRows) {
+        RowPreview preview = classifyPreview(row, priorReceivedRows);
         return DiscogsImportRowDTO.builder()
                 .id(row.getIdDiscogsImportRow())
                 .sourceExcelRowNumber(row.getSourceExcelRowNumber())
@@ -1420,6 +1623,10 @@ public class DiscogsImportJobService {
                 .importedCatalogProductId(row.getImportedCatalogProduct() != null
                         ? row.getImportedCatalogProduct().getIdDisco()
                         : null)
+                .previewOutcome(preview.outcome())
+                .previewReason(previewReason(row, preview))
+                .normalizedPriceStatus(normalizedPriceStatus(row))
+                .resultingCopyState(resultingCopyState(row))
                 .build();
     }
 

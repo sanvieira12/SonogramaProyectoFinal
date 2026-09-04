@@ -519,12 +519,12 @@ public class DiscogsExcelParser {
     private PriceParse parsePrice(String rawPrice, int excelRowNumber, Integer columnIndex) {
         if (blank(rawPrice)) {
             return new PriceParse(null,
-                    "PRICE_REQUIRES_REVIEW — El precio está vacío y se importará sin precio.");
+                    "PRICE_UNDEFINED — PRICE_REQUIRES_REVIEW — El precio está vacío y se importará sin precio.");
         }
         String normalized = rawPrice.trim().toUpperCase(Locale.ROOT);
         if (normalized.contains("SIN PRECIO") || normalized.equals("S/P")) {
-            return new PriceParse(null, "PRICE_REQUIRES_REVIEW — NON_NUMERIC_PRICE — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
-                    "El precio no contiene un valor numérico."));
+            return new PriceParse(null, "PRICE_UNDEFINED — " + cellIssue(excelRowNumber, columnIndex, rawPrice,
+                    "El precio de venta no está definido; se importará sin precio."));
         }
         String numeric = rawPrice.replaceAll("[^0-9,.-]", "").trim();
         if (numeric.isBlank()) {

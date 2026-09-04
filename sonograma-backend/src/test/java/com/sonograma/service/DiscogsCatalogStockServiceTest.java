@@ -1,8 +1,10 @@
 package com.sonograma.service;
 
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.exception.ConflictoNegocioException;
@@ -94,6 +96,85 @@ class DiscogsCatalogStockServiceTest {
         assertThat(qrCopyService.countAvailableCopies(disco.getIdDisco())).isEqualTo(2);
     }
 
+    @Test
+    void soldReceiptCreatesOneSoldCopyAndNoAvailableStock() {
+        DiscogsCatalogStockService.ReceiptResult result =
+                service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO));
+
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
+            assertThat(disco.getCantidadCopias()).isZero();
+        });
+        assertThat(copyRepository.findByIdDiscoOrderByCopyNumber(result.disco().getIdDisco()))
+                .singleElement()
+                .extracting(DiscoQrCopy::getEstado)
+                .isEqualTo(EstadoCopiaDisco.VENDIDO);
+        assertThat(qrCopyService.countAvailableCopies(result.disco().getIdDisco())).isZero();
+    }
+
+    @Test
+    void availableAndSoldReceiptsReuseOneProductAndKeepCopyStatesIndependent() {
+        DiscogsCatalogStockService.ReceiptResult available =
+                service.receive(command(456L, 1, EstadoCopiaDisco.DISPONIBLE));
+        service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO));
+
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getIdDisco()).isEqualTo(available.disco().getIdDisco());
+            assertThat(disco.getEstado()).isEqualTo(EstadoDisco.DISPONIBLE);
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+        });
+        assertThat(copyRepository.findByIdDiscoOrderByCopyNumber(available.disco().getIdDisco()))
+                .extracting(DiscoQrCopy::getEstado)
+                .containsExactly(EstadoCopiaDisco.DISPONIBLE, EstadoCopiaDisco.VENDIDO);
+        assertThat(qrCopyService.totalCopies(available.disco().getIdDisco())).isEqualTo(2);
+        assertThat(qrCopyService.countAvailableCopies(available.disco().getIdDisco())).isEqualTo(1);
+        assertThat(qrCopyService.soldCopies(available.disco().getIdDisco())).isEqualTo(1);
+    }
+
+    @Test
+    void twoSoldReceiptsReuseOneProductWithoutAvailableStock() {
+        DiscogsCatalogStockService.ReceiptResult first =
+                service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO));
+        service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO));
+
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getIdDisco()).isEqualTo(first.disco().getIdDisco());
+            assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
+            assertThat(disco.getCantidadCopias()).isZero();
+        });
+        assertThat(qrCopyService.totalCopies(first.disco().getIdDisco())).isEqualTo(2);
+        assertThat(qrCopyService.soldCopies(first.disco().getIdDisco())).isEqualTo(2);
+        assertThat(qrCopyService.countAvailableCopies(first.disco().getIdDisco())).isZero();
+    }
+
+    @Test
+    void importingAvailableAfterSoldPreservesSoldProvenance() {
+        Disco sold = service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO)).disco();
+        service.receive(command(456L, 1, EstadoCopiaDisco.DISPONIBLE));
+
+        assertThat(copyRepository.findByIdDiscoOrderByCopyNumber(sold.getIdDisco()))
+                .extracting(DiscoQrCopy::getEstado)
+                .containsExactly(EstadoCopiaDisco.VENDIDO, EstadoCopiaDisco.DISPONIBLE);
+        assertThat(qrCopyService.totalCopies(sold.getIdDisco())).isEqualTo(2);
+        assertThat(qrCopyService.countAvailableCopies(sold.getIdDisco())).isEqualTo(1);
+    }
+
+    @Test
+    void importingSoldAfterExistingAvailablePreservesExistingAvailableCopy() {
+        Disco existing = service.receive(command(456L, 1, EstadoCopiaDisco.DISPONIBLE)).disco();
+        Long existingCopyId = copyRepository.findByIdDiscoOrderByCopyNumber(existing.getIdDisco())
+                .getFirst().getId();
+
+        service.receive(command(456L, 1, EstadoCopiaDisco.VENDIDO));
+
+        assertThat(copyRepository.findById(existingCopyId)).get()
+                .extracting(DiscoQrCopy::getEstado)
+                .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(qrCopyService.totalCopies(existing.getIdDisco())).isEqualTo(2);
+        assertThat(qrCopyService.countAvailableCopies(existing.getIdDisco())).isEqualTo(1);
+        assertThat(qrCopyService.soldCopies(existing.getIdDisco())).isEqualTo(1);
+    }
+
     private Disco newLegacy(Long releaseId) {
         return Disco.builder()
                 .codigoQr(UUID.randomUUID().toString())
@@ -109,11 +190,16 @@ class DiscogsCatalogStockServiceTest {
     }
 
     private DiscogsCatalogStockService.ReceiptCommand command(long releaseId, int copies) {
+        return command(releaseId, copies, EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    private DiscogsCatalogStockService.ReceiptCommand command(
+            long releaseId, int copies, EstadoCopiaDisco copyState) {
         return new DiscogsCatalogStockService.ReceiptCommand(releaseId, copies,
                 new DiscogsCatalogStockService.DiscogsMetadata(
                         "Artist", "Album", "Electronic", "Label", 2000,
                         CondicionDisco.USADO, "VG+", TipoDisco.VINILO, "VINILO",
                         null, null, PricingMode.AUTO, "Uruguay", "Techno", "A1. Track",
-                        null, null, "A-2000-" + releaseId, "DISCOGS", null));
+                        null, null, "A-2000-" + releaseId, "DISCOGS", null), copyState);
     }
 }

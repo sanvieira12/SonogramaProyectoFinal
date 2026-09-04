@@ -350,6 +350,13 @@ function jobStatusLabel(status) {
 }
 
 function statusLabel(row) {
+  const previewLabels = {
+    NEW_COPY: 'NUEVA COPIA',
+    ALREADY_RECEIVED: 'YA RECIBIDA',
+    MANUAL_REVIEW: 'REVISIÓN MANUAL',
+    BLOCKED_ERROR: 'BLOQUEADA / ERROR',
+  }
+  if (previewLabels[row.previewOutcome]) return previewLabels[row.previewOutcome]
   if (row.catalogImportStatus === 'already_imported') return 'Ya importada'
   if (row.catalogImportStatus === 'imported') return 'Importada'
   if (row.status === 'ignored') return 'Ignorada — no es un producto'
@@ -373,6 +380,36 @@ function statusLabel(row) {
   return labels[row.status] || row.status || '—'
 }
 
+function ImportConfirmationModal({ job, onConfirm, onCancel, saving, error }) {
+  const newCopies = job.newCopiesToReceive ?? job.physicalCopiesToReceive ?? job.readyToImport ?? 0
+  const available = job.availableCopiesToReceive ?? 0
+  const sold = job.soldCopiesToReceive ?? 0
+  const noPrice = job.noPriceReceivableRows ?? 0
+  const alreadyReceived = job.alreadyReceivedRows ?? job.alreadyImported ?? 0
+  const manualReview = job.manualReviewRows ?? job.rowsRequiringReview ?? 0
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4" role="presentation">
+      <div className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-2xl shadow-2xl w-full max-w-md p-6" role="dialog" aria-modal="true" aria-labelledby="discogs-confirm-title">
+        <h3 id="discogs-confirm-title" className="text-slate-900 dark:text-white font-bold text-base mb-3">Confirmar recepción de inventario</h3>
+        <p className="text-slate-600 dark:text-stone-300 text-sm mb-4">Vas a recibir {newCopies} copias físicas nuevas: {available} disponibles y {sold} vendidas.</p>
+        <div className="rounded-lg bg-slate-50 dark:bg-stone-950 border border-slate-200 dark:border-stone-800 px-3 py-2 text-xs text-slate-600 dark:text-stone-300 space-y-1 mb-5">
+          <p>{noPrice} sin precio — se conservarán sin precio.</p>
+          <p>{manualReview} fila(s) requieren revisión manual y no se recibirán.</p>
+          {alreadyReceived > 0 && <p>{alreadyReceived} fila(s) ya recibidas — no crearán stock adicional.</p>}
+        </div>
+        {error && <p role="alert" className="text-red-600 dark:text-red-300 text-sm mb-4">{error}</p>}
+        <div className="flex gap-3">
+          <button type="button" onClick={onCancel} disabled={saving} className="btn-secondary flex-1">Cancelar</button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="flex-1 bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all">
+            {saving ? 'Recibiendo…' : 'Confirmar recepción'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function urlSourceLabel(source) {
   const labels = {
     hyperlink: 'hipervínculo',
@@ -394,12 +431,21 @@ function ExcelLinks() {
   const [errorMsg, setErrorMsg] = useState('')
   const [filter, setFilter] = useState('all')
   const [downloadingZip, setDownloadingZip] = useState(false)
+  const [confirmingImport, setConfirmingImport] = useState(false)
+  const [confirmationError, setConfirmationError] = useState('')
   const inputRef = useRef(null)
 
   const jobProcessing = job && ['pending', 'processing'].includes(job.status)
   const zipPreparing = job?.zipStatus === 'preparing'
   const processing = jobProcessing || zipPreparing
-  const readyCount = job?.readyToImport || 0
+  const newCopiesToReceive = job?.newCopiesToReceive ?? job?.physicalCopiesToReceive ?? job?.readyToImport ?? 0
+  const alreadyReceivedRows = job?.alreadyReceivedRows ?? job?.alreadyImported ?? 0
+  const availableCopiesToReceive = job?.availableCopiesToReceive ?? 0
+  const soldCopiesToReceive = job?.soldCopiesToReceive ?? 0
+  const noPriceRows = job?.noPriceRows ?? 0
+  const noPriceReceivableRows = job?.noPriceReceivableRows ?? 0
+  const manualReviewRows = job?.manualReviewRows ?? job?.rowsRequiringReview ?? 0
+  const canConfirm = job?.canConfirm ?? (newCopiesToReceive > 0 && !processing)
   const filteredRows = useMemo(() => {
     const rows = job?.rows || []
     return rows.filter(row => {
@@ -476,13 +522,23 @@ function ExcelLinks() {
 
   async function importarFilasIdentificables() {
     setEstado('saving')
+    setConfirmationError('')
     try {
       setJob(await api.importaciones.discogsImportarJob(job.id))
       setEstado('preview')
     } catch (err) {
+      setConfirmationError(err.message || 'Error al guardar')
       setErrorMsg(err.message || 'Error al guardar')
-      setEstado('error')
+      setEstado('preview')
+    } finally {
+      setConfirmingImport(false)
     }
+  }
+
+  function solicitarImportacion() {
+    if (!canConfirm) return
+    setConfirmationError('')
+    setConfirmingImport(true)
   }
 
   async function retryRow(rowId) {
@@ -585,6 +641,34 @@ function ExcelLinks() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {[
+              ['Nuevas copias', newCopiesToReceive],
+              ['Disponibles', availableCopiesToReceive],
+              ['Vendidas', soldCopiesToReceive],
+              ['Ya recibidas', alreadyReceivedRows],
+              ['Sin precio', noPriceRows],
+              ['Revisión manual', manualReviewRows],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-[#7E9FA8]/40 bg-[#7E9FA8]/5 px-3 py-2">
+                <p className="text-[10px] uppercase text-slate-500 dark:text-stone-400">{label}</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {noPriceRows > 0 && noPriceReceivableRows !== noPriceRows && (
+            <p className="text-xs text-slate-500 dark:text-stone-400">
+              Sin precio recepcionables: {noPriceReceivableRows}; las restantes quedan fuera por revisión manual.
+            </p>
+          )}
+
+          {newCopiesToReceive === 0 && alreadyReceivedRows > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+              Este archivo exacto ya recibió sus copias físicas. No se crearán copias nuevas.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-2">
             {[
               ['Filas fuente', job.realRowsRead ?? job.totalRowsRead],
@@ -598,7 +682,7 @@ function ExcelLinks() {
               ['Productos nuevos', job.newProducts],
               ['Productos existentes reutilizados', job.existingProducts],
               ['Releases concretos resueltos', job.resolvedConcreteReleases],
-              ['Copias físicas a recibir', job.physicalCopiesToReceive ?? job.readyToImport],
+              ['Copias físicas a recibir', newCopiesToReceive],
               ['Requieren revisión', job.rowsRequiringReview],
               ['Filas pendientes', job.pendingRows ?? job.pending],
               ['Filas con error', job.errorRows ?? job.failed],
@@ -619,7 +703,7 @@ function ExcelLinks() {
               ['Portadas faltantes', job.coversMissing],
               ['YouTube encontrados', job.youtubeLinksFound],
               ['Tracks sin YouTube', job.youtubeTracksMissing],
-              ['Identificables por importar', job.readyToImport],
+              ['Identificables por importar', newCopiesToReceive],
               ['Ya importados', job.alreadyImported],
               ['QR creados', job.qrEntriesCreated],
               ['Advertencias', job.warnings],
@@ -738,20 +822,24 @@ function ExcelLinks() {
                     </td>
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500">
                       <div>{row.manualCondition || '—'} · {row.manualPriceUyu != null ? `$${row.manualPriceUyu}` : `sin precio${row.rawPrice ? ` (${row.rawPrice})` : ''}`}</div>
+                      <div className={row.normalizedPriceStatus === 'UNDEFINED' ? 'font-medium text-amber-700 dark:text-amber-300' : ''}>
+                        Precio normalizado: {row.normalizedPriceStatus === 'UNDEFINED' ? 'SIN PRECIO' : row.normalizedPriceStatus || (row.manualPriceUyu != null ? 'DEFINED' : 'REQUIRES_REVIEW')}
+                      </div>
                       <div>{row.manualGenre || '—'} · {row.sourceStatus || '—'}</div>
                       <div className="font-medium text-emerald-700 dark:text-emerald-300">Catálogo: USADO</div>
                       {row.internalCode && <div className="font-mono">{row.internalCode}</div>}
                       {row.observation && <div className="text-amber-700 dark:text-amber-300">Obs: {row.observation}</div>}
                     </td>
                     <td className="px-3 py-2">
-                      <div>{statusLabel(row)}</div>
+                      <div className="font-medium">{statusLabel(row)}</div>
+                      {row.resultingCopyState && <div>Copia resultante: {row.resultingCopyState}</div>}
                       <div className="text-[10px] text-slate-400">Metadata: {row.metadataStatus || '—'}</div>
                       <div className="text-[10px] text-slate-400">Portada: {row.coverStatus || '—'}</div>
                       <div className="text-[10px] text-slate-400">YouTube: {row.youtubeStatus || '—'}</div>
                       <div className="text-[10px] text-slate-400">Catálogo: {row.catalogImportStatus || '—'}</div>
                     </td>
                     <td className="px-3 py-2 text-slate-500 dark:text-stone-500 max-w-[240px]">
-                      {row.errorMessage || row.warningMessage || '—'}
+                      {row.previewReason || row.errorMessage || row.warningMessage || '—'}
                     </td>
                     <td className="px-3 py-2">
                       {(['failed', 'rate_limited', 'failed_retryable'].includes(row.metadataStatus)
@@ -805,9 +893,9 @@ function ExcelLinks() {
           )}
 
           <div className="flex flex-wrap gap-3">
-            <button onClick={importarFilasIdentificables} disabled={readyCount === 0 || processing || estado === 'saving'}
+            <button onClick={solicitarImportacion} disabled={!canConfirm || estado === 'saving'}
               className="px-5 py-2.5 rounded-lg bg-[#5C7D87] hover:bg-[#4a6a74] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">
-              {estado === 'saving' ? 'Importando…' : `Importar todas las filas identificables (${readyCount})`}
+              {estado === 'saving' ? 'Recibiendo…' : `Confirmar recepción (${newCopiesToReceive})`}
             </button>
             <button onClick={retryPending} disabled={processing || !(job.metadataPending || job.rateLimited || job.failed)}
               className="px-5 py-2.5 rounded-lg border border-[#7E9FA8]/50 text-[#5C7D87] dark:text-[#7E9FA8] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -831,6 +919,12 @@ function ExcelLinks() {
               Cancelar
             </button>
           </div>
+
+          {job.status?.startsWith('completed') && (job.imported > 0 || job.alreadyImported > 0) && estado !== 'saving' && (
+            <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+              Recepción completada: {job.imported || 0} copias nuevas; {job.alreadyImported || 0} ya recibidas.
+            </div>
+          )}
         </div>
       )}
 
@@ -840,6 +934,16 @@ function ExcelLinks() {
           {errorMsg && <p className="text-xs text-red-600 dark:text-red-300 mt-1">{errorMsg}</p>}
           <button onClick={reset} className="mt-1 text-xs underline text-red-600 dark:text-red-400">Reintentar</button>
         </div>
+      )}
+
+      {confirmingImport && job && (
+        <ImportConfirmationModal
+          job={job}
+          onConfirm={importarFilasIdentificables}
+          onCancel={() => { if (estado !== 'saving') setConfirmingImport(false) }}
+          saving={estado === 'saving'}
+          error={confirmationError}
+        />
       )}
     </div>
   )

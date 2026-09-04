@@ -23,6 +23,7 @@ vi.mock('../api/sonograma', () => ({
   api: {
     discos: {
       porId: vi.fn(),
+      eliminarCopia: vi.fn(),
       previews: { listar: vi.fn().mockResolvedValue([]) },
     },
     qr: {
@@ -148,6 +149,39 @@ describe('Catalog permanent deletion flow', () => {
     fireEvent.click(screen.getAllByText('Deletion Artist')[0])
     expect(await screen.findByText('Categoría')).toBeInTheDocument()
     expect(screen.getAllByText('USADO').length).toBeGreaterThan(0)
+  })
+
+  it('labels an undefined catalogue price as Sin precio', async () => {
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    await screen.findByText('Deletion Artist')
+    expect(screen.getAllByText('Sin precio').length).toBeGreaterThan(0)
+    expect(screen.queryByText('UYU $0')).not.toBeInTheDocument()
+  })
+
+  it('deletes one selected physical copy from the QR management dialog', async () => {
+    const withCopy = {
+      ...disco,
+      qrCopies: [{ id: 77, copyNumber: 1, codigoQr: 'copy-77', estado: 'DISPONIBLE' }],
+      totalCopias: 1,
+    }
+    api.discos.porId.mockResolvedValue(withCopy)
+    api.discos.eliminarCopia.mockResolvedValue({ ...withCopy, qrCopies: [], totalCopias: 0, cantidadCopias: 0, estado: 'SIN_STOCK' })
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByText('Deletion Artist')
+    fireEvent.click(screen.getAllByText('Deletion Artist')[0])
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Ver QR' }))[0])
+    await screen.findByText('Código QR')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar copia' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/El producto y las demás copias se conservarán/i)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Eliminar copia' }))
+
+    await waitFor(() => expect(api.discos.eliminarCopia).toHaveBeenCalledWith(42, 77))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText('Este disco no tiene copias físicas con QR.')).toBeInTheDocument()
   })
 
   it('keeps a sold new product visible and orders by update date with entry-date fallback', async () => {

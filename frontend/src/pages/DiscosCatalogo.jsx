@@ -93,6 +93,10 @@ function formatImportDate(value) {
   })
 }
 
+function sellingPriceLabel(value) {
+  return value != null ? `UYU $${Number(value).toLocaleString('es-UY')}` : 'Sin precio'
+}
+
 function EmptyState({ hayFiltro }) {
   return (
     <div className="text-center py-20">
@@ -193,6 +197,9 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
   const [imageError, setImageError] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
+  const [copyToDelete, setCopyToDelete] = useState(null)
+  const [deletingCopy, setDeletingCopy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   if (!disco) return null
   const copies = qrCopiesForDisco(disco)
@@ -219,6 +226,21 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
       setDownloadError(err.message || 'No se pudo descargar el QR')
     } finally {
       setDownloading(false)
+    }
+  }
+
+  async function handleDeleteCopy() {
+    if (!copyToDelete || deletingCopy) return
+    setDeletingCopy(true)
+    setDeleteError('')
+    try {
+      const actualizado = await api.discos.eliminarCopia(disco.idDisco, copyToDelete.id)
+      setCopyToDelete(null)
+      onUpdated(actualizado)
+    } catch (err) {
+      setDeleteError(err.message || 'No se pudo eliminar la copia. No se realizó ningún cambio.')
+    } finally {
+      setDeletingCopy(false)
     }
   }
 
@@ -322,24 +344,44 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
                 >
                   {downloading ? 'Descargando...' : 'Descargar QR'}
                 </button>
-                {selectedCopy.id && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const nuevoEstado = selectedCopy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
-                      const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, selectedCopy.id, nuevoEstado)
-                      onUpdated(actualizado)
-                    }}
-                    className="btn-secondary w-full"
-                  >
-                    {selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
-                  </button>
+                {selectedCopy.id && !String(selectedCopy.id).startsWith('legacy-') && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const nuevoEstado = selectedCopy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
+                        const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, selectedCopy.id, nuevoEstado)
+                        onUpdated(actualizado)
+                      }}
+                      className="btn-secondary w-full"
+                    >
+                      {selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setDeleteError(''); setCopyToDelete(selectedCopy) }}
+                      className="btn-secondary w-full text-red-600 dark:text-red-400"
+                    >
+                      Eliminar copia
+                    </button>
+                  </>
                 )}
               </div>
             </article>
           )}
         </div>
       </div>
+      {copyToDelete && (
+        <ConfirmModal
+          titulo="Eliminar copia física"
+          mensaje={`¿Seguro que querés eliminar la copia ${copyToDelete.copyNumber || 'seleccionada'}? El producto y las demás copias se conservarán.`}
+          onConfirmar={handleDeleteCopy}
+          onCancelar={() => { if (!deletingCopy) { setCopyToDelete(null); setDeleteError('') } }}
+          cargando={deletingCopy}
+          confirmarTexto="Eliminar copia"
+          error={deleteError}
+        />
+      )}
     </div>
   )
 }
@@ -471,7 +513,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               ['Categoría',     disco.condicion],
               ['Condición',     disco.condicionFisica],
               ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
-              ['Precio venta',  disco.precioVenta ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
+              ['Precio venta',  sellingPriceLabel(disco.precioVenta)],
               ['Stock actual',  disco.cantidadCopias ?? 0],
               ['Código interno', disco.codigoInterno],
             ].map(([label, value]) => (
@@ -552,7 +594,7 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
   const fields = [
     ['Código', disco.codigoInterno],
     ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
-    ['Venta', disco.precioVenta != null ? `UYU $${Number(disco.precioVenta).toLocaleString('es-UY')}` : null],
+    ['Venta', sellingPriceLabel(disco.precioVenta)],
     ['Stock', disco.cantidadCopias ?? 0],
     ['Categoría', disco.condicion],
     ['Condición', disco.condicionFisica],
@@ -1013,9 +1055,9 @@ export default function DiscosCatalogo() {
                         {d.condicionFisica || <span className="text-slate-300 dark:text-stone-600">—</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {d.precioVenta
+                        {d.precioVenta != null
                           ? `UYU $${Number(d.precioVenta).toLocaleString('es-UY')}`
-                          : <span className="text-slate-400 dark:text-stone-600 font-normal">—</span>}
+                          : <span className="text-slate-400 dark:text-stone-600 font-normal">Sin precio</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatImportDate(d.fechaActualizacion || d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}

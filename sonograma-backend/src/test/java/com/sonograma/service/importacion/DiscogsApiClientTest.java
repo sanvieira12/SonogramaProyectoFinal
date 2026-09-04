@@ -52,6 +52,27 @@ class DiscogsApiClientTest {
     }
 
     @Test
+    void marketplaceMasterReferenceUsesTheExistingMasterResolutionPath() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/masters/875660", exchange ->
+                respond(exchange, 200, "{\"main_release\":7240443}"));
+        server.createContext("/releases/7240443", exchange ->
+                respond(exchange, 200, "{\"title\":\"Marketplace release\",\"artists\":[{\"name\":\"Artist\"}]}"));
+        server.start();
+
+        var link = new DiscogsLinkParser().parse(
+                "https://www.discogs.com/es/sell/list?master_id=875660"
+        ).orElseThrow();
+        var result = client().fetch(link.type(), link.id());
+
+        assertThat(link.type()).isEqualTo("master");
+        assertThat(link.id()).isEqualTo(875660L);
+        assertThat(result.success()).isTrue();
+        assertThat(result.masterId()).isEqualTo(875660L);
+        assertThat(result.resolvedReleaseId()).isEqualTo(7240443L);
+    }
+
+    @Test
     void retriesRateLimitAndRespectsRetryAfter() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);

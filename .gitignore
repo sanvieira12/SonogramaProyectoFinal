@@ -28,6 +28,7 @@ backups/
 *.sql
 *.sql.gz
 !docs/migraciones/*.sql
+!docs/testing/*.sql
 
 # Uploads locales
 uploads/

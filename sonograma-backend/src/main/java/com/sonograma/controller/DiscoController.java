@@ -97,6 +97,14 @@ public class DiscoController {
         return ResponseEntity.ok(discoService.cambiarEstadoCopia(idDisco, idCopia, nuevoEstado));
     }
 
+    @DeleteMapping("/{idDisco}/copias/{idCopia}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<DiscoResponseDTO> eliminarCopia(
+            @PathVariable Long idDisco,
+            @PathVariable Long idCopia) {
+        return ResponseEntity.ok(discoService.eliminarCopia(idDisco, idCopia));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> eliminarDisco(@PathVariable Long id, Principal principal) {

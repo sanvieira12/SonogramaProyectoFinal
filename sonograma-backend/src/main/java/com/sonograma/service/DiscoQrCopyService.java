@@ -91,6 +91,50 @@ public class DiscoQrCopyService {
         return fresh;
     }
 
+    /** Adds incoming physical copies in the requested state without creating them as available first. */
+    public List<DiscoQrCopy> addCopies(Disco disco, int quantity, EstadoCopiaDisco state) {
+        if (disco.getIdDisco() == null) {
+            throw new IllegalArgumentException("El disco debe estar guardado antes de generar sus QR");
+        }
+        if (quantity < 1) {
+            throw new IllegalArgumentException("La cantidad de copias debe ser mayor a cero");
+        }
+        if (state == null) {
+            throw new IllegalArgumentException("El estado de la copia es obligatorio");
+        }
+
+        List<DiscoQrCopy> current = new ArrayList<>(
+                repository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())
+        );
+        List<DiscoQrCopy> added = new ArrayList<>();
+        for (int i = 0; i < quantity; i++) {
+            DiscoQrCopy copy = repository.save(DiscoQrCopy.builder()
+                    .idDisco(disco.getIdDisco())
+                    .copyNumber(nextCopyNumber(current))
+                    .codigoQr(UUID.randomUUID().toString())
+                    .estado(state)
+                    .build());
+            current.add(copy);
+            added.add(copy);
+        }
+
+        refreshAggregateFields(disco, current);
+        return added;
+    }
+
+    private void refreshAggregateFields(Disco disco, List<DiscoQrCopy> copies) {
+        List<DiscoQrCopy> available = copies.stream()
+                .filter(copy -> copy.getEstado() == EstadoCopiaDisco.DISPONIBLE)
+                .sorted(Comparator.comparing(DiscoQrCopy::getCopyNumber))
+                .toList();
+        disco.setCantidadCopias(available.size());
+        disco.setCodigoQr(available.stream()
+                .findFirst()
+                .or(() -> copies.stream().findFirst())
+                .map(DiscoQrCopy::getCodigoQr)
+                .orElse(null));
+    }
+
     @Transactional(readOnly = true)
     public List<DiscoQrCopyDTO> listDtos(Disco disco) {
         return repository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco()).stream()

@@ -2,6 +2,7 @@ package com.sonograma.service.importacion;
 
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -22,6 +23,11 @@ public class DiscogsLinkParser {
             return Optional.empty();
         }
         String trimmed = value.trim();
+        Optional<DiscogsLink> marketplaceMaster = parseMarketplaceMasterUrl(trimmed);
+        if (marketplaceMaster.isPresent()) {
+            return marketplaceMaster;
+        }
+
         Matcher matcher = DISCOGS_URL.matcher(trimmed);
         if (matcher.find()) {
             return Optional.of(link(matcher.group(1), matcher.group(2), trimTrailingPunctuation(matcher.group())));
@@ -43,6 +49,71 @@ public class DiscogsLinkParser {
         }
 
         return Optional.empty();
+    }
+
+    private Optional<DiscogsLink> parseMarketplaceMasterUrl(String value) {
+        String candidate = trimTrailingPunctuation(value);
+        String uriValue = candidate.matches("(?i)^https?://.*")
+                ? candidate
+                : "https://" + candidate;
+
+        try {
+            URI uri = URI.create(uriValue);
+            if (!isAcceptedDiscogsHost(uri) || !isMarketplaceListPath(uri.getPath())) {
+                return Optional.empty();
+            }
+
+            String query = uri.getRawQuery();
+            if (query == null || query.isBlank()) {
+                return Optional.empty();
+            }
+
+            Long masterId = null;
+            for (String parameter : query.split("&", -1)) {
+                int separator = parameter.indexOf('=');
+                if (separator < 0) {
+                    continue;
+                }
+                String key = parameter.substring(0, separator);
+                if (!"master_id".equalsIgnoreCase(key)) {
+                    continue;
+                }
+                if (masterId != null) {
+                    return Optional.empty();
+                }
+                String rawId = parameter.substring(separator + 1);
+                if (!rawId.matches("[1-9]\\d*")) {
+                    return Optional.empty();
+                }
+                try {
+                    masterId = Long.parseLong(rawId);
+                } catch (NumberFormatException ignored) {
+                    return Optional.empty();
+                }
+            }
+
+            return masterId == null
+                    ? Optional.empty()
+                    : Optional.of(link("master", masterId.toString(), candidate));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    private boolean isAcceptedDiscogsHost(URI uri) {
+        if (uri.getUserInfo() != null || uri.getHost() == null) {
+            return false;
+        }
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        return "discogs.com".equals(host) || "www.discogs.com".equals(host);
+    }
+
+    private boolean isMarketplaceListPath(String path) {
+        if (path == null) {
+            return false;
+        }
+        String normalizedPath = path.replaceFirst("/+$", "");
+        return normalizedPath.matches("(?i)/(?:[a-z]{2}/)?sell/list");
     }
 
     private DiscogsLink link(String rawType, String rawId, String original) {

@@ -14,9 +14,9 @@ const ESTADO_LABELS = {
 
 export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar }) {
   const navigate = useNavigate()
-  const precio = disco.precioVenta
+  const precio = disco.precioVenta != null
     ? `$ ${Math.round(Number(disco.precioVenta)).toLocaleString('es-AR')}`
-    : null
+    : 'Sin precio'
 
   const estadosSiguientes = ESTADOS_SIGUIENTES[disco.estado] || []
 
@@ -51,7 +51,7 @@ export default function DiscoCard({ disco, onEditar, onCambiarEstado, onEliminar
 
       {/* Precio */}
       {precio && (
-        <div className="font-bold text-slate-900 dark:text-white tabular-nums text-lg">
+        <div className={`font-bold tabular-nums text-lg ${disco.precioVenta == null ? 'text-slate-400 dark:text-gray-500' : 'text-slate-900 dark:text-white'}`}>
           {precio}
         </div>
       )}

@@ -102,7 +102,7 @@ class DiscogsExcelParserTest {
             assertThat(soldRow.discogsId()).isEqualTo(20923924L);
             assertThat(soldRow.status()).isEqualTo(DiscogsImportRowStatus.PARSED);
             assertThat(soldRow.manualPriceUyu()).isNull();
-            assertThat(soldRow.errorMessage()).contains("SIN PRECIO");
+            assertThat(soldRow.errorMessage()).contains("PRICE_UNDEFINED", "SIN PRECIO");
         }
     }
 
@@ -214,6 +214,37 @@ class DiscogsExcelParserTest {
                 assertThat(parsedRow.discogsId()).isEqualTo(222L);
                 assertThat(parsedRow.urlSource()).isEqualTo("hyperlink");
                 assertThat(parsedRow.normalizedDiscogsUrl()).isEqualTo("https://www.discogs.com/master/222");
+            });
+        }
+    }
+
+    @Test
+    void parsesMarketplaceMasterHyperlinkAndKeepsVisibleProvenance() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Discogs");
+            sheet.createRow(0).createCell(0).setCellValue("LINK DE DISCOGS");
+            var row = sheet.createRow(1);
+            var cell = row.createCell(0);
+            cell.setCellValue("Marketplace listing");
+            var hyperlink = workbook.getCreationHelper().createHyperlink(HyperlinkType.URL);
+            hyperlink.setAddress("https://www.discogs.com/es/sell/list?master_id=875660");
+            cell.setHyperlink(hyperlink);
+            workbook.write(output);
+
+            var parsed = parser.parse(new MockMultipartFile(
+                    "file", "marketplace-master.xlsx", "application/xlsx", output.toByteArray()
+            ));
+
+            assertThat(parsed.rows()).singleElement().satisfies(parsedRow -> {
+                assertThat(parsedRow.discogsType()).isEqualTo("master");
+                assertThat(parsedRow.discogsId()).isEqualTo(875660L);
+                assertThat(parsedRow.hyperlinkUrl()).isEqualTo(
+                        "https://www.discogs.com/es/sell/list?master_id=875660");
+                assertThat(parsedRow.visibleCellValue()).isEqualTo("Marketplace listing");
+                assertThat(parsedRow.urlSource()).isEqualTo("hyperlink");
+                assertThat(parsedRow.normalizedDiscogsUrl())
+                        .isEqualTo("https://www.discogs.com/master/875660");
             });
         }
     }

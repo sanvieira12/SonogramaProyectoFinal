@@ -2,6 +2,7 @@ package com.sonograma.service;
 
 import com.sonograma.entity.Disco;
 import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoDisco;
@@ -29,6 +30,7 @@ public class DiscogsCatalogStockService {
     private final DiscoQrCopyService qrCopyService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final EntityManager entityManager;
+    private final DiscoEstadoService discoEstadoService;
 
     @Transactional
     public ReceiptResult receive(ReceiptCommand command) {
@@ -50,11 +52,17 @@ public class DiscogsCatalogStockService {
         disco.setDiscogsUrl(canonicalReleaseUrl(command.discogsReleaseId()));
 
         int previousAvailable = isNew ? 0 : availableStock(disco);
-        int resultingAvailable = previousAvailable + command.incomingCopies();
+        int incomingAvailable = command.incomingCopyState() == EstadoCopiaDisco.DISPONIBLE
+                ? command.incomingCopies() : 0;
+        int resultingAvailable = previousAvailable + incomingAvailable;
         disco.setCantidadCopias(resultingAvailable);
         if (!isNew) disco.setFechaActualizacion(LocalDateTime.now());
         disco = discoRepository.save(disco);
         qrCopyService.synchronizeAvailableCopies(disco, resultingAvailable);
+        if (command.incomingCopyState() == EstadoCopiaDisco.VENDIDO) {
+            qrCopyService.addCopies(disco, command.incomingCopies(), EstadoCopiaDisco.VENDIDO);
+        }
+        discoEstadoService.aplicar(disco);
         disco = discoRepository.save(disco);
         preVentaCodeMatcher.linkPendingPreSales(disco);
 
@@ -133,7 +141,6 @@ public class DiscogsCatalogStockService {
         }
         if (!blank(metadata.procedencia())) disco.setProcedencia(metadata.procedencia());
         if (!blank(metadata.notas())) disco.setNotas(mergeNotes(disco.getNotas(), metadata.notas()));
-        disco.setEstado(EstadoDisco.DISPONIBLE);
     }
 
     private int availableStock(Disco disco) {
@@ -160,6 +167,9 @@ public class DiscogsCatalogStockService {
         if (command.incomingCopies() < 1) {
             throw new IllegalArgumentException("La cantidad de copias debe ser mayor a cero.");
         }
+        if (command.incomingCopyState() == null) {
+            throw new IllegalArgumentException("El estado de la copia entrante es obligatorio.");
+        }
         if (command.metadata() == null || blank(command.metadata().artista()) || blank(command.metadata().album())) {
             throw new IllegalArgumentException("No se pudo obtener metadata válida de Discogs para crear el producto.");
         }
@@ -180,7 +190,16 @@ public class DiscogsCatalogStockService {
 
     public record ReceiptResult(Disco disco, ProductStatus productStatus, int addedCopies, int resultingAvailableCopies) {}
 
-    public record ReceiptCommand(Long discogsReleaseId, int incomingCopies, DiscogsMetadata metadata) {}
+    public record ReceiptCommand(
+            Long discogsReleaseId,
+            int incomingCopies,
+            DiscogsMetadata metadata,
+            EstadoCopiaDisco incomingCopyState
+    ) {
+        public ReceiptCommand(Long discogsReleaseId, int incomingCopies, DiscogsMetadata metadata) {
+            this(discogsReleaseId, incomingCopies, metadata, EstadoCopiaDisco.DISPONIBLE);
+        }
+    }
 
     public record DiscogsMetadata(
             String artista, String album, String genero, String selloDiscografico, Integer anio,
