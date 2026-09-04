@@ -129,6 +129,8 @@ public class DeudaService {
         Deuda deuda = deudaRepository.findById(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
+        recalcularEstado(deuda);
+        validarMontoPagadoNoEditable(deuda, request);
         aplicarRequest(deuda, request, false);
         deuda.setMontoPagadoInicial(inicialDesdeMontoActual(deuda));
         recalcularEstado(deuda);
@@ -445,6 +447,14 @@ public class DeudaService {
         if (deuda.getFechaVenta() == null) deuda.setFechaVenta(deuda.getFechaDeuda());
         if (deuda.getFechaCreacion() == null) deuda.setFechaCreacion(LocalDateTime.now());
         deuda.setUpdatedAt(LocalDateTime.now());
+    }
+
+    private void validarMontoPagadoNoEditable(Deuda deuda, DeudaRequestDTO request) {
+        if (request.getMontoPagado() == null) return;
+        BigDecimal montoPagadoActual = Objects.requireNonNullElse(deuda.getMontoPagado(), BigDecimal.ZERO);
+        if (request.getMontoPagado().compareTo(montoPagadoActual) != 0) {
+            throw new NegocioException("Los pagos deben registrarse mediante la opción Registrar pago");
+        }
     }
 
     private EstadoPago estadoDesdeMontos(BigDecimal total, BigDecimal pagado) {

@@ -113,4 +113,33 @@ describe('Deudas deletion flow', () => {
     resolveDelete()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
+
+  it('keeps the paid amount read-only and out of the generic update payload', async () => {
+    api.deudas.actualizar.mockResolvedValue(debt)
+    render(<Deudas />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+
+    const paidInput = screen.getByDisplayValue('500')
+    expect(paidInput).toHaveAttribute('readonly')
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar deuda' }))
+
+    await waitFor(() => expect(api.deudas.actualizar).toHaveBeenCalled())
+    expect(api.deudas.actualizar.mock.calls[0][1]).not.toHaveProperty('montoPagado')
+  })
+
+  it('keeps Registrar pago as the dedicated payment endpoint', async () => {
+    api.deudas.registrarPago.mockResolvedValue(debt)
+    render(<Deudas />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Pago' }).at(-1))
+    fireEvent.change(screen.getByPlaceholderText(/Máx\./), { target: { value: '1500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar pago' }))
+
+    await waitFor(() => expect(api.deudas.registrarPago).toHaveBeenCalledWith(
+      7, 1500, null, null, expect.any(String),
+    ))
+  })
 })

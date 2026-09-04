@@ -341,6 +341,46 @@ class VentaServiceTest {
         assertThat(libro.get(1).getMontoMovimiento()).isEqualByComparingTo("400");
     }
 
+    @Test
+    void obtenerLibroIncluyePagoDeDeudaAunqueLaDeudaYaEsteSaldada() {
+        Cliente cliente = cliente(2L);
+        Venta venta = Venta.builder()
+                .idVenta(201L)
+                .cliente(cliente)
+                .fechaVenta(LocalDateTime.of(2026, 6, 1, 10, 0))
+                .totalFinal(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("1000"))
+                .montoDeuda(BigDecimal.ZERO)
+                .build();
+        Deuda deuda = Deuda.builder()
+                .idDeuda(301L)
+                .venta(venta)
+                .cliente(cliente)
+                .montoTotal(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("1000"))
+                .montoPendiente(BigDecimal.ZERO)
+                .estadoPago(com.sonograma.enums.EstadoPago.PAGADO)
+                .activa(false)
+                .build();
+        PagoDeuda pago = PagoDeuda.builder()
+                .idPagoDeuda(402L)
+                .deuda(deuda)
+                .monto(new BigDecimal("600"))
+                .fechaPago(LocalDate.of(2026, 6, 2))
+                .build();
+
+        when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of(venta));
+        when(envioRepository.findByVentaIdVenta(201L)).thenReturn(Optional.empty());
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago));
+
+        var libro = ventaService.obtenerLibro(null, null, null, null);
+
+        assertThat(libro).anySatisfy(row -> {
+            assertThat(row.getTipoMovimiento()).isEqualTo("PAGO_DEUDA");
+            assertThat(row.getMontoMovimiento()).isEqualByComparingTo("600");
+        });
+    }
+
     private static Cliente cliente(Long id) {
         Cliente cliente = new Cliente();
         cliente.setIdCliente(id);

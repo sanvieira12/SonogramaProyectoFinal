@@ -8,6 +8,7 @@ import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.dto.PagoDeudaDTO;
+import com.sonograma.dto.DeudaRequestDTO;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
@@ -221,12 +222,70 @@ class DeudaServiceTest {
         assertThat(completoConBoleta.getEstadoPago()).isEqualTo("PAGADO");
         assertThat(pagos).extracting(PagoDeuda::getNumeroRecibo)
                 .containsExactly("1258", null, "1320");
+        assertThat(pagos).extracting(PagoDeuda::getMonto)
+                .containsExactly(new BigDecimal("1000"), new BigDecimal("500"), new BigDecimal("1500"));
+        assertThat(pagos).allSatisfy(pago -> assertThat(pago.getDeuda()).isSameAs(deuda));
         assertThat(completoConBoleta.getPagos()).extracting(PagoDeudaDTO::getNumeroRecibo)
                 .containsExactly("1258", null, "1320");
 
         service.registrarPago(1L, new BigDecimal("1500"), null, "1320", "payment-3");
 
         assertThat(pagos).hasSize(3);
+    }
+
+    @Test
+    void actualizarNoPermiteCambiarMontoPagadoNiCrearPago() {
+        Cliente cliente = cliente(2L, "Cliente");
+        Deuda deuda = Deuda.builder().idDeuda(2L).cliente(cliente).activa(true)
+                .montoTotal(new BigDecimal("2000")).montoPagadoInicial(new BigDecimal("500"))
+                .montoPagado(new BigDecimal("500")).montoPendiente(new BigDecimal("1500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        when(deudaRepository.findById(2L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(2L))
+                .thenReturn(List.of());
+
+        DeudaRequestDTO request = DeudaRequestDTO.builder()
+                .idCliente(2L)
+                .montoTotal(new BigDecimal("2000"))
+                .montoPagado(new BigDecimal("2000"))
+                .estadoPago("PAGADO")
+                .build();
+
+        assertThatThrownBy(() -> service.actualizar(2L, request))
+                .isInstanceOf(com.sonograma.exception.NegocioException.class)
+                .hasMessageContaining("Registrar pago");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("500");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("1500");
+        assertThat(deuda.getEstadoPago()).isEqualTo(EstadoPago.PARCIAL);
+        verify(pagoDeudaRepository, org.mockito.Mockito.never()).save(any(PagoDeuda.class));
+        verify(deudaRepository, org.mockito.Mockito.never()).save(any(Deuda.class));
+    }
+
+    @Test
+    void actualizarNoPuedeMarcarPagadaUnaDeudaSoloCambiandoElEstado() {
+        Cliente cliente = cliente(3L, "Cliente");
+        Deuda deuda = Deuda.builder().idDeuda(3L).cliente(cliente).activa(true)
+                .montoTotal(new BigDecimal("2000")).montoPagadoInicial(new BigDecimal("500"))
+                .montoPagado(new BigDecimal("500")).montoPendiente(new BigDecimal("1500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        when(deudaRepository.findById(3L)).thenReturn(Optional.of(deuda));
+        when(clienteRepository.findById(3L)).thenReturn(Optional.of(cliente));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(3L))
+                .thenReturn(List.of());
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DeudaRequestDTO request = DeudaRequestDTO.builder()
+                .idCliente(3L)
+                .montoTotal(new BigDecimal("2000"))
+                .estadoPago("PAGADO")
+                .build();
+
+        var response = service.actualizar(3L, request);
+
+        assertThat(response.getMontoPagado()).isEqualByComparingTo("500");
+        assertThat(response.getMontoPendiente()).isEqualByComparingTo("1500");
+        assertThat(response.getEstadoPago()).isEqualTo("PARCIAL");
+        verify(pagoDeudaRepository, org.mockito.Mockito.never()).save(any(PagoDeuda.class));
     }
 
     @Test

@@ -81,7 +81,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
   }
 
   function payload() {
-    return {
+    const data = {
       idCliente: form.idCliente ? Number(form.idCliente) : null,
       nombreDeudorManual: form.idCliente ? null : form.nombreDeudorManual || null,
       mailManual: form.mailManual || null,
@@ -89,12 +89,13 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
       ciManual: form.ciManual || null,
       descripcion: form.descripcion || null,
       montoTotal: form.montoTotal ? Number(form.montoTotal) : null,
-      montoPagado: form.montoPagado ? Number(form.montoPagado) : 0,
       fechaDeuda: form.fechaDeuda || null,
       fechaVenta: form.fechaDeuda || null,
       estadoPago: form.estadoPago || null,
       notas: form.notas || null,
     }
+    if (!movimiento?.idDeuda) data.montoPagado = form.montoPagado ? Number(form.montoPagado) : 0
+    return data
   }
 
   async function save(e) {
@@ -210,8 +211,9 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
                 <input type="number" step="0.01" min="0" className="input w-full" value={form.montoTotal} onChange={e => set('montoTotal', e.target.value)} />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Pagado</label>
-                <input type="number" step="0.01" min="0" className="input w-full" value={form.montoPagado} onChange={e => set('montoPagado', e.target.value)} />
+                <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Pagado (historial)</label>
+                <input type="number" step="0.01" min="0" className="input w-full" value={form.montoPagado} readOnly={Boolean(movimiento?.idDeuda)} onChange={e => { if (!movimiento?.idDeuda) set('montoPagado', e.target.value) }} />
+                {movimiento?.idDeuda && <p className="mt-1 text-xs text-slate-400 dark:text-white/60">Los nuevos pagos se registran con “Pago”.</p>}
               </div>
             </div>
             <div>
