@@ -261,21 +261,35 @@ describe('Catalog permanent deletion flow', () => {
     expect(await screen.findByText('Search Result Artist')).toBeInTheDocument()
   })
 
-  it('filters the catalogue by a logical Discogs source without exposing job details', async () => {
+  it('filters the catalogue by a persisted Discogs source without exposing job details', async () => {
     const reused = catalogDisco({ idDisco: 806, artista: 'Producto reutilizado' })
     const newlyCreated = catalogDisco({ idDisco: 1450, artista: 'Producto nuevo' })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
-      { key: 'pin', label: 'Discos PIN', productos: 238 },
+      { key: 'discos pin.xlsx', label: 'Discos PIN.xlsx', productos: 238 },
     ])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([reused, newlyCreated])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: /Discos PIN.*238 productos/i })
+    await screen.findByRole('option', { name: /Discos PIN.xlsx.*238 productos/i })
     expect(screen.queryByRole('option', { name: /Job\s*\d+/i })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'pin' } })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'discos pin.xlsx' } })
 
-    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs).toHaveBeenCalledWith('pin'))
+    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
+      .toHaveBeenCalledWith('discos pin.xlsx'))
     expect(await screen.findByText('Producto reutilizado')).toBeInTheDocument()
     expect(screen.getByText('Producto nuevo')).toBeInTheDocument()
+  })
+
+  it('renders persisted Discogs sources without duplicate names', async () => {
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
+      { key: 'jph para catalogo y web.xlsx', label: 'JPH PARA CATALOGO Y WEB.xlsx', productos: 2 },
+      { key: 'discos pin.xlsx', label: 'Discos PIN.xlsx', productos: 238 },
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    await screen.findByRole('option', { name: /JPH PARA CATALOGO Y WEB\.xlsx.*2 productos/i })
+    expect(screen.getAllByRole('option', { name: /Discos PIN\.xlsx/i })).toHaveLength(1)
+    expect(screen.getByRole('option', { name: 'Todas las importaciones' })).toBeInTheDocument()
   })
 })

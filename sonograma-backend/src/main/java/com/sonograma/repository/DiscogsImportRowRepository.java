@@ -95,6 +95,34 @@ public interface DiscogsImportRowRepository extends JpaRepository<DiscogsImportR
     List<Disco> findDistinctActiveCatalogProductsByJobIds(@Param("jobIds") Collection<Long> jobIds);
 
     @Query("""
+            SELECT DISTINCT p
+            FROM DiscogsImportRow r
+            JOIN r.job j
+            JOIN r.importedCatalogProduct p
+            WHERE LOWER(TRIM(j.nombreArchivo)) = LOWER(TRIM(:source))
+              AND r.status = com.sonograma.enums.DiscogsImportRowStatus.IMPORTED
+              AND p.catalogDeletedAt IS NULL
+            """)
+    List<Disco> findDistinctActiveCatalogProductsBySource(@Param("source") String source);
+
+    @Query("""
+            SELECT new com.sonograma.dto.DiscogsCatalogSourceDTO(
+                LOWER(TRIM(j.nombreArchivo)),
+                MIN(TRIM(j.nombreArchivo)),
+                COUNT(DISTINCT p.idDisco)
+            )
+            FROM DiscogsImportRow r
+            JOIN r.job j
+            JOIN r.importedCatalogProduct p
+            WHERE TRIM(j.nombreArchivo) <> ''
+              AND r.status = com.sonograma.enums.DiscogsImportRowStatus.IMPORTED
+              AND p.catalogDeletedAt IS NULL
+            GROUP BY LOWER(TRIM(j.nombreArchivo))
+            ORDER BY MAX(j.createdAt) DESC
+            """)
+    List<com.sonograma.dto.DiscogsCatalogSourceDTO> findCatalogSources();
+
+    @Query("""
             SELECT new com.sonograma.dto.DiscogsCatalogJobFilterDTO(
                 r.job.idDiscogsImportJob,
                 r.job.nombreArchivo,

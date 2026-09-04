@@ -9,6 +9,7 @@ import com.sonograma.enums.DiscogsImportJobStatus;
 import com.sonograma.enums.DiscogsImportRowStatus;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.TipoDisco;
+import com.sonograma.dto.DiscogsCatalogSourceDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,6 +86,48 @@ class DiscogsCatalogJobFilterRepositoryTest {
         assertThat(filtered).extracting(Disco::getIdDisco)
                 .containsAll(jobProducts.subList(0, 18).stream().map(Disco::getIdDisco).toList());
         assertThat(discoRepository.findAll()).hasSize(239);
+    }
+
+    @Test
+    void catalogSourcesArePersistedNamesDeduplicatedAndFilterable() {
+        DiscogsImportJob pin = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("Discos PIN.xlsx")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        DiscogsImportJob pinReplay = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo(" discos pin.XLSX ")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        DiscogsImportJob jph = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("JPH PARA CATALOGO Y WEB.xlsx")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+        DiscogsImportJob frank = jobRepository.save(DiscogsImportJob.builder()
+                .nombreArchivo("Discos FRANK.xlsx")
+                .status(DiscogsImportJobStatus.COMPLETED)
+                .build());
+
+        Disco pinProduct = discoRepository.save(catalogProduct(2000));
+        Disco jphProduct = discoRepository.save(catalogProduct(2001));
+        Disco frankProduct = discoRepository.save(catalogProduct(2002));
+        rowRepository.saveAll(List.of(
+                importedRow(pin, pinProduct, 2, "NEW_PRODUCT"),
+                importedRow(pinReplay, pinProduct, 2, "EXISTING_PRODUCT"),
+                importedRow(jph, jphProduct, 2, "NEW_PRODUCT"),
+                importedRow(frank, frankProduct, 2, "NEW_PRODUCT")
+        ));
+
+        List<DiscogsCatalogSourceDTO> sources = rowRepository.findCatalogSources();
+
+        assertThat(sources).extracting(DiscogsCatalogSourceDTO::label)
+                .containsExactlyInAnyOrder(
+                        "Discos PIN.xlsx", "JPH PARA CATALOGO Y WEB.xlsx", "Discos FRANK.xlsx");
+        assertThat(sources).extracting(DiscogsCatalogSourceDTO::key)
+                .doesNotHaveDuplicates();
+        assertThat(sources).filteredOn(source -> source.label().equals("Discos PIN.xlsx"))
+                .singleElement().extracting(DiscogsCatalogSourceDTO::productos).isEqualTo(1L);
+        assertThat(rowRepository.findDistinctActiveCatalogProductsBySource("jph para catalogo y web.xlsx"))
+                .extracting(Disco::getIdDisco).containsExactly(jphProduct.getIdDisco());
     }
 
     private Disco catalogProduct(int index) {

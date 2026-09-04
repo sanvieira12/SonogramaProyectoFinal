@@ -37,15 +37,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class DiscoService {
 
-    private static final List<DiscogsCatalogSource> DISCOGS_CATALOG_SOURCES = List.of(
-            new DiscogsCatalogSource("pin", "Discos PIN", List.of(22L, 23L)),
-            new DiscogsCatalogSource("frank", "Discos FRANK", List.of(20L, 21L)),
-            new DiscogsCatalogSource("fede-pintos", "Fede Pintos", List.of(16L)),
-            new DiscogsCatalogSource("catalogo-sc", "Catálogo SC", List.of(19L)),
-            new DiscogsCatalogSource("lvs", "LVS", List.of(14L)),
-            new DiscogsCatalogSource("mati-muten", "Mati Muten", List.of(15L))
-    );
-
     private final DiscoRepository discoRepository;
     private final DiscoQrCopyRepository discoQrCopyRepository;
     private final DetalleVentaRepository detalleVentaRepository;
@@ -101,7 +92,7 @@ public class DiscoService {
         List<Disco> discos = discogsImportJobId == null
                 ? (discogsSource == null || discogsSource.isBlank()
                     ? discoRepository.findAll()
-                    : discogsImportRowRepository.findDistinctActiveCatalogProductsByJobIds(source(discogsSource).jobIds()))
+                    : discogsImportRowRepository.findDistinctActiveCatalogProductsBySource(discogsSource))
                 : discogsImportRowRepository.findDistinctActiveCatalogProductsByJobId(discogsImportJobId);
         return discos.stream()
                 .map(this::toDTO)
@@ -115,22 +106,8 @@ public class DiscoService {
 
     @Transactional(readOnly = true)
     public List<DiscogsCatalogSourceDTO> listarFuentesImportacionDiscogs() {
-        return DISCOGS_CATALOG_SOURCES.stream()
-                .map(source -> new DiscogsCatalogSourceDTO(
-                        source.key(), source.label(),
-                        discogsImportRowRepository.findDistinctActiveCatalogProductsByJobIds(source.jobIds()).size()
-                ))
-                .toList();
+        return discogsImportRowRepository.findCatalogSources();
     }
-
-    private DiscogsCatalogSource source(String key) {
-        return DISCOGS_CATALOG_SOURCES.stream()
-                .filter(source -> source.key().equals(key))
-                .findFirst()
-                .orElseThrow(() -> new NegocioException("Fuente Discogs no válida: " + key));
-    }
-
-    private record DiscogsCatalogSource(String key, String label, List<Long> jobIds) {}
 
     public List<DiscoResponseDTO> obtenerDisponibles() {
         return discoRepository.findAll().stream()
