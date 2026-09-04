@@ -105,6 +105,10 @@ function catalogCondition(disco) {
   return disco?.manualBatchCondicionFisica ?? disco?.condicionFisica
 }
 
+function catalogCode(disco) {
+  return disco?.manualBatchCustomerCode ?? disco?.codigoInterno
+}
+
 function isManualSource(source) {
   return source?.type === 'MANUAL' || String(source?.key || '').toLowerCase().startsWith('manual:')
 }
@@ -271,7 +275,7 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
           <div>
             <h2 className="font-bold text-slate-900 dark:text-white">{disco.album}</h2>
             <p className="text-sm text-slate-500 dark:text-stone-400">{disco.artista}</p>
-            <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Código: {disco.codigoInterno || '—'} · Origen: {sourceLabel}</p>
+            <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Código: {catalogCode(disco) || '—'} · Origen: {sourceLabel}</p>
           </div>
           <button type="button" onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
         </div>
@@ -340,7 +344,7 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
               <div className="mt-5 grid sm:grid-cols-2 gap-3 text-left">
                 {[
                   ['Álbum', disco.album],
-                  ['Código/SKU', disco.codigoInterno],
+                  ['Código/SKU', catalogCode(disco)],
                   ['Copia', selectedCopy.copyNumber ? `Copia ${selectedCopy.copyNumber}` : null],
                   ['Estado', selectedCopy.estado || '—'],
                   ['Código QR', selectedCopy.codigoQr],
@@ -535,7 +539,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
               ['Precio venta',  sellingPriceLabel(catalogPrice(disco))],
               ['Stock actual',  disco.cantidadCopias ?? 0],
-              ['Código interno', disco.codigoInterno],
+              ['Código', catalogCode(disco)],
             ].map(([label, value]) => (
               <div key={label} className="bg-slate-50 dark:bg-stone-950 border border-slate-100 dark:border-stone-800 rounded-lg px-3 py-2">
                 <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-0.5">{label}</p>
@@ -612,7 +616,7 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
   }
 
   const fields = [
-    ['Código', disco.codigoInterno],
+    ['Código', catalogCode(disco)],
     ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
     ['Venta', sellingPriceLabel(catalogPrice(disco))],
     ['Stock', disco.cantidadCopias ?? 0],

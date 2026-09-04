@@ -52,6 +52,27 @@ class DiscogsApiClientTest {
     }
 
     @Test
+    void prefersFirstDiscogsStyleForGenreAndFallsBackToFirstGenre() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/releases/703", exchange -> respond(exchange, 200, """
+                {"title":"Styled","genres":["Electronic"],"styles":["Tech House","Minimal Techno"]}
+                """));
+        server.createContext("/releases/704", exchange -> respond(exchange, 200, """
+                {"title":"Genre fallback","genres":["Electronic"],"styles":[]}
+                """));
+        server.createContext("/releases/705", exchange -> respond(exchange, 200, """
+                {"title":"Null fallback","genres":["Electronic"],"styles":null}
+                """));
+        server.start();
+
+        DiscogsApiClient client = client();
+
+        assertThat(client.fetch("release", 703).genre()).isEqualTo("Tech House");
+        assertThat(client.fetch("release", 704).genre()).isEqualTo("Electronic");
+        assertThat(client.fetch("release", 705).genre()).isEqualTo("Electronic");
+    }
+
+    @Test
     void marketplaceMasterReferenceUsesTheExistingMasterResolutionPath() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/masters/875660", exchange ->

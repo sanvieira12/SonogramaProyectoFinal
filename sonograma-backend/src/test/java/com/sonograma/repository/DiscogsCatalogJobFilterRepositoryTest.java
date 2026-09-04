@@ -10,6 +10,7 @@ import com.sonograma.enums.DiscogsImportRowStatus;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.TipoDisco;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
+import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.enums.DiscogsManualBatchStatus;
@@ -150,7 +151,7 @@ class DiscogsCatalogJobFilterRepositoryTest {
     @Test
     void manualSourcesCountPhysicalCopiesAndFilterByExactBatchMembership() {
         DiscogsManualBatch first = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.OPEN));
-        DiscogsManualBatch second = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.FINALIZED));
+        DiscogsManualBatch second = manualBatchRepository.save(manualBatch("SV3", DiscogsManualBatchStatus.FINALIZED));
         Disco shared = discoRepository.save(catalogProduct(3000));
         Disco onlyInSecond = discoRepository.save(catalogProduct(3001));
 
@@ -178,13 +179,15 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .filteredOn(source -> source.batchId().equals(second.getId()))
                 .singleElement()
                 .extracting(DiscogsCatalogSourceDTO::label)
-                .isEqualTo("JPH · 2 discos · Finalizada");
+                .isEqualTo("SV3 · 2 discos · Finalizada");
         assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
                 .extracting(dto -> dto.getIdDisco())
                 .containsExactly(shared.getIdDisco());
         assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
                 .singleElement()
                 .satisfies(dto -> {
+                    assertThat(dto.getManualBatchCustomerCode()).isEqualTo("JPH");
+                    assertThat(dto.getCodigoInterno()).isEqualTo("INTERNAL-3000");
                     assertThat(dto.getManualBatchPrecioVenta()).isNull();
                     assertThat(dto.getManualBatchCondicionFisica()).isNull();
                 });
@@ -192,9 +195,16 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .filteredOn(dto -> dto.getIdDisco().equals(onlyInSecond.getIdDisco()))
                 .singleElement()
                 .satisfies(dto -> {
+                    assertThat(dto.getManualBatchCustomerCode()).isEqualTo("SV3");
+                    assertThat(dto.getCodigoInterno()).isEqualTo("INTERNAL-3001");
                     assertThat(dto.getManualBatchPrecioVenta()).isEqualByComparingTo("4000");
                     assertThat(dto.getManualBatchCondicionFisica()).isEqualTo("MINT");
                 });
+        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
+                .filteredOn(dto -> dto.getIdDisco().equals(shared.getIdDisco()))
+                .singleElement()
+                .extracting(DiscoResponseDTO::getManualBatchCustomerCode)
+                .isEqualTo("SV3");
         assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
                 .extracting(dto -> dto.getIdDisco())
                 .containsExactlyInAnyOrder(shared.getIdDisco(), onlyInSecond.getIdDisco());
@@ -227,6 +237,7 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .artista("Artista " + index)
                 .album("Álbum " + index)
                 .discogsReleaseId(100_000L + index)
+                .codigoInterno("INTERNAL-" + index)
                 .estado(EstadoDisco.DISPONIBLE)
                 .condicion(CondicionDisco.USADO)
                 .tipoDisco(TipoDisco.VINILO)

@@ -38,7 +38,7 @@ class DiscogsManualBatchExcelServiceTest {
     @Test
     void exportsOneRowPerExactCopyWithCanonicalColumnsAndValues() throws Exception {
         DiscogsManualBatch batch = batch(15L, DiscogsManualBatchStatus.FINALIZED);
-        Disco first = product(10L, "https://www.discogs.com/release/111", "House", "INTERNAL-1", EstadoDisco.VENDIDO);
+        Disco first = product(10L, "https://www.discogs.com/release/111", "Tech House", "INTERNAL-1", EstadoDisco.VENDIDO);
         Disco second = product(20L, null, "Techno", "INTERNAL-2", EstadoDisco.DISPONIBLE);
         DiscoQrCopy firstAvailable = copy(101L, first, 1, new BigDecimal("937.50"), "VG+", EstadoCopiaDisco.DISPONIBLE);
         DiscoQrCopy firstSold = copy(102L, first, 2, null, "ROTO", EstadoCopiaDisco.VENDIDO);
@@ -70,13 +70,13 @@ class DiscogsManualBatchExcelServiceTest {
             assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("$937,50");
             assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("VG+");
             assertThat(sheet.getRow(1).getCell(3).getStringCellValue()).isBlank();
-            assertThat(sheet.getRow(1).getCell(4).getStringCellValue()).isEqualTo("House");
+            assertThat(sheet.getRow(1).getCell(4).getStringCellValue()).isEqualTo("Tech House");
             assertThat(sheet.getRow(1).getCell(5).getStringCellValue()).isEqualTo("JPH");
 
             assertThat(sheet.getRow(2).getCell(1).getStringCellValue()).isEqualTo("SIN PRECIO");
             assertThat(sheet.getRow(2).getCell(2).getStringCellValue()).isEqualTo("ROTO");
             assertThat(sheet.getRow(2).getCell(3).getStringCellValue()).isEqualTo("VENDIDO");
-            assertThat(sheet.getRow(2).getCell(4).getStringCellValue()).isEqualTo("House");
+            assertThat(sheet.getRow(2).getCell(4).getStringCellValue()).isEqualTo("Tech House");
             assertThat(sheet.getRow(3).getCell(0).getStringCellValue())
                     .isEqualTo("https://www.discogs.com/release/222");
             assertThat(sheet.getRow(3).getCell(1).getStringCellValue()).isEqualTo("$625");

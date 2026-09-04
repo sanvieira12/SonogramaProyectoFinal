@@ -162,7 +162,7 @@ public class DiscogsApiClient {
                     firstArtist(json),
                     text(json, "title"),
                     positiveInt(json, "year"),
-                    firstText(json.path("genres")),
+                    firstStyleOrGenre(json),
                     firstLabel(json),
                     firstCatalogNumber(json),
                     text(json, "country"),
@@ -363,6 +363,13 @@ public class DiscogsApiClient {
 
     private String firstText(JsonNode array) {
         return array.isArray() && !array.isEmpty() ? array.get(0).asText(null) : null;
+    }
+
+    private String firstStyleOrGenre(JsonNode json) {
+        String firstStyle = firstText(json.path("styles"));
+        return firstStyle == null || firstStyle.isBlank()
+                ? firstText(json.path("genres"))
+                : firstStyle;
     }
 
     private String text(JsonNode json, String field) {

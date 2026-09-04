@@ -339,6 +339,31 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.getByRole('button', { name: 'Descargar ZIP' })).toBeInTheDocument()
   })
 
+  it('shows the selected manual batch customer code without replacing the internal code', async () => {
+    const product = catalogDisco({
+      idDisco: 508,
+      codigoInterno: 'Z-2007-1019255',
+      manualBatchCustomerCode: 'SV3',
+      artista: 'Z@P',
+      album: 'Palvince EP',
+      genero: 'Tech House',
+    })
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
+      { type: 'MANUAL', key: 'manual:51', label: 'SV3 · 1 discos · En curso', customerCode: 'SV3', status: 'OPEN', batchId: 51, copyCount: 1 },
+    ])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([product])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByRole('option', { name: 'SV3 · 1 discos · En curso' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:51' } })
+    const artist = await screen.findByText('Z@P')
+    fireEvent.mouseEnter(artist.closest('tr'))
+
+    expect(await screen.findByText('Tech House')).toBeInTheDocument()
+    expect(screen.getByText('SV3', { exact: true })).toBeInTheDocument()
+    expect(screen.queryByText('Código: Z-2007-1019255')).not.toBeInTheDocument()
+  })
+
   it('exports an OPEN manual batch ZIP and triggers a browser download', async () => {
     const blob = new Blob(['zip'], { type: 'application/zip' })
     api.importaciones.discogsManualBatchZip.mockResolvedValue({

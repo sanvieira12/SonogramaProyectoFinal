@@ -33,6 +33,8 @@ public class DiscoResponseDTO {
     private String numeroFacturaCompra;
     private LocalDate fechaFacturaCompra;
     private BigDecimal precioVenta;
+    /** Customer-facing code for the selected manual batch; null outside that scope. */
+    private String manualBatchCustomerCode;
     private BigDecimal manualBatchPrecioVenta;
     private String manualBatchCondicionFisica;
     private String pricingMode;

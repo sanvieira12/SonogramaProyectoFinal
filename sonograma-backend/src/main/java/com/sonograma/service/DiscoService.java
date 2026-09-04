@@ -6,6 +6,7 @@ import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.exception.ConflictoNegocioException;
@@ -127,6 +128,8 @@ public class DiscoService {
     }
 
     private List<DiscoResponseDTO> obtenerPorBatchManual(Long batchId) {
+        DiscogsManualBatch batch = discogsManualBatchRepository.findById(batchId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Batch Discogs", batchId));
         List<DiscoQrCopy> copies = discoQrCopyRepository.findByManualDiscogsBatchIdOrderByCopyNumber(batchId);
         if (copies.isEmpty()) return List.of();
 
@@ -137,12 +140,16 @@ public class DiscoService {
         java.util.Map<Long, List<DiscoQrCopy>> copiesByProduct = copies.stream()
                 .collect(Collectors.groupingBy(DiscoQrCopy::getIdDisco));
         return discoRepository.findAllById(productIds).stream()
-                .map(disco -> toDTO(disco, copiesByProduct.getOrDefault(disco.getIdDisco(), List.of())))
+                .map(disco -> toDTO(
+                        disco,
+                        copiesByProduct.getOrDefault(disco.getIdDisco(), List.of()),
+                        batch.getCustomerCode()))
                 .collect(Collectors.toList());
     }
 
-    private DiscoResponseDTO toDTO(Disco disco, List<DiscoQrCopy> batchCopies) {
+    private DiscoResponseDTO toDTO(Disco disco, List<DiscoQrCopy> batchCopies, String customerCode) {
         DiscoResponseDTO dto = toDTO(disco);
+        dto.setManualBatchCustomerCode(customerCode);
         if (batchCopies.size() == 1) {
             DiscoQrCopy copy = batchCopies.get(0);
             dto.setManualBatchPrecioVenta(copy.getPrecioVenta());
