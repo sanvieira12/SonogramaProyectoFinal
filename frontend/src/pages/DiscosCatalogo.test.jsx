@@ -372,6 +372,38 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.getByText('Release from second batch')).toBeInTheDocument()
   })
 
+  it('keeps manual customer results visible when searching within the logical source', async () => {
+    const product = catalogDisco({
+      idDisco: 603,
+      artista: 'Manual customer release',
+      manualBatchCustomerCode: 'JS',
+    })
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
+      type: 'MANUAL',
+      key: 'manual:customer:JS',
+      label: 'JS · 1 discos · Finalizada',
+      customerCode: 'JS',
+      status: 'FINALIZED',
+      batchId: 13,
+      copyCount: 1,
+    }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([product])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    await screen.findByRole('option', { name: 'JS · 1 discos · Finalizada' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), {
+      target: { value: 'manual:customer:JS' },
+    })
+    await screen.findByText('Manual customer release')
+    fireEvent.change(screen.getByPlaceholderText('Buscar disco, artista o código...'), {
+      target: { value: ' js ' },
+    })
+
+    expect(screen.getByText('Manual customer release')).toBeInTheDocument()
+    expect(discoService.buscar).not.toHaveBeenCalled()
+  })
+
   it('collapses four legacy JS technical entries into one logical selector', async () => {
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
       { type: 'MANUAL', key: 'manual:101', customerCode: 'JS', status: 'FINALIZED', batchId: 101, copyCount: 1 },

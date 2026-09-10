@@ -247,6 +247,82 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .containsExactly(product.getIdDisco());
     }
 
+    @Test
+    void generalSearchPrioritizesExactManualCustomerMembershipAcrossBatchesWithoutDuplicates() {
+        DiscogsManualBatch jsFinalized = manualBatch("JS", DiscogsManualBatchStatus.FINALIZED);
+        DiscogsManualBatch jsOpen = manualBatch(" js ", DiscogsManualBatchStatus.OPEN);
+        DiscogsManualBatch sv3Finalized = manualBatch("SV3", DiscogsManualBatchStatus.FINALIZED);
+
+        Disco jsOnly = discoRepository.save(catalogProduct(3200));
+        Disco shared = discoRepository.save(catalogProduct(3201));
+        Disco sv3Only = discoRepository.save(catalogProduct(3202));
+        Disco accidentalJs = catalogProduct(3203);
+        accidentalJs.setArtista("Artist JS accidental");
+        accidentalJs.setCodigoInterno("UNRELATED-3203");
+        accidentalJs = discoRepository.save(accidentalJs);
+        Disco ordinaryJs2 = catalogProduct(3204);
+        ordinaryJs2.setCodigoInterno("JS2-3204");
+        ordinaryJs2 = discoRepository.save(ordinaryJs2);
+
+        copyRepository.saveAll(List.of(
+                copy(jsOnly, jsFinalized, 1, "search-js-only", "1000", "VG"),
+                copy(shared, jsFinalized, 1, "search-js-shared-finalized", "1000", "VG"),
+                copy(shared, jsOpen, 2, "search-js-shared-open", "1000", "VG"),
+                copy(shared, sv3Finalized, 3, "search-sv3-shared", "1000", "VG"),
+                copy(sv3Only, sv3Finalized, 1, "search-sv3-only", "1000", "VG")
+        ));
+
+        List<DiscoResponseDTO> jsResults = discoService.buscar(" JS ");
+        assertThat(jsResults).extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactlyInAnyOrder(jsOnly.getIdDisco(), shared.getIdDisco())
+                .doesNotContain(accidentalJs.getIdDisco(), ordinaryJs2.getIdDisco(), sv3Only.getIdDisco());
+        assertThat(jsResults).extracting(DiscoResponseDTO::getIdDisco).doesNotHaveDuplicates();
+        assertThat(jsResults).allSatisfy(result ->
+                assertThat(result.getManualBatchCustomerCode()).isEqualTo("JS"));
+
+        List<DiscoResponseDTO> sv3Results = discoService.buscar(" Sv3 ");
+        assertThat(sv3Results).extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactlyInAnyOrder(shared.getIdDisco(), sv3Only.getIdDisco())
+                .doesNotContain(jsOnly.getIdDisco(), accidentalJs.getIdDisco());
+        assertThat(sv3Results).extracting(DiscoResponseDTO::getIdDisco).doesNotHaveDuplicates();
+        assertThat(sv3Results).allSatisfy(result ->
+                assertThat(result.getManualBatchCustomerCode()).isEqualTo("SV3"));
+
+        // An unknown code keeps the pre-existing ordinary product-field search.
+        assertThat(discoService.buscar("JS2"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(ordinaryJs2.getIdDisco());
+        assertThat(discoService.buscar("Artist JS accidental"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(accidentalJs.getIdDisco());
+    }
+
+    @Test
+    void ordinarySearchFieldsRemainAvailableForNonCustomerQueries() {
+        Disco fp = catalogProduct(3210);
+        fp.setCodigoInterno("FP-3210");
+        fp.setArtista("Ordinary Artist");
+        fp.setAlbum("Ordinary Album");
+        fp = discoRepository.save(fp);
+
+        Disco lvs = catalogProduct(3211);
+        lvs.setCodigoInterno("LVS-3211");
+        lvs = discoRepository.save(lvs);
+
+        assertThat(discoService.buscar("FP"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(fp.getIdDisco());
+        assertThat(discoService.buscar("LVS"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(lvs.getIdDisco());
+        assertThat(discoService.buscar("Ordinary Artist"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(fp.getIdDisco());
+        assertThat(discoService.buscar("Ordinary Album"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(fp.getIdDisco());
+    }
+
     private DiscogsManualBatch manualBatch(String customerCode, DiscogsManualBatchStatus status) {
         return manualBatchRepository.save(DiscogsManualBatch.builder()
                 .customerCode(customerCode)

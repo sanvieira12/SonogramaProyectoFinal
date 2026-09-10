@@ -26,6 +26,8 @@ public interface DiscogsManualBatchRepository extends JpaRepository<DiscogsManua
             """)
     List<DiscogsManualBatch> findAllWithCopiesForCatalog();
 
+    boolean existsByNormalizedCustomerCode(String normalizedCustomerCode);
+
     Optional<DiscogsManualBatch> findByNormalizedCustomerCodeAndStatus(
             String normalizedCustomerCode,
             DiscogsManualBatchStatus status

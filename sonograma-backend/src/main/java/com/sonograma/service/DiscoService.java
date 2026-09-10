@@ -301,6 +301,12 @@ public class DiscoService {
         if (query.isBlank()) {
             return obtenerTodos();
         }
+        String normalizedCustomerCode = DiscogsManualBatchService.normalizeCustomerCode(q);
+        if (discogsManualBatchRepository.existsByNormalizedCustomerCode(normalizedCustomerCode)) {
+            return discoRepository.findAllByManualCustomerCode(normalizedCustomerCode).stream()
+                    .map(disco -> toDTO(disco, List.of(), normalizedCustomerCode))
+                    .collect(Collectors.toList());
+        }
         return discoRepository.findAll().stream()
                 .filter(d -> coincide(d, query))
                 .map(this::toDTO)

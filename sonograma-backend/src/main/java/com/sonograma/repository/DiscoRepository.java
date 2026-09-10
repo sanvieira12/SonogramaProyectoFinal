@@ -69,6 +69,25 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
     @Query("SELECT d FROM Disco d WHERE d.discogsReleaseId = :releaseId AND d.catalogDeletedAt IS NULL")
     List<Disco> findAllByDiscogsReleaseId(@Param("releaseId") Long releaseId);
 
+    /**
+     * Returns each active catalogue product once when one of its physical copies
+     * belongs to any technical manual Discogs batch for this customer.
+     */
+    @Query("""
+        SELECT d
+        FROM Disco d
+        WHERE d.catalogDeletedAt IS NULL
+          AND EXISTS (
+              SELECT c.id
+              FROM DiscoQrCopy c
+              JOIN c.manualDiscogsBatch b
+              WHERE c.idDisco = d.idDisco
+                AND b.normalizedCustomerCode = :normalizedCustomerCode
+          )
+        ORDER BY d.idDisco
+        """)
+    List<Disco> findAllByManualCustomerCode(@Param("normalizedCustomerCode") String normalizedCustomerCode);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT d FROM Disco d WHERE d.discogsReleaseId = :releaseId AND d.catalogDeletedAt IS NULL")
     List<Disco> findAllByDiscogsReleaseIdForUpdate(@Param("releaseId") Long releaseId);

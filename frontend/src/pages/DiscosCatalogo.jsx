@@ -1010,7 +1010,7 @@ export default function DiscosCatalogo() {
     const coincideEstado = filtroEstado === 'TODOS' || d.estado === filtroEstado
     const coincideCondicion = filtroCondicion === 'TODOS' || condicionNormalizada(d) === filtroCondicion
     const query = busqueda.trim().toLowerCase()
-    const coincideBusqueda = !query || [d.artista, d.album, d.codigoInterno]
+    const coincideBusqueda = !query || [d.artista, d.album, d.codigoInterno, d.manualBatchCustomerCode]
       .some(value => String(value || '').toLowerCase().includes(query))
     return coincideEstado && coincideCondicion && coincideBusqueda
   })
