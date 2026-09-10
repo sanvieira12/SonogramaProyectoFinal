@@ -9,24 +9,22 @@ import org.springframework.data.repository.query.Param;
 
 import jakarta.persistence.LockModeType;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface DiscogsManualBatchRepository extends JpaRepository<DiscogsManualBatch, Long> {
 
+    /**
+     * Loads the technical batches and their physical-copy memberships so the
+     * catalogue can project one logical source per normalized customer code.
+     */
     @Query("""
-            SELECT new com.sonograma.dto.DiscogsCatalogSourceDTO(
-                b.customerCode,
-                COUNT(c.id),
-                b.status,
-                b.id,
-                b.createdAt
-            )
+            SELECT DISTINCT b
             FROM DiscogsManualBatch b
-            LEFT JOIN b.copies c
-            GROUP BY b.id, b.customerCode, b.status, b.createdAt
+            LEFT JOIN FETCH b.copies
             ORDER BY b.createdAt DESC
             """)
-    java.util.List<com.sonograma.dto.DiscogsCatalogSourceDTO> findCatalogSources();
+    List<DiscogsManualBatch> findAllWithCopiesForCatalog();
 
     Optional<DiscogsManualBatch> findByNormalizedCustomerCodeAndStatus(
             String normalizedCustomerCode,

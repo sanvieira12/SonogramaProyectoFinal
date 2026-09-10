@@ -121,6 +121,72 @@ function manualSourceLabel(source) {
   return `${source.customerCode || ''} · ${count} discos · ${status}`
 }
 
+function normalizedManualCustomerCode(source) {
+  const customerCode = String(source?.customerCode || '').trim()
+  if (customerCode) return customerCode.toUpperCase()
+  const key = String(source?.key || '')
+  if (!key.toLowerCase().startsWith('manual:customer:')) return ''
+  return key.slice('manual:customer:'.length).trim().toUpperCase()
+}
+
+function logicalManualSource(customerCode, sources) {
+  const copies = sources.reduce((total, item) =>
+    total + Number(item.copyCount ?? item.productos ?? 0), 0)
+  const representative = sources.find(item => item.status === 'OPEN') || sources[0]
+  return {
+    ...representative,
+    key: `manual:customer:${customerCode}`,
+    type: 'MANUAL',
+    label: null,
+    customerCode,
+    status: sources.some(item => item.status === 'OPEN') ? 'OPEN' : 'FINALIZED',
+    batchId: representative?.batchId,
+    productos: copies,
+    copyCount: copies,
+  }
+}
+
+/**
+ * Keep the selector safe when an older backend still returns technical
+ * manual rows. A current logical row wins; otherwise legacy rows with the
+ * same customer code are projected into one logical option in the UI.
+ */
+function deduplicateManualSources(sources) {
+  const list = Array.isArray(sources) ? sources : []
+  const logicalCustomers = new Set(list
+    .filter(source => String(source?.key || '').toLowerCase().startsWith('manual:customer:'))
+    .map(normalizedManualCustomerCode)
+    .filter(Boolean))
+  const renderedLogicalCustomers = new Set()
+  const legacyByCustomer = new Map()
+  const result = []
+
+  list.forEach(source => {
+    if (!isManualSource(source)) {
+      result.push(source)
+      return
+    }
+    const customerCode = normalizedManualCustomerCode(source)
+    const isLogical = String(source?.key || '').toLowerCase().startsWith('manual:customer:')
+    if (!customerCode || logicalCustomers.has(customerCode)) {
+      if (isLogical && !renderedLogicalCustomers.has(customerCode)) {
+        renderedLogicalCustomers.add(customerCode)
+        result.push(source)
+      }
+      return
+    }
+    const existing = legacyByCustomer.get(customerCode) || []
+    legacyByCustomer.set(customerCode, [...existing, source])
+  })
+
+  legacyByCustomer.forEach((customerSources, customerCode) => {
+    result.push(customerSources.length === 1
+      ? customerSources[0]
+      : logicalManualSource(customerCode, customerSources))
+  })
+  return result
+}
+
 function EmptyState({ hayFiltro }) {
   return (
     <div className="text-center py-20">
@@ -747,7 +813,8 @@ export default function DiscosCatalogo() {
 
   async function cargarFuentesImportacionDiscogs() {
     try {
-      setFuentesImportacionDiscogs(await discoService.listarFuentesImportacionDiscogs())
+      const sources = await discoService.listarFuentesImportacionDiscogs()
+      setFuentesImportacionDiscogs(deduplicateManualSources(sources))
     } catch {
       // Preserve the last known selector state when a refresh fails.
     }

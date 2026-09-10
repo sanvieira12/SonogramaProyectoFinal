@@ -303,7 +303,7 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.getByRole('option', { name: 'Todas las importaciones' })).toBeInTheDocument()
   })
 
-  it('shows independent manual batches with physical-copy labels and scoped summary', async () => {
+  it('collapses legacy technical batch selectors by customer while rendering the grouped summary', async () => {
     const firstProduct = catalogDisco({
       idDisco: 501,
       artista: 'Producto del batch 1',
@@ -324,19 +324,77 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    expect(await screen.findByRole('option', { name: 'JPH · 2 discos · En curso' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'JPH · 1 discos · Finalizada' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:11' } })
+    expect(await screen.findByRole('option', { name: 'JPH · 3 discos · En curso' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JPH · 3 discos/ })).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), {
+      target: { value: 'manual:customer:JPH' },
+    })
 
     await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
-      .toHaveBeenCalledWith('manual:11'))
+      .toHaveBeenCalledWith('manual:customer:JPH'))
     expect(await screen.findByTestId('manual-batch-summary'))
-      .toHaveTextContent('JPH · 2 discos · En curso')
+      .toHaveTextContent('JPH · 3 discos · En curso')
     expect(screen.getByText('Producto del batch 1')).toBeInTheDocument()
     expect(screen.getByText('VG+')).toBeInTheDocument()
     expect(screen.getByText('UYU $1.750')).toBeInTheDocument()
     expect(screen.queryByText('Producto del batch 2')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Descargar ZIP' })).toBeInTheDocument()
+  })
+
+  it('renders one logical customer selector and loads copies from all technical batches', async () => {
+    const releaseFromFirstBatch = catalogDisco({ idDisco: 601, artista: 'Release from first batch' })
+    const releaseFromSecondBatch = catalogDisco({ idDisco: 602, artista: 'Release from second batch' })
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
+      type: 'MANUAL',
+      key: 'manual:customer:JPH',
+      label: 'JPH · 3 discos · En curso',
+      customerCode: 'JPH',
+      status: 'OPEN',
+      batchId: 12,
+      copyCount: 3,
+    }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([
+      releaseFromFirstBatch,
+      releaseFromSecondBatch,
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    expect(await screen.findByRole('option', { name: 'JPH · 3 discos · En curso' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JPH · 3 discos/ })).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), {
+      target: { value: 'manual:customer:JPH' },
+    })
+
+    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
+      .toHaveBeenCalledWith('manual:customer:JPH'))
+    expect(await screen.findByText('Release from first batch')).toBeInTheDocument()
+    expect(screen.getByText('Release from second batch')).toBeInTheDocument()
+  })
+
+  it('collapses four legacy JS technical entries into one logical selector', async () => {
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
+      { type: 'MANUAL', key: 'manual:101', customerCode: 'JS', status: 'FINALIZED', batchId: 101, copyCount: 1 },
+      { type: 'MANUAL', key: 'manual:102', customerCode: 'js', status: 'FINALIZED', batchId: 102, copyCount: 1 },
+      { type: 'MANUAL', key: 'manual:103', customerCode: ' JS ', status: 'FINALIZED', batchId: 103, copyCount: 1 },
+      { type: 'MANUAL', key: 'manual:104', customerCode: 'Js', status: 'FINALIZED', batchId: 104, copyCount: 51 },
+    ])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([
+      catalogDisco({ idDisco: 701, artista: 'Historical JS release' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    expect(await screen.findByRole('option', { name: 'JS · 54 discos · Finalizada' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JS · 54 discos/ })).toHaveLength(1)
+    expect(screen.queryByRole('option', { name: /manual:10/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), {
+      target: { value: 'manual:customer:JS' },
+    })
+
+    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
+      .toHaveBeenCalledWith('manual:customer:JS'))
+    expect(await screen.findByText('Historical JS release')).toBeInTheDocument()
   })
 
   it('shows the selected manual batch customer code without replacing the internal code', async () => {

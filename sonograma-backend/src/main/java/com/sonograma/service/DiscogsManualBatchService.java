@@ -17,8 +17,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Foundation services for persistent manual Discogs customer batches.
- * No manual import flow calls this service yet; Phase 2 will connect it.
+ * Services for persistent manual Discogs customer batches and copy membership.
  */
 @Service
 @RequiredArgsConstructor

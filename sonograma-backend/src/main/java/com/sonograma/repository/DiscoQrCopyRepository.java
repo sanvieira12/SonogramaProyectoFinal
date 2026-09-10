@@ -20,6 +20,17 @@ public interface DiscoQrCopyRepository extends JpaRepository<DiscoQrCopy, Long> 
 
     List<DiscoQrCopy> findByManualDiscogsBatchIdOrderByCopyNumber(Long batchId);
 
+    @Query("""
+            SELECT c
+            FROM DiscoQrCopy c
+            JOIN c.manualDiscogsBatch b
+            WHERE b.normalizedCustomerCode = :normalizedCustomerCode
+            ORDER BY b.createdAt ASC, c.copyNumber ASC, c.id ASC
+            """)
+    List<DiscoQrCopy> findByManualCustomerCodeOrderByCopyNumber(
+            @Param("normalizedCustomerCode") String normalizedCustomerCode
+    );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM DiscoQrCopy c WHERE c.id = :id")
     Optional<DiscoQrCopy> findByIdForUpdate(@Param("id") Long id);

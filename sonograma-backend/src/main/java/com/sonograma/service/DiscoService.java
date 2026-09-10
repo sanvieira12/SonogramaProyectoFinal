@@ -9,6 +9,7 @@ import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.DiscogsManualBatchStatus;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -30,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -103,6 +105,9 @@ public class DiscoService {
                     .collect(Collectors.toList());
         }
         if (isManualSource(discogsSource)) {
+            if (isManualCustomerSource(discogsSource)) {
+                return obtenerPorCustomerCodeManual(parseManualCustomerCode(discogsSource));
+            }
             return obtenerPorBatchManual(parseManualBatchId(discogsSource));
         }
         return discogsImportRowRepository.findDistinctActiveCatalogProductsBySource(excelSourceName(discogsSource)).stream()
@@ -118,13 +123,69 @@ public class DiscoService {
     @Transactional(readOnly = true)
     public List<DiscogsCatalogSourceDTO> listarFuentesImportacionDiscogs() {
         List<DiscogsCatalogSourceDTO> sources = new java.util.ArrayList<>(discogsImportRowRepository.findCatalogSources());
-        discogsManualBatchRepository.findCatalogSources().stream()
-                .map(this::withManualLabel)
-                .forEach(sources::add);
+        sources.addAll(listarFuentesManualesAgrupadas());
         sources.sort(java.util.Comparator.comparing(
                 DiscogsCatalogSourceDTO::createdAt,
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
         return sources;
+    }
+
+    private List<DiscogsCatalogSourceDTO> listarFuentesManualesAgrupadas() {
+        Map<String, List<DiscogsManualBatch>> batchesByCustomer =
+                discogsManualBatchRepository.findAllWithCopiesForCatalog().stream()
+                        .map(batch -> java.util.Map.entry(normalizedManualCustomerCode(batch), batch))
+                        .filter(entry -> entry.getKey() != null)
+                        .collect(Collectors.groupingBy(
+                                java.util.Map.Entry::getKey,
+                                java.util.LinkedHashMap::new,
+                                Collectors.mapping(java.util.Map.Entry::getValue, Collectors.toList())));
+
+        return batchesByCustomer.entrySet().stream()
+                .map(entry -> {
+                    String customerCode = entry.getKey();
+                    List<DiscogsManualBatch> batches = entry.getValue();
+                    DiscogsManualBatch representative = batches.stream()
+                            .filter(batch -> batch.getStatus() == DiscogsManualBatchStatus.OPEN)
+                            .findFirst()
+                            .orElse(batches.get(0));
+                    DiscogsManualBatchStatus status = batches.stream()
+                            .anyMatch(batch -> batch.getStatus() == DiscogsManualBatchStatus.OPEN)
+                            ? DiscogsManualBatchStatus.OPEN
+                            : DiscogsManualBatchStatus.FINALIZED;
+                    long copyCount = batches.stream()
+                            .mapToLong(batch -> batch.getCopies() == null ? 0 : batch.getCopies().size())
+                            .sum();
+                    return withManualLabel(new DiscogsCatalogSourceDTO(
+                            "manual:customer:" + customerCode,
+                            "MANUAL",
+                            null,
+                            copyCount,
+                            customerCode,
+                            status,
+                            representative.getId(),
+                            batches.stream()
+                                    .map(DiscogsManualBatch::getCreatedAt)
+                                    .max(java.util.Comparator.naturalOrder())
+                                    .orElse(representative.getCreatedAt())));
+                })
+                .toList();
+    }
+
+    /**
+     * Historical rows are grouped from the display customer code when it is
+     * available, with the normalized column as a fallback. This also makes
+     * the projection tolerant of old rows created before that column was
+     * populated.
+     */
+    private String normalizedManualCustomerCode(DiscogsManualBatch batch) {
+        String raw = batch.getCustomerCode() != null && !batch.getCustomerCode().isBlank()
+                ? batch.getCustomerCode() : batch.getNormalizedCustomerCode();
+        try {
+            return DiscogsManualBatchService.normalizeCustomerCode(raw);
+        } catch (IllegalArgumentException ex) {
+            log.warn("Omitiendo batch Discogs {} sin código de cliente válido", batch.getId());
+            return null;
+        }
     }
 
     private List<DiscoResponseDTO> obtenerPorBatchManual(Long batchId) {
@@ -144,6 +205,25 @@ public class DiscoService {
                         disco,
                         copiesByProduct.getOrDefault(disco.getIdDisco(), List.of()),
                         batch.getCustomerCode()))
+                .collect(Collectors.toList());
+    }
+
+    private List<DiscoResponseDTO> obtenerPorCustomerCodeManual(String normalizedCustomerCode) {
+        List<DiscoQrCopy> copies = discoQrCopyRepository
+                .findByManualCustomerCodeOrderByCopyNumber(normalizedCustomerCode);
+        if (copies.isEmpty()) return List.of();
+
+        List<Long> productIds = copies.stream()
+                .map(DiscoQrCopy::getIdDisco)
+                .distinct()
+                .toList();
+        Map<Long, List<DiscoQrCopy>> copiesByProduct = copies.stream()
+                .collect(Collectors.groupingBy(DiscoQrCopy::getIdDisco));
+        return discoRepository.findAllById(productIds).stream()
+                .map(disco -> toDTO(
+                        disco,
+                        copiesByProduct.getOrDefault(disco.getIdDisco(), List.of()),
+                        normalizedCustomerCode))
                 .collect(Collectors.toList());
     }
 
@@ -169,6 +249,20 @@ public class DiscoService {
 
     private boolean isManualSource(String source) {
         return source.trim().toLowerCase(Locale.ROOT).startsWith("manual:");
+    }
+
+    private boolean isManualCustomerSource(String source) {
+        return source.trim().regionMatches(true, 0, "manual:customer:", 0,
+                "manual:customer:".length());
+    }
+
+    private String parseManualCustomerCode(String source) {
+        String raw = source.trim().substring("manual:customer:".length());
+        try {
+            return DiscogsManualBatchService.normalizeCustomerCode(raw);
+        } catch (IllegalArgumentException ex) {
+            throw new NegocioException("La selección de cliente Discogs no es válida.");
+        }
     }
 
     private Long parseManualBatchId(String source) {

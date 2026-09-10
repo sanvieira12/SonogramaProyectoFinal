@@ -149,41 +149,42 @@ class DiscogsCatalogJobFilterRepositoryTest {
     }
 
     @Test
-    void manualSourcesCountPhysicalCopiesAndFilterByExactBatchMembership() {
+    void manualSourcesGroupTechnicalBatchesByNormalizedCustomerAndFilterAllCopies() {
         DiscogsManualBatch first = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.OPEN));
-        DiscogsManualBatch second = manualBatchRepository.save(manualBatch("SV3", DiscogsManualBatchStatus.FINALIZED));
+        DiscogsManualBatch second = manualBatchRepository.save(manualBatch("jph", DiscogsManualBatchStatus.FINALIZED));
+        DiscogsManualBatch otherCustomer = manualBatchRepository.save(manualBatch("SV3", DiscogsManualBatchStatus.FINALIZED));
         Disco shared = discoRepository.save(catalogProduct(3000));
         Disco onlyInSecond = discoRepository.save(catalogProduct(3001));
 
         copyRepository.saveAll(List.of(
                 copy(shared, first, 1, "first-a", "1000", "VG"),
-                copy(shared, first, 2, "first-b", "2000", "EX"),
-                copy(shared, second, 3, "second-a", "3000", "NM"),
-                copy(onlyInSecond, second, 4, "second-b", "4000", "MINT")
+                copy(shared, second, 2, "second-a", "3000", "NM"),
+                copy(onlyInSecond, second, 3, "second-b", "4000", "MINT"),
+                copy(shared, otherCustomer, 4, "other-a", "5000", "EX")
         ));
 
-        List<DiscogsCatalogSourceDTO> sources = manualBatchRepository.findCatalogSources();
+        List<DiscogsCatalogSourceDTO> sources = discoService.listarFuentesImportacionDiscogs();
 
-        assertThat(sources).extracting(DiscogsCatalogSourceDTO::key)
-                .containsExactly("manual:" + second.getId(), "manual:" + first.getId());
-        assertThat(sources).extracting(DiscogsCatalogSourceDTO::productos)
-                .containsExactly(2L, 2L);
+        assertThat(sources).filteredOn(source -> source.type().equals("MANUAL"))
+                .hasSize(2);
         assertThat(discoService.listarFuentesImportacionDiscogs())
-                .filteredOn(source -> source.batchId().equals(first.getId()))
+                .filteredOn(source -> source.key().equals("manual:customer:JPH"))
                 .singleElement()
                 .satisfies(source -> {
-                    assertThat(source.label()).isEqualTo("JPH · 2 discos · En curso");
+                    assertThat(source.label()).isEqualTo("JPH · 3 discos · En curso");
                     assertThat(source.status()).isEqualTo(DiscogsManualBatchStatus.OPEN);
+                    assertThat(source.batchId()).isEqualTo(first.getId());
                 });
         assertThat(discoService.listarFuentesImportacionDiscogs())
-                .filteredOn(source -> source.batchId().equals(second.getId()))
+                .filteredOn(source -> source.key().equals("manual:customer:SV3"))
                 .singleElement()
                 .extracting(DiscogsCatalogSourceDTO::label)
-                .isEqualTo("SV3 · 2 discos · Finalizada");
-        assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
+                .isEqualTo("SV3 · 1 discos · Finalizada");
+        assertThat(discoService.obtenerTodos(null, "manual:customer:jph"))
                 .extracting(dto -> dto.getIdDisco())
-                .containsExactly(shared.getIdDisco());
-        assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
+                .containsExactlyInAnyOrder(shared.getIdDisco(), onlyInSecond.getIdDisco());
+        assertThat(discoService.obtenerTodos(null, "manual:customer:JPH"))
+                .filteredOn(dto -> dto.getIdDisco().equals(shared.getIdDisco()))
                 .singleElement()
                 .satisfies(dto -> {
                     assertThat(dto.getManualBatchCustomerCode()).isEqualTo("JPH");
@@ -191,29 +192,65 @@ class DiscogsCatalogJobFilterRepositoryTest {
                     assertThat(dto.getManualBatchPrecioVenta()).isNull();
                     assertThat(dto.getManualBatchCondicionFisica()).isNull();
                 });
-        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
+        assertThat(discoService.obtenerTodos(null, "manual:customer:JPH"))
                 .filteredOn(dto -> dto.getIdDisco().equals(onlyInSecond.getIdDisco()))
                 .singleElement()
                 .satisfies(dto -> {
-                    assertThat(dto.getManualBatchCustomerCode()).isEqualTo("SV3");
-                    assertThat(dto.getCodigoInterno()).isEqualTo("INTERNAL-3001");
+                    assertThat(dto.getManualBatchCustomerCode()).isEqualTo("JPH");
                     assertThat(dto.getManualBatchPrecioVenta()).isEqualByComparingTo("4000");
                     assertThat(dto.getManualBatchCondicionFisica()).isEqualTo("MINT");
                 });
-        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
+        assertThat(discoService.obtenerTodos(null, "manual:customer:SV3"))
                 .filteredOn(dto -> dto.getIdDisco().equals(shared.getIdDisco()))
                 .singleElement()
                 .extracting(DiscoResponseDTO::getManualBatchCustomerCode)
                 .isEqualTo("SV3");
-        assertThat(discoService.obtenerTodos(null, "manual:" + second.getId()))
-                .extracting(dto -> dto.getIdDisco())
-                .containsExactlyInAnyOrder(shared.getIdDisco(), onlyInSecond.getIdDisco());
+        // Legacy technical selectors remain exact and do not leak the logical grouping.
+        assertThat(discoService.obtenerTodos(null, "manual:" + first.getId()))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(shared.getIdDisco());
+    }
+
+    @Test
+    void historicalJsBatchesWithOnePlusOnePlusOnePlusFiftyOneCopiesExposeOneLogicalSource() {
+        List<DiscogsManualBatch> jsBatches = List.of(
+                manualBatch("JS", DiscogsManualBatchStatus.FINALIZED),
+                manualBatch("js", DiscogsManualBatchStatus.FINALIZED),
+                manualBatch(" JS ", DiscogsManualBatchStatus.FINALIZED),
+                manualBatch("Js", DiscogsManualBatchStatus.FINALIZED)
+        );
+        Disco product = discoRepository.save(catalogProduct(3100));
+
+        List<DiscoQrCopy> copies = new ArrayList<>();
+        int copyNumber = 1;
+        for (int batchIndex = 0; batchIndex < jsBatches.size(); batchIndex++) {
+            int batchCopies = batchIndex == jsBatches.size() - 1 ? 51 : 1;
+            for (int index = 0; index < batchCopies; index++) {
+                copies.add(copy(product, jsBatches.get(batchIndex), copyNumber++,
+                        "js-history-" + copyNumber, "1000", "VG"));
+            }
+        }
+        copyRepository.saveAll(copies);
+
+        List<DiscogsCatalogSourceDTO> manualSources = discoService.listarFuentesImportacionDiscogs().stream()
+                .filter(source -> source.type().equals("MANUAL"))
+                .toList();
+
+        assertThat(manualSources).singleElement().satisfies(source -> {
+            assertThat(source.key()).isEqualTo("manual:customer:JS");
+            assertThat(source.customerCode()).isEqualTo("JS");
+            assertThat(source.productos()).isEqualTo(54L);
+            assertThat(source.status()).isEqualTo(DiscogsManualBatchStatus.FINALIZED);
+        });
+        assertThat(discoService.obtenerTodos(null, "manual:customer:js"))
+                .extracting(DiscoResponseDTO::getIdDisco)
+                .containsExactly(product.getIdDisco());
     }
 
     private DiscogsManualBatch manualBatch(String customerCode, DiscogsManualBatchStatus status) {
         return manualBatchRepository.save(DiscogsManualBatch.builder()
                 .customerCode(customerCode)
-                .normalizedCustomerCode(customerCode)
+                .normalizedCustomerCode(customerCode.trim().toUpperCase(java.util.Locale.ROOT))
                 .status(status)
                 .build());
     }
