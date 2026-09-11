@@ -21,7 +21,82 @@ function rangoPeriodo(mes, hoy = fechaInputLocal()) {
   return { desde: `${mes}-01`, hasta }
 }
 
-function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel, onDelete }) {
+function detallesParaEditar(venta) {
+  return venta?.detalles?.length ? venta.detalles : [{
+    idDisco: venta?.idDisco,
+    artista: venta?.artista,
+    album: venta?.album,
+    precioUnitario: venta?.precioVenta,
+  }]
+}
+
+function formularioVenta(venta) {
+  return {
+    descuentoPorcentaje: venta?.descuentoPorcentaje ?? 0,
+    medioPago: venta?.medioPago || '',
+    numeroRecibo: venta?.numeroRecibo || '',
+    montoPagado: venta?.montoPagado ?? '',
+    observaciones: venta?.observaciones || '',
+    detalles: detallesParaEditar(venta).map(d => ({ ...d, precioUnitario: d.precioUnitario ?? 0 })),
+  }
+}
+
+function numeroCantidad(detalle) {
+  const cantidad = Number(detalle?.cantidad)
+  return Number.isFinite(cantidad) && cantidad > 0 ? cantidad : 1
+}
+
+function redondearMoneda(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+}
+
+function vistaPreviaVenta(form) {
+  const subtotal = redondearMoneda(form.detalles.reduce((sum, detalle) => (
+    sum + Number(detalle.precioUnitario || 0) * numeroCantidad(detalle)
+  ), 0))
+  const descuentoPorcentaje = Number(form.descuentoPorcentaje || 0)
+  const descuento = redondearMoneda(subtotal * descuentoPorcentaje / 100)
+  const total = redondearMoneda(subtotal - descuento)
+  const montoPagado = form.montoPagado === '' ? total : Number(form.montoPagado || 0)
+  const deuda = redondearMoneda(Math.max(total - montoPagado, 0))
+  const estadoPago = deuda === 0
+    ? 'PAGADO'
+    : montoPagado === 0 && deuda > 0
+      ? 'PENDIENTE'
+      : 'PARCIAL'
+  return { subtotal, descuento, total, montoPagado, deuda, estadoPago }
+}
+
+function validarFormularioVenta(form, preview) {
+  for (let index = 0; index < form.detalles.length; index += 1) {
+    const value = form.detalles[index].precioUnitario
+    if (value === '' || !Number.isFinite(Number(value)) || Number(value) <= 0) {
+      return `Ingresá un precio de venta válido para el ítem ${index + 1}.`
+    }
+  }
+
+  const descuento = Number(form.descuentoPorcentaje || 0)
+  if (!Number.isFinite(descuento) || descuento < 0 || descuento > 100) {
+    return 'El descuento debe estar entre 0% y 100%.'
+  }
+
+  if (form.montoPagado !== '') {
+    const montoPagado = Number(form.montoPagado)
+    if (!Number.isFinite(montoPagado) || montoPagado < 0) {
+      return 'El monto pagado no puede ser negativo.'
+    }
+    if (montoPagado > preview.total) {
+      return 'El monto pagado no puede superar el total de la venta.'
+    }
+  }
+  return ''
+}
+
+function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onEditCancel, onSaved, onCancel, onDelete, isEditing }) {
+  const [form, setForm] = useState(() => formularioVenta(venta))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
   if (!venta) return null
   const esPagoDeuda = venta.tipoMovimiento === 'PAGO_DEUDA'
   const esPreVenta = venta.tipoMovimiento === 'PRE_VENTA'
@@ -37,104 +112,23 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onCancel
     estadoGanancia: venta.estadoGanancia,
   }]
   const cover = selectedDisk?.imagenUrl
-  return (
-    <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto">
-      <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="font-bold text-slate-900 dark:text-white">{venta.clienteNombreSnapshot || `${venta.nombreCliente || ''} ${venta.apellidoCliente || ''}`.trim()}</h2>
-          <p className="text-sm text-slate-400 dark:text-stone-500">{fmtDate(venta.fechaVenta)}</p>
-        </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
-      </div>
-      <div className="p-5 space-y-5">
-        {cover && <img src={resolveApiUrl(cover)} alt="" className="w-40 h-40 rounded-xl object-cover bg-slate-100 dark:bg-stone-800 mx-auto" />}
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            ['Movimiento', venta.descripcionMovimiento || (esPagoDeuda ? 'Pago de deuda' : 'Venta')],
-            ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
-            ['Total venta', fmt(venta.totalFinal)],
-            ['Ganancia bruta de la venta', esPagoDeuda ? '—' : fmtProfit(venta.grossProfit ?? venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.grossProfit ?? venta.gananciaNeta)],
-            ['Método de pago', venta.medioPago],
-            [esPagoDeuda ? 'Número de boleta' : 'Número de recibo', venta.numeroRecibo],
-            ['Estado pago', venta.estadoPago],
-            ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
-            ['Monto pagado', fmt(venta.montoPagado)],
-            ['Deuda pendiente', fmt(venta.montoDeuda)],
-          ].map(([label, value, valueClass]) => (
-            <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-              <p className={`text-sm text-slate-800 dark:text-stone-200 ${valueClass || ''}`}>{value || '—'}</p>
-            </div>
-          ))}
-        </div>
-        {venta.observaciones && <p className="text-sm text-slate-500 dark:text-stone-400 whitespace-pre-wrap">{venta.observaciones}</p>}
-        {!esPagoDeuda && (
-        <div>
-          <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</p>
-          <div className="space-y-2">
-            {detalles.map((d, index) => (
-              <button key={d.idDetalle || d.idDisco || index} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
-                <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
-                <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.importeVentaReal ?? d.precioUnitario)}</p>
-                <p className={`text-xs font-mono tabular-nums ${profitToneClass(d.estadoGanancia, d.grossProfit ?? d.gananciaNeta)}`}>
-                  {d.estadoGanancia === 'UNAVAILABLE' || (d.grossProfit ?? d.gananciaNeta) == null
-                    ? 'Ganancia no disponible'
-                    : fmtProfit(d.grossProfit ?? d.gananciaNeta, d.estadoGanancia)}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-        )}
-        <div className="flex gap-2">
-          {!esPagoDeuda && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
-          {!esPreVenta && <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
-            {esPagoDeuda ? 'Anular pago' : 'Cancelar venta'}
-          </button>}
-          {esPreVenta && <button onClick={onDelete} className="btn-secondary flex-1 text-red-600 dark:text-red-400">Eliminar</button>}
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-function EditSaleModal({ venta, onClose, onSaved }) {
-  const detallesIniciales = venta.detalles?.length ? venta.detalles : [{
-    idDisco: venta.idDisco,
-    artista: venta.artista,
-    album: venta.album,
-    precioUnitario: venta.precioVenta,
-  }]
-  const [form, setForm] = useState({
-    descuentoPorcentaje: venta.descuentoPorcentaje ?? 0,
-    medioPago: venta.medioPago || '',
-    numeroRecibo: venta.numeroRecibo || '',
-    montoPagado: venta.montoPagado ?? '',
-    observaciones: venta.observaciones || '',
-    detalles: detallesIniciales.map(d => ({ ...d, precioUnitario: d.precioUnitario ?? 0 })),
-  })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  function setDetalle(index, value) {
-    setForm(prev => ({
-      ...prev,
-      detalles: prev.detalles.map((d, i) => i === index ? { ...d, precioUnitario: value } : d),
-    }))
-  }
 
   async function submit(e) {
     e.preventDefault()
+    const preview = vistaPreviaVenta(form)
+    const validationError = validarFormularioVenta(form, preview)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
     setSaving(true)
     setError('')
     try {
-      const subtotal = form.detalles.reduce((sum, d) => sum + Number(d.precioUnitario || 0), 0)
-      const descuento = subtotal * Number(form.descuentoPorcentaje || 0) / 100
-      const total = subtotal - descuento
       const payload = {
         idCliente: venta.idCliente,
         canalVenta: venta.canalVenta || 'LOCAL',
-        total,
+        total: preview.total,
         costoEnvio: Number(venta.costoEnvio || 0),
         tipoEntrega: venta.tipoEntrega || 'RETIRO',
         descuentoPorcentaje: Number(form.descuentoPorcentaje || 0),
@@ -153,7 +147,8 @@ function EditSaleModal({ venta, onClose, onSaved }) {
           precioUnitario: Number(d.precioUnitario || 0),
         })),
       }
-      onSaved(await api.ventas.actualizar(venta.idVenta, payload))
+      const updated = await api.ventas.actualizar(venta.idVenta, payload)
+      await onSaved(updated)
     } catch (e) {
       setError(e.message || 'No se pudo editar la venta')
     } finally {
@@ -161,53 +156,188 @@ function EditSaleModal({ venta, onClose, onSaved }) {
     }
   }
 
+  function setDetalle(index, value) {
+    setForm(prev => ({
+      ...prev,
+      detalles: prev.detalles.map((d, i) => i === index ? { ...d, precioUnitario: value } : d),
+    }))
+    setError('')
+  }
+
+  function updateForm(field, value) {
+    setForm(prev => ({ ...prev, [field]: value }))
+    setError('')
+  }
+
+  const preview = isEditing ? vistaPreviaVenta(form) : null
+
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <form onSubmit={submit} className="w-full max-w-lg bg-white dark:bg-stone-950 rounded-xl border border-slate-200 dark:border-stone-800 shadow-2xl p-5 space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="font-bold text-slate-900 dark:text-white">Editar venta</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+    <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="sale-panel-title">
+      <div className="sticky top-0 bg-white/95 dark:bg-stone-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-3">
+        <div>
+          <h2 id="sale-panel-title" className="font-bold text-slate-900 dark:text-white">{venta.clienteNombreSnapshot || `${venta.nombreCliente || ''} ${venta.apellidoCliente || ''}`.trim()}</h2>
+          <p className="text-sm text-slate-400 dark:text-stone-500">{fmtDate(venta.fechaVenta)}</p>
         </div>
-        {error && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
-        <label className="block text-xs text-slate-500 dark:text-stone-400">Número de recibo
-          <input className="input w-full mt-1" value={form.numeroRecibo} onChange={e => setForm(prev => ({ ...prev, numeroRecibo: e.target.value }))} />
-        </label>
-        <div className="space-y-2">
-          {form.detalles.map((d, index) => (
-            <div key={d.idDetalle || d.idDisco || index} className="grid grid-cols-[1fr_120px] gap-3 items-center">
-              <p className="text-sm text-slate-700 dark:text-stone-300 truncate">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
-              <input type="number" min="0" step="0.01" className="input text-right" value={d.precioUnitario} onChange={e => setDetalle(index, e.target.value)} />
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
+      </div>
+      <div className="p-5 space-y-5">
+        {cover && <img src={resolveApiUrl(cover)} alt="" className="w-40 h-40 rounded-xl object-cover bg-slate-100 dark:bg-stone-800 mx-auto" />}
+        {isEditing ? (
+          <form onSubmit={submit} className="space-y-5">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Editar venta</p>
+              <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">El cliente y la fecha se mantienen sin cambios.</p>
             </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Descuento %</label>
-            <input type="number" min="0" step="0.01" className="input w-full" value={form.descuentoPorcentaje} onChange={e => setForm(f => ({ ...f, descuentoPorcentaje: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Monto pagado</label>
-            <input type="number" min="0" step="0.01" className="input w-full" value={form.montoPagado} onChange={e => setForm(f => ({ ...f, montoPagado: e.target.value }))} />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs text-slate-500 dark:text-stone-400 mb-1">Método de pago</label>
-            <select className="input w-full" value={form.medioPago} onChange={e => setForm(f => ({ ...f, medioPago: e.target.value }))}>
-              <option value="">Sin definir</option>
-              <option value="EFECTIVO">Efectivo</option>
-              <option value="TRANSFERENCIA">Transferencia</option>
-              <option value="MERCADOPAGO">Mercado Pago</option>
-              <option value="TARJETA">Tarjeta</option>
-              <option value="OTRO">Otro</option>
-            </select>
-          </div>
-        </div>
-        <textarea className="input w-full min-h-20 resize-y" value={form.observaciones} onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))} placeholder="Observaciones" />
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancelar</button>
-          <button disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar cambios'}</button>
-        </div>
-      </form>
-    </div>
+
+            {error && <p role="alert" className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
+
+            <label className="block text-xs text-slate-500 dark:text-stone-400">
+              Número de recibo
+              <input className="input mt-1" value={form.numeroRecibo} onChange={e => updateForm('numeroRecibo', e.target.value)} />
+            </label>
+
+            {!esPagoDeuda && (
+              <section>
+                <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</p>
+                <div className="space-y-3">
+                  {form.detalles.map((d, index) => {
+                    const detalleTexto = d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`
+                    return (
+                      <div key={d.idDetalle || d.idDisco || index} className="rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-3 space-y-2">
+                        <button type="button" onClick={() => onDiskClick(d)} className="w-full text-left hover:text-[#5C7D87] dark:hover:text-[#7E9FA8]">
+                          <p className="text-sm font-medium text-slate-800 dark:text-stone-200 truncate">{detalleTexto}</p>
+                          <p className="text-xs text-slate-400 dark:text-stone-500 truncate">{d.codigoInterno || 'Sin código'} · Cant. {numeroCantidad(d)}</p>
+                        </button>
+                        <label className="block text-xs text-slate-500 dark:text-stone-400">
+                          Precio de venta
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="input mt-1 text-right"
+                            value={d.precioUnitario}
+                            onChange={e => setDetalle(index, e.target.value)}
+                            aria-label={`Precio de venta ${detalleTexto}`}
+                          />
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Venta</p>
+              <label className="block text-xs text-slate-500 dark:text-stone-400">
+                Descuento %
+                <input type="number" min="0" step="0.01" className="input mt-1" value={form.descuentoPorcentaje} onChange={e => updateForm('descuentoPorcentaje', e.target.value)} />
+              </label>
+            </section>
+
+            <section>
+              <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Pago</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-500 dark:text-stone-400 sm:col-span-2">
+                  Método de pago
+                  <select className="input mt-1" value={form.medioPago} onChange={e => updateForm('medioPago', e.target.value)}>
+                    <option value="">Sin definir</option>
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TRANSFERENCIA">Transferencia</option>
+                    <option value="MERCADOPAGO">Mercado Pago</option>
+                    <option value="TARJETA">Tarjeta</option>
+                    <option value="OTRO">Otro</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-slate-500 dark:text-stone-400 sm:col-span-2">
+                  Monto pagado
+                  <input type="number" min="0" step="0.01" className="input mt-1" value={form.montoPagado} onChange={e => updateForm('montoPagado', e.target.value)} />
+                </label>
+              </div>
+            </section>
+
+            <section>
+              <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Resumen financiero</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ['Subtotal', fmt(preview.subtotal)],
+                  ['Descuento', fmt(preview.descuento)],
+                  ['Total venta', fmt(preview.total)],
+                  ['Monto pagado', fmt(preview.montoPagado)],
+                  ['Deuda pendiente', fmt(preview.deuda)],
+                  ['Estado pago', preview.estadoPago],
+                  ['Ganancia bruta de la venta', esPagoDeuda ? '—' : fmtProfit(venta.grossProfit ?? venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.grossProfit ?? venta.gananciaNeta)],
+                ].map(([label, value, valueClass]) => (
+                  <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                    <p className={`text-sm text-slate-800 dark:text-stone-200 ${valueClass || ''}`}>{value || '—'}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 dark:text-stone-500 mt-2">La ganancia bruta se actualiza con los valores del servidor al guardar.</p>
+            </section>
+
+            <label className="block text-xs text-slate-500 dark:text-stone-400">
+              Observaciones
+              <textarea className="input mt-1 min-h-20 resize-y" value={form.observaciones} onChange={e => updateForm('observaciones', e.target.value)} />
+            </label>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <button type="button" onClick={onEditCancel} className="btn-secondary text-sm">Cancelar edición</button>
+              <button disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ['Movimiento', venta.descripcionMovimiento || (esPagoDeuda ? 'Pago de deuda' : 'Venta')],
+                ['Ingreso', fmt(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)],
+                ['Total venta', fmt(venta.totalFinal)],
+                ['Ganancia bruta de la venta', esPagoDeuda ? '—' : fmtProfit(venta.grossProfit ?? venta.gananciaNeta, venta.estadoGanancia), esPagoDeuda ? '' : profitToneClass(venta.estadoGanancia, venta.grossProfit ?? venta.gananciaNeta)],
+                ['Método de pago', venta.medioPago],
+                [esPagoDeuda ? 'Número de boleta' : 'Número de recibo', venta.numeroRecibo],
+                ['Estado pago', venta.estadoPago],
+                ['Descuento', venta.descuentoPorcentaje != null ? `${venta.descuentoPorcentaje}%` : '0%'],
+                ['Monto pagado', fmt(venta.montoPagado)],
+                ['Deuda pendiente', fmt(venta.montoDeuda)],
+              ].map(([label, value, valueClass]) => (
+                <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                  <p className={`text-sm text-slate-800 dark:text-stone-200 ${valueClass || ''}`}>{value || '—'}</p>
+                </div>
+              ))}
+            </div>
+            {venta.observaciones && <p className="text-sm text-slate-500 dark:text-stone-400 whitespace-pre-wrap">{venta.observaciones}</p>}
+            {!esPagoDeuda && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider mb-2">Discos vendidos</p>
+              <div className="space-y-2">
+                {detalles.map((d, index) => (
+                  <button key={d.idDetalle || d.idDisco || index} onClick={() => onDiskClick(d)} className="w-full text-left rounded-lg border border-slate-100 dark:border-stone-800 px-3 py-2 hover:border-[#7E9FA8]/50">
+                    <p className="text-sm font-medium text-slate-800 dark:text-stone-200">{d.manualItem ? d.descripcion : `${d.artista} — ${d.album}`}</p>
+                    <p className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno || 'Sin código'} · Cant. {d.cantidad || 1} · {fmt(d.importeVentaReal ?? d.precioUnitario)}</p>
+                    <p className={`text-xs font-mono tabular-nums ${profitToneClass(d.estadoGanancia, d.grossProfit ?? d.gananciaNeta)}`}>
+                      {d.estadoGanancia === 'UNAVAILABLE' || (d.grossProfit ?? d.gananciaNeta) == null
+                        ? 'Ganancia no disponible'
+                        : fmtProfit(d.grossProfit ?? d.gananciaNeta, d.estadoGanancia)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
+            <div className="flex flex-col sm:flex-row gap-2">
+              {!esPagoDeuda && <button onClick={onEdit} className="btn-primary flex-1">Editar</button>}
+              {!esPreVenta && <button onClick={onCancel} className="btn-secondary flex-1 text-red-600 dark:text-red-400">
+                {esPagoDeuda ? 'Anular pago' : 'Cancelar venta'}
+              </button>}
+              {esPreVenta && <button onClick={onDelete} className="btn-secondary flex-1 text-red-600 dark:text-red-400">Eliminar</button>}
+            </div>
+          </>
+        )}
+      </div>
+    </aside>
   )
 }
 
@@ -387,7 +517,7 @@ export default function LibroVentas() {
   const [selectedDisk, setSelectedDisk] = useState(null)
   const [ventaCancelar, setVentaCancelar] = useState(null)
   const [cancelando, setCancelando] = useState(false)
-  const [editando, setEditando] = useState(null)
+  const [editMode, setEditMode] = useState(false)
   const [editandoPreVenta, setEditandoPreVenta] = useState(null)
   const [eliminandoPreVenta, setEliminandoPreVenta] = useState(null)
   const [eliminando, setEliminando] = useState(false)
@@ -514,6 +644,25 @@ export default function LibroVentas() {
     } finally {
       setEliminando(false)
     }
+  }
+
+  async function guardarVentaActualizada(updated) {
+    setVentas(prev => prev.map(v => v.idVenta === updated.idVenta ? updated : v))
+    setVentaPanel(updated)
+    setEditMode(false)
+    setSelectedDisk(current => {
+      if (!current) return null
+      const detalleActualizado = updated.detalles?.find(d => (
+        (current.idDetalle && d.idDetalle === current.idDetalle)
+          || (current.idDisco && d.idDisco === current.idDisco)
+      ))
+      return detalleActualizado
+        ? { ...detalleActualizado, imagenUrl: current.imagenUrl || detalleActualizado.imagenUrl }
+        : null
+    })
+    await cargarResumen(periodo)
+    window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
+    setSuccess('Venta actualizada correctamente.')
   }
 
   async function seleccionarDiscoDetalle(detalle) {
@@ -689,25 +838,18 @@ export default function LibroVentas() {
         </div>
       </div>
       <SalePanel
+        key={`${ventaPanel?.tipoMovimiento || 'none'}-${ventaPanel?.idPagoDeuda || ventaPanel?.idVenta || 'none'}-${editMode ? 'edit' : 'view'}`}
         venta={ventaPanel}
         selectedDisk={selectedDisk}
         onDiskClick={seleccionarDiscoDetalle}
-        onClose={() => { setVentaPanel(null); setSelectedDisk(null) }}
-        onEdit={() => ventaPanel.tipoMovimiento === 'PRE_VENTA' ? setEditandoPreVenta(ventaPanel) : setEditando(ventaPanel)}
+        isEditing={editMode && ventaPanel?.tipoMovimiento === 'VENTA'}
+        onClose={() => { setEditMode(false); setVentaPanel(null); setSelectedDisk(null) }}
+        onEdit={() => ventaPanel.tipoMovimiento === 'PRE_VENTA' ? setEditandoPreVenta(ventaPanel) : setEditMode(true)}
+        onEditCancel={() => setEditMode(false)}
+        onSaved={guardarVentaActualizada}
         onCancel={() => setVentaCancelar(ventaPanel)}
         onDelete={() => setEliminandoPreVenta(ventaPanel)}
       />
-      {editando && (
-        <EditSaleModal
-          venta={editando}
-          onClose={() => setEditando(null)}
-          onSaved={(updated) => {
-            setVentas(prev => prev.map(v => v.idVenta === updated.idVenta ? updated : v))
-            setVentaPanel(updated)
-            setEditando(null)
-          }}
-        />
-      )}
       {editandoPreVenta && (
         <EditPreVentaPaymentModal
           venta={editandoPreVenta}

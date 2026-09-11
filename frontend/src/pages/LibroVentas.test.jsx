@@ -11,6 +11,7 @@ vi.mock('../api/sonograma', () => ({
     },
     ventas: {
       resumenMensual: vi.fn(),
+      actualizar: vi.fn(),
     },
     preVentas: {
       actualizarPago: vi.fn(),
@@ -141,6 +142,59 @@ const preVentaMovement = {
   }],
 }
 
+const multiItemMovement = {
+  idVenta: 30,
+  tipoMovimiento: 'VENTA',
+  descripcionMovimiento: 'Venta',
+  idCliente: 7,
+  clienteNombreSnapshot: 'María Silva',
+  fechaVenta: '2026-07-16T10:00:00',
+  canalVenta: 'LOCAL',
+  tipoEntrega: 'RETIRO',
+  medioPago: 'EFECTIVO',
+  numeroRecibo: 'R-30',
+  subtotal: 2500,
+  descuentoPorcentaje: 0,
+  totalFinal: 2500,
+  montoMovimiento: 2500,
+  montoPagado: 2500,
+  montoDeuda: 0,
+  estadoPago: 'PAGADO',
+  grossProfit: 700,
+  gananciaNeta: 700,
+  estadoGanancia: 'POSITIVE',
+  detalles: [
+    {
+      idDetalle: 31,
+      idDisco: 81,
+      artista: 'Artista A',
+      album: 'Álbum A',
+      codigoInterno: 'A-1',
+      cantidad: 2,
+      precioUnitario: 1000,
+      importeVentaReal: 2000,
+      grossProfit: 600,
+      gananciaNeta: 600,
+      estadoGanancia: 'POSITIVE',
+      manualItem: false,
+    },
+    {
+      idDetalle: 32,
+      idDisco: 82,
+      artista: 'Artista B',
+      album: 'Álbum B',
+      codigoInterno: 'B-1',
+      cantidad: 1,
+      precioUnitario: 500,
+      importeVentaReal: 500,
+      grossProfit: 100,
+      gananciaNeta: 100,
+      estadoGanancia: 'POSITIVE',
+      manualItem: false,
+    },
+  ],
+}
+
 function rowContaining(table, text) {
   return within(table).getAllByRole('row').find(row => row.textContent.includes(text))
 }
@@ -237,6 +291,137 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(rowContaining(table, 'Ana Pérez'))
     expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancelar venta' })).toBeInTheDocument()
+  })
+
+  it('switches a normal sale in the existing panel without opening a second modal', async () => {
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+
+    expect(screen.getByText('Editar venta')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('Ana Pérez')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('22/07/2026')).toBeInTheDocument()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.queryByText('Cancelar venta')).not.toBeInTheDocument()
+  })
+
+  it('cancels edit without requesting an update or cancelling the sale', async () => {
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+
+    fireEvent.change(screen.getByLabelText('Precio de venta Artista — Álbum'), { target: { value: '999' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar edición' }))
+
+    expect(api.ventas.actualizar).not.toHaveBeenCalled()
+    expect(screen.getByText('Discos vendidos')).toBeInTheDocument()
+    expect(screen.getByText('Cancelar venta')).toBeInTheDocument()
+    expect(screen.getByText('OUT008 · Cant. 1 · UYU $1.370,00')).toBeInTheDocument()
+  })
+
+  it('saves through the existing update API, keeps the panel open, and refreshes financial data', async () => {
+    const updated = {
+      ...movements[0],
+      totalFinal: 1350,
+      montoMovimiento: 1350,
+      montoPagado: 1350,
+      montoDeuda: 0,
+      estadoPago: 'PAGADO',
+      detalles: [{ ...movements[0].detalles[0], precioUnitario: 1500, importeVentaReal: 1350 }],
+    }
+    api.ventas.actualizar.mockResolvedValue(updated)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    fireEvent.change(screen.getByLabelText('Precio de venta Artista — Álbum'), { target: { value: '1500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(api.ventas.actualizar).toHaveBeenCalledWith(1, expect.objectContaining({
+      total: 1500,
+      detalles: [expect.objectContaining({ cantidad: 1, precioUnitario: 1500 })],
+    })))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByText('Discos vendidos')).toBeInTheDocument()
+    expect(screen.queryByText('Cancelar edición')).not.toBeInTheDocument()
+    expect(screen.getByText('Venta actualizada correctamente.')).toBeInTheDocument()
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'sonograma:financial-data-changed' }))
+    dispatchSpy.mockRestore()
+  })
+
+  it('renders and submits every multi-item price while preserving quantities in the preview and payload', async () => {
+    api.libro.listar.mockResolvedValue([multiItemMovement])
+    api.ventas.actualizar.mockResolvedValue(multiItemMovement)
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'María Silva'))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    const panel = screen.getByRole('dialog')
+
+    expect(within(panel).getByText('Artista A — Álbum A')).toBeInTheDocument()
+    expect(within(panel).getByText('Artista B — Álbum B')).toBeInTheDocument()
+    expect(within(panel).getAllByText('UYU $2.500,00').length).toBeGreaterThan(0)
+
+    fireEvent.change(screen.getByLabelText('Precio de venta Artista A — Álbum A'), { target: { value: '950' } })
+    fireEvent.change(screen.getByLabelText('Descuento %'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Monto pagado'), { target: { value: '2000' } })
+
+    expect(within(panel).getByText('UYU $2.400,00')).toBeInTheDocument()
+    expect(within(panel).getByText('UYU $2.160,00')).toBeInTheDocument()
+    expect(within(panel).getByText('UYU $160,00')).toBeInTheDocument()
+    expect(within(panel).getByText('PARCIAL')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(api.ventas.actualizar).toHaveBeenCalledWith(30, expect.objectContaining({
+      total: 2160,
+      detalles: [
+        expect.objectContaining({ cantidad: 2, precioUnitario: 950 }),
+        expect.objectContaining({ cantidad: 1, precioUnitario: 500 }),
+      ],
+    })))
+  })
+
+  it('blocks invalid prices, discounts, and amounts before calling the API', async () => {
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+
+    const price = screen.getByLabelText('Precio de venta Artista — Álbum')
+    fireEvent.change(price, { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('precio de venta válido')
+
+    fireEvent.change(price, { target: { value: '1370' } })
+    fireEvent.change(screen.getByLabelText('Descuento %'), { target: { value: '101' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('entre 0% y 100%')
+
+    fireEvent.change(screen.getByLabelText('Descuento %'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText('Monto pagado'), { target: { value: '1371' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('no puede superar el total')
+    expect(api.ventas.actualizar).not.toHaveBeenCalled()
+  })
+
+  it('keeps edit mode and entered values when the backend rejects the update', async () => {
+    api.ventas.actualizar.mockRejectedValue(new Error('El servidor rechazó la venta'))
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    fireEvent.change(screen.getByLabelText('Precio de venta Artista — Álbum'), { target: { value: '1500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('El servidor rechazó la venta')
+    expect(screen.getByText('Editar venta')).toBeInTheDocument()
+    expect(screen.getByLabelText('Precio de venta Artista — Álbum')).toHaveValue(1500)
   })
 
   it('preserves the compact fixed table layout', async () => {
