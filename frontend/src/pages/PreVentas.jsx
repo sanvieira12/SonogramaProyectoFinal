@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, resolveApiUrl } from '../api/sonograma'
+import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
+import { calculatePreVentaGroupSummary, groupPreVentasByClient } from './preVentaGrouping'
 
 const emptyManualForm = () => ({ descripcion: '', codigo: '', cantidad: '1', precio: '', notas: '' })
 const emptyMetaForm = () => ({ fecha: new Date().toISOString().slice(0, 10), notas: '' })
@@ -22,6 +23,12 @@ function fmtDate(value) {
   const [year, month, day] = String(value).slice(0, 10).split('-')
   if (!year || !month || !day) return value
   return `${day}/${month}/${year}`
+}
+
+function fmtDateTime(value) {
+  if (!value) return '—'
+  const date = String(value).replace('T', ' ')
+  return date.length >= 16 ? `${fmtDate(date)} ${date.slice(11, 16)}` : fmtDate(date)
 }
 
 function asDateStamp(value) {
@@ -79,6 +86,24 @@ function buildSelectedFromManual(manualForm) {
   }
 }
 
+function preVentaTitle(preVenta) {
+  if (preVenta.idDisco) {
+    return [preVenta.artista, preVenta.album].filter(Boolean).join(' — ') || preVenta.descripcion || 'Disco de catálogo'
+  }
+  return preVenta.descripcion || [preVenta.artista, preVenta.album].filter(Boolean).join(' — ') || 'Ítem manual'
+}
+
+function statusSummary(summary) {
+  const pendingLabel = `${summary.pendingCount} ${summary.pendingCount === 1 ? 'pendiente' : 'pendientes'}`
+  const paidLabel = `${summary.paidCount} ${summary.paidCount === 1 ? 'pagada' : 'pagadas'}`
+  if (summary.pendingCount > 0 && summary.paidCount > 0) {
+    return `${pendingLabel} · ${paidLabel}`
+  }
+  if (summary.pendingCount > 0) return pendingLabel
+  if (summary.paidCount > 0) return paidLabel
+  return 'Sin estado'
+}
+
 export default function PreVentas() {
   const clientSearchRef = useRef(null)
   const listSectionRef = useRef(null)
@@ -102,6 +127,7 @@ export default function PreVentas() {
   const [showClienteModal, setShowClienteModal] = useState(false)
   const [sortOrder, setSortOrder] = useState('desc')
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [selectedClientId, setSelectedClientId] = useState(null)
 
   useEffect(() => {
     api.preVentas.listar().then(setPreVentas).catch(() => setPreVentas([]))
@@ -146,6 +172,12 @@ export default function PreVentas() {
       return ((a.idPreVenta || 0) - (b.idPreVenta || 0)) * dir
     })
   }, [preVentas, sortOrder])
+
+  const clientGroups = useMemo(() => groupPreVentasByClient(sortedPreVentas), [sortedPreVentas])
+  const selectedClientGroup = useMemo(
+    () => clientGroups.find(group => String(group.idCliente) === String(selectedClientId)) || null,
+    [clientGroups, selectedClientId],
+  )
 
   const totalSeleccionado = useMemo(
     () => selectedPrice(selectedItem) * selectedQuantity(selectedItem),
@@ -231,6 +263,7 @@ export default function PreVentas() {
     try {
       const updated = await api.preVentas.marcarPagada(item.idPreVenta)
       setPreVentas(prev => prev.map(p => p.idPreVenta === updated.idPreVenta ? updated : p))
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     } catch (err) {
       setError(err.message || 'No se pudo marcar la pre-venta como pagada')
     } finally {
@@ -245,6 +278,7 @@ export default function PreVentas() {
     try {
       await api.preVentas.eliminar(deleting.idPreVenta)
       setPreVentas(prev => prev.filter(p => p.idPreVenta !== deleting.idPreVenta))
+      if (selectedClientGroup?.preVentas.length === 1) setSelectedClientId(null)
       setDeleting(null)
     } catch (err) {
       setError(err.message || 'No se pudo eliminar la pre-venta')
@@ -348,7 +382,7 @@ export default function PreVentas() {
                           onChange={e => setSelectedItem(prev => ({ ...prev, cantidad: e.target.value }))}
                         />
                       </Field>
-                      <Field label="Precio unitario">
+                      <Field label="Precio por unidad">
                         <input
                           required
                           className="input"
@@ -425,7 +459,7 @@ export default function PreVentas() {
                         onChange={e => setManualForm(prev => ({ ...prev, cantidad: e.target.value }))}
                       />
                     </Field>
-                    <Field label="Precio">
+                    <Field label="Precio por unidad">
                       <input
                         className="input"
                         type="number"
@@ -589,7 +623,7 @@ export default function PreVentas() {
               </Field>
             </div>
 
-            <Field label="Total">
+            <Field label="Total preventa">
               <div className="input flex items-center font-semibold text-slate-900 dark:text-white">
                 {money(totalSeleccionado)}
               </div>
@@ -621,22 +655,24 @@ export default function PreVentas() {
           <div>
             <h2 className="font-semibold text-slate-900 dark:text-white">Listado</h2>
             <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-              Seguimiento de reservas, cobros y eliminación segura de pendientes.
+              Seguimiento por cliente, con cada pre-venta conservando su propia identidad.
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+            className="btn-secondary text-xs whitespace-nowrap"
+            aria-label={`Ordenar por fecha ${sortOrder === 'desc' ? 'ascendente' : 'descendente'}`}
+          >
+            Fecha <SortChevron direction={sortOrder} />
+          </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="hidden md:block">
+          <table className="w-full text-sm" data-testid="preventa-client-table">
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500 whitespace-nowrap">
-                  <button type="button" onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')} className="inline-flex items-center gap-1 hover:text-slate-700 dark:hover:text-stone-300">
-                    Fecha
-                    <SortChevron direction={sortOrder} />
-                  </button>
-                </th>
-                {['Cliente', 'Disco / descripción', 'Código', 'Cantidad', 'Precio', 'Estado', 'Acciones'].map(label => (
+                {['Cliente', 'Pre-ventas', 'Unidades', 'Total', 'Estado', 'Acciones'].map(label => (
                   <th key={label} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500 whitespace-nowrap">
                     {label}
                   </th>
@@ -644,69 +680,37 @@ export default function PreVentas() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {sortedPreVentas.map(item => {
-                const pagada = item.estado === 'PAGADA'
-                const busy = busyId === item.idPreVenta
-                const linkedDisco = item.idDisco ? discosById.get(String(item.idDisco)) : null
-                const titulo = item.idDisco ? `${item.artista || '—'} — ${item.album || '—'}` : item.descripcion
-
+              {clientGroups.map(group => {
+                const summary = calculatePreVentaGroupSummary(group.preVentas)
                 return (
-                  <tr key={item.idPreVenta} className="align-middle">
-                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap">{fmtDate(item.fecha)}</td>
-                    <td className="px-3 py-3 text-slate-900 dark:text-white min-w-40">{item.clienteNombre}</td>
-                    <td className="px-3 py-3 min-w-64 max-w-80">
-                      <div className="flex items-center gap-3 min-w-0">
-                        {linkedDisco?.imagenUrl && (
-                          <img src={resolveApiUrl(linkedDisco.imagenUrl)} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="text-slate-900 dark:text-white truncate" title={titulo}>{titulo || '—'}</div>
-                          {linkedDisco?.estado && (
-                            <div className="text-xs text-slate-400 dark:text-stone-500 mt-1 truncate">
-                              {ESTADO_LABELS[linkedDisco.estado] || linkedDisco.estado}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                  <tr key={String(group.idCliente)} className="align-middle">
+                    <td className="px-3 py-3 text-slate-900 dark:text-white">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClientId(String(group.idCliente))}
+                        className="text-left font-semibold hover:text-[#5C7D87] dark:hover:text-[#7E9FA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] rounded"
+                        aria-label={`Ver detalle de ${group.clienteNombre}`}
+                      >
+                        {group.clienteNombre}
+                      </button>
                     </td>
-                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 whitespace-nowrap max-w-36 truncate" title={item.codigoDisco}>{item.codigoDisco || '—'}</td>
-                    <td className="px-3 py-3 tabular-nums text-slate-600 dark:text-stone-400">{item.cantidad}</td>
-                    <td className="px-3 py-3 tabular-nums text-slate-900 dark:text-white whitespace-nowrap">{money(item.precio)}</td>
+                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 tabular-nums">{summary.preVentaCount}</td>
+                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 tabular-nums">{summary.totalQuantity}</td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-white tabular-nums whitespace-nowrap">{money(summary.totalAmount)}</td>
                     <td className="px-3 py-3">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${pagada ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                        {pagada ? 'Pagada' : 'Pendiente'}
-                      </span>
+                      <StatusSummary summary={summary} />
                     </td>
                     <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1.5 min-w-36">
-                        {!pagada && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => marcarPagada(item)}
-                            className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            {busy ? 'Procesando…' : 'Marcar pago'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          disabled={busy || pagada}
-                          onClick={() => setDeleting(item)}
-                          title={pagada ? 'Las pre-ventas pagadas no se pueden eliminar' : 'Eliminar pre-venta'}
-                          aria-label="Eliminar pre-venta"
-                          className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-35 dark:border-red-900 dark:hover:bg-red-950/30"
-                        >
-                          <TrashIcon />
-                        </button>
-                      </div>
+                      <button type="button" onClick={() => setSelectedClientId(String(group.idCliente))} className="btn-secondary text-xs whitespace-nowrap">
+                        Ver detalle
+                      </button>
                     </td>
                   </tr>
                 )
               })}
-              {sortedPreVentas.length === 0 && (
+              {clientGroups.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">
+                  <td colSpan={6} className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">
                     No hay pre-ventas registradas.
                   </td>
                 </tr>
@@ -714,7 +718,50 @@ export default function PreVentas() {
             </tbody>
           </table>
         </div>
+
+        <div className="md:hidden divide-y divide-slate-100 dark:divide-stone-800" data-testid="preventa-client-cards">
+          {clientGroups.map(group => {
+            const summary = calculatePreVentaGroupSummary(group.preVentas)
+            return (
+              <article key={String(group.idCliente)} className="p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClientId(String(group.idCliente))}
+                    className="text-left font-semibold text-slate-900 dark:text-white hover:text-[#5C7D87] dark:hover:text-[#7E9FA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] rounded"
+                    aria-label={`Ver detalle de ${group.clienteNombre}`}
+                  >
+                    {group.clienteNombre}
+                  </button>
+                  <StatusSummary summary={summary} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <SummaryMetric label="Pre-ventas" value={summary.preVentaCount} />
+                  <SummaryMetric label="Unidades" value={summary.totalQuantity} />
+                  <SummaryMetric label="Total" value={money(summary.totalAmount)} />
+                </div>
+                <button type="button" onClick={() => setSelectedClientId(String(group.idCliente))} className="btn-secondary w-full text-sm">
+                  Ver detalle
+                </button>
+              </article>
+            )
+          })}
+          {clientGroups.length === 0 && (
+            <p className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">No hay pre-ventas registradas.</p>
+          )}
+        </div>
       </section>
+
+      {selectedClientGroup && (
+        <ClientPreVentaPanel
+          group={selectedClientGroup}
+          discosById={discosById}
+          busyId={busyId}
+          onClose={() => setSelectedClientId(null)}
+          onMarkPaid={marcarPagada}
+          onDelete={setDeleting}
+        />
+      )}
 
       {selectedDiscoDetalle && (
         <DiscoDetalleModal
@@ -754,6 +801,146 @@ function Field({ label, children, className = '' }) {
       <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">{label}</label>
       {children}
     </div>
+  )
+}
+
+function StatusSummary({ summary }) {
+  const mixed = summary.pendingCount > 0 && summary.paidCount > 0
+  const paidOnly = summary.pendingCount === 0 && summary.paidCount > 0
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
+      mixed
+        ? 'bg-slate-100 text-slate-700 dark:bg-stone-800 dark:text-stone-200'
+        : paidOnly
+          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+    }`}>
+      {statusSummary(summary)}
+    </span>
+  )
+}
+
+function SummaryMetric({ label, value }) {
+  return (
+    <div className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+      <p className="text-sm font-semibold text-slate-800 dark:text-stone-200 tabular-nums">{value}</p>
+    </div>
+  )
+}
+
+function ClientPreVentaPanel({ group, discosById, busyId, onClose, onMarkPaid, onDelete }) {
+  const summary = calculatePreVentaGroupSummary(group.preVentas)
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" aria-hidden="true" onClick={onClose} />
+      <aside
+        className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preventa-client-panel-title"
+      >
+        <div className="sticky top-0 z-10 bg-white/95 dark:bg-stone-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Cliente</p>
+            <h2 id="preventa-client-panel-title" className="font-bold text-slate-900 dark:text-white truncate">{group.clienteNombre}</h2>
+            <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
+              {summary.preVentaCount} {summary.preVentaCount === 1 ? 'preventa' : 'preventas'} · {summary.totalQuantity} {summary.totalQuantity === 1 ? 'unidad' : 'unidades'}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar detalle del cliente" className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg leading-none">✕</button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <section className="grid grid-cols-2 gap-3" aria-label="Resumen de preventas">
+            <SummaryMetric label="Total" value={money(summary.totalAmount)} />
+            <SummaryMetric label="Pendiente" value={money(summary.pendingAmount)} />
+            <SummaryMetric label="Pagado" value={money(summary.paidAmount)} />
+            <SummaryMetric label="Preventas" value={summary.preVentaCount} />
+            <SummaryMetric label="Unidades" value={summary.totalQuantity} />
+            <div className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">Estado</p>
+              <div className="mt-1"><StatusSummary summary={summary} /></div>
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Pre-ventas individuales</h3>
+              <span className="text-xs text-slate-400 dark:text-stone-500">{summary.preVentaCount}</span>
+            </div>
+            <div className="space-y-3">
+              {group.preVentas.map(preVenta => {
+                const paid = preVenta.estado === 'PAGADA'
+                const busy = busyId === preVenta.idPreVenta
+                const linkedDisco = preVenta.idDisco ? discosById.get(String(preVenta.idDisco)) : null
+
+                return (
+                  <article key={preVenta.idPreVenta} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      {linkedDisco?.imagenUrl && (
+                        <img src={resolveApiUrl(linkedDisco.imagenUrl)} alt="" className="w-12 h-12 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-semibold text-slate-900 dark:text-white truncate" title={preVentaTitle(preVenta)}>{preVentaTitle(preVenta)}</h4>
+                        <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">
+                          {preVenta.idDisco && linkedDisco?.estado ? ESTADO_LABELS[linkedDisco.estado] || linkedDisco.estado : 'Preventa'} · #{preVenta.idPreVenta}
+                        </p>
+                        {preVenta.codigoDisco && (
+                          <p className="text-xs text-slate-500 dark:text-stone-400 mt-1 truncate">Código: {preVenta.codigoDisco}</p>
+                        )}
+                      </div>
+                      <StatusBadge paid={paid} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <SummaryMetric label="Fecha" value={fmtDate(preVenta.fecha)} />
+                      <SummaryMetric label="Cantidad" value={preVenta.cantidad} />
+                      <SummaryMetric label="Total" value={money(preVenta.precio)} />
+                      <SummaryMetric label="Pago" value={preVenta.fechaPago ? fmtDateTime(preVenta.fechaPago) : paid ? 'Registrado' : 'Pendiente'} />
+                    </div>
+
+                    {preVenta.notas && (
+                      <p className="text-xs text-slate-500 dark:text-stone-400 whitespace-pre-wrap">{preVenta.notas}</p>
+                    )}
+
+                    {!paid && (
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onMarkPaid(preVenta)}
+                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex-1"
+                        >
+                          {busy ? 'Procesando…' : 'Marcar pago'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onDelete(preVenta)}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-35 dark:border-red-900 dark:hover:bg-red-950/30"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </>
+  )
+}
+
+function StatusBadge({ paid }) {
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium flex-shrink-0 ${paid ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+      {paid ? 'Pagada' : 'Pendiente'}
+    </span>
   )
 }
 
@@ -883,14 +1070,6 @@ function SortChevron({ direction }) {
   return (
     <svg className={`h-3.5 w-3.5 transition-transform ${direction === 'asc' ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
       <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.508a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-function TrashIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M18.16 5.79 17.41 19.5a2.25 2.25 0 0 1-2.244 2.126H8.834A2.25 2.25 0 0 1 6.59 19.5L5.84 5.79m12.32 0a48.108 48.108 0 0 0-3.478-.397m-8.842.397a48.11 48.11 0 0 1 3.478-.397m5.364 0V4.477c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-1.184 0c-1.18.037-2.09 1.022-2.09 2.201v.916m5.364 0a48.667 48.667 0 0 0-5.364 0" />
     </svg>
   )
 }
