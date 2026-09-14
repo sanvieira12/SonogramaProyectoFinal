@@ -17,18 +17,14 @@ public interface PagoDeudaRepository extends JpaRepository<PagoDeuda, Long> {
         JOIN FETCH p.deuda d
         LEFT JOIN FETCH d.venta v
         LEFT JOIN FETCH d.cliente c
-        WHERE COALESCE(p.anulado, false) = false
-          AND COALESCE(d.activa, true) = true
-          AND (v IS NULL OR v.estado <> com.sonograma.enums.EstadoVenta.CANCELADA)
-          AND p.fechaPago BETWEEN :desde AND :hasta
+        WHERE p.fechaPago BETWEEN :desde AND :hasta
         ORDER BY p.fechaPago ASC, p.idPagoDeuda ASC
         """)
-    List<PagoDeuda> findValidosEntre(@Param("desde") LocalDate desde, @Param("hasta") LocalDate hasta);
+    List<PagoDeuda> findEntre(@Param("desde") LocalDate desde, @Param("hasta") LocalDate hasta);
 
     @Query("""
         SELECT p FROM PagoDeuda p
         WHERE p.deuda.idDeuda = :idDeuda
-          AND COALESCE(p.anulado, false) = false
         ORDER BY p.fechaPago DESC, p.createdAt DESC
         """)
     List<PagoDeuda> findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(@Param("idDeuda") Long idDeuda);

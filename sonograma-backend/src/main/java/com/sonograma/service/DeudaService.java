@@ -51,6 +51,8 @@ public class DeudaService {
     private final DiscoRepository discoRepository;
     private final DiscoQrCopyService discoQrCopyService;
     private final DiscoEstadoService discoEstadoService;
+    private final BusinessTime businessTime;
+    private final FinancialMovementPolicy financialMovementPolicy;
 
     @Transactional(readOnly = true)
     public List<DeudaConsolidadaResponseDTO> obtenerPendientes(String q) {
@@ -129,6 +131,7 @@ public class DeudaService {
         Deuda deuda = deudaRepository.findById(idDeuda)
                 .filter(d -> Boolean.TRUE.equals(d.getActiva()))
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", idDeuda));
+        validarTotalDeudaVinculada(deuda, request);
         recalcularEstado(deuda);
         validarMontoPagadoNoEditable(deuda, request);
         aplicarRequest(deuda, request, false);
@@ -153,7 +156,7 @@ public class DeudaService {
         if (deuda == null) {
             deuda = new Deuda();
             deuda.setVenta(venta);
-            deuda.setFechaCreacion(LocalDateTime.now());
+            deuda.setFechaCreacion(businessTime.now());
             deuda.setMontoPagadoInicial(Objects.requireNonNullElse(montoPagado, BigDecimal.ZERO));
         } else {
             // Set the new sale total before clamping the recovered initial payment.
@@ -165,7 +168,7 @@ public class DeudaService {
         deuda.setFechaVenta(fechaVenta.toLocalDate());
         deuda.setFechaDeuda(fechaVenta.toLocalDate());
         deuda.setActiva(true);
-        deuda.setUpdatedAt(LocalDateTime.now());
+        deuda.setUpdatedAt(businessTime.now());
         recalcularEstado(deuda);
         deudaRepository.save(deuda);
     }
@@ -341,21 +344,30 @@ public class DeudaService {
         PagoDeuda pago = PagoDeuda.builder()
                 .deuda(deuda)
                 .monto(monto)
-                .fechaPago(LocalDate.now())
+                .fechaPago(businessTime.today())
                 .notas(textoNulo(notas))
                 .numeroRecibo(textoNulo(numeroRecibo))
                 .idempotencyKey(normalizedIdempotencyKey)
                 .build();
         pagoDeudaRepository.save(pago);
 
-        deuda.setFechaUltimoPago(LocalDate.now());
-        deuda.setUpdatedAt(LocalDateTime.now());
+        deuda.setFechaUltimoPago(businessTime.today());
+        deuda.setUpdatedAt(businessTime.now());
         if (notas != null && !notas.isBlank()) deuda.setNotas(notas);
         recalcularEstado(deuda);
         return toDTO(deudaRepository.save(deuda));
     }
 
     public void eliminarPago(Long idPagoDeuda) {
+        eliminarPago(idPagoDeuda, null);
+    }
+
+    /**
+     * Annuls a payment without deleting its historical row. The original
+     * amount, payment date, creation timestamp and idempotency key remain
+     * untouched for audit purposes.
+     */
+    public void eliminarPago(Long idPagoDeuda, String anuladoPor) {
         PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaForUpdate(idPagoDeuda)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Pago de deuda", idPagoDeuda));
 
@@ -373,15 +385,19 @@ public class DeudaService {
         Deuda deuda = deudaRepository.findByIdForUpdate(deudaRelacionada.getIdDeuda())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", deudaRelacionada.getIdDeuda()));
 
-        pagoDeudaRepository.delete(pago);
+        pago.setAnulado(true);
+        pago.setFechaAnulacion(businessTime.now());
+        pago.setAnuladoPor(textoNulo(anuladoPor));
+        pagoDeudaRepository.save(pago);
         pagoDeudaRepository.flush();
 
         LocalDate fechaUltimoPago = pagoDeudaRepository
                 .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda()).stream()
+                .filter(financialMovementPolicy::isReportableDebtPayment)
                 .findFirst().map(PagoDeuda::getFechaPago).orElse(null);
 
         deuda.setFechaUltimoPago(fechaUltimoPago);
-        deuda.setUpdatedAt(LocalDateTime.now());
+        deuda.setUpdatedAt(businessTime.now());
         if (deuda.getMontoPagadoInicial() == null) deuda.setMontoPagadoInicial(BigDecimal.ZERO);
         recalcularEstado(deuda);
         deudaRepository.save(deuda);
@@ -443,10 +459,10 @@ public class DeudaService {
                 : estadoDesdeMontos(total, pagado);
         deuda.setEstadoPago(estado);
 
-        if (deuda.getFechaDeuda() == null) deuda.setFechaDeuda(LocalDate.now());
+        if (deuda.getFechaDeuda() == null) deuda.setFechaDeuda(businessTime.today());
         if (deuda.getFechaVenta() == null) deuda.setFechaVenta(deuda.getFechaDeuda());
-        if (deuda.getFechaCreacion() == null) deuda.setFechaCreacion(LocalDateTime.now());
-        deuda.setUpdatedAt(LocalDateTime.now());
+        if (deuda.getFechaCreacion() == null) deuda.setFechaCreacion(businessTime.now());
+        deuda.setUpdatedAt(businessTime.now());
     }
 
     private void validarMontoPagadoNoEditable(Deuda deuda, DeudaRequestDTO request) {
@@ -454,6 +470,23 @@ public class DeudaService {
         BigDecimal montoPagadoActual = Objects.requireNonNullElse(deuda.getMontoPagado(), BigDecimal.ZERO);
         if (request.getMontoPagado().compareTo(montoPagadoActual) != 0) {
             throw new NegocioException("Los pagos deben registrarse mediante la opción Registrar pago");
+        }
+    }
+
+    private void validarTotalDeudaVinculada(Deuda deuda, DeudaRequestDTO request) {
+        Venta venta = deuda.getVenta();
+        if (venta == null) return;
+
+        BigDecimal totalVenta = venta.getTotalFinal() != null ? venta.getTotalFinal() : venta.getTotal();
+        if (totalVenta == null) {
+            throw new NegocioException("La venta vinculada no tiene un total válido; editá la venta antes de actualizar la deuda");
+        }
+
+        if (deuda.getMontoTotal() != null && deuda.getMontoTotal().compareTo(totalVenta) != 0) {
+            throw new NegocioException("La deuda vinculada no coincide con el total de la venta; editá la venta para cambiarlo");
+        }
+        if (request.getMontoTotal() != null && request.getMontoTotal().compareTo(totalVenta) != 0) {
+            throw new NegocioException("El total de una deuda vinculada debe coincidir con el total de la venta; editá la venta para cambiarlo");
         }
     }
 
@@ -575,7 +608,7 @@ public class DeudaService {
         if (deuda.getIdDeuda() == null) return List.of();
         List<PagoDeuda> pagos = pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda());
         return pagos == null ? List.of() : pagos.stream()
-                .filter(p -> p != null && !Boolean.TRUE.equals(p.getAnulado()))
+                .filter(financialMovementPolicy::isReportableDebtPayment)
                 .toList();
     }
 

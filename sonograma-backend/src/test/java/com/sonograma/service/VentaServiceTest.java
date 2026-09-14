@@ -28,9 +28,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
+
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,9 +65,11 @@ class VentaServiceTest {
     @Mock private ProfitCalculationService profitCalculationService;
 
     private VentaService ventaService;
+    private BusinessTime businessTime;
 
     @BeforeEach
     void setUp() {
+        businessTime = new BusinessTime(Clock.fixed(Instant.parse("2026-09-14T13:00:00Z"), ZoneOffset.UTC));
         ventaService = new VentaService(
                 ventaRepository,
                 envioRepository,
@@ -81,7 +89,9 @@ class VentaServiceTest {
                 profitCalculationService,
                 discoQrCopyService,
                 discoEstadoService,
-                new IngresoLibroCalculator()
+                new IngresoLibroCalculator(deudaRepository),
+                businessTime,
+                new FinancialMovementPolicy()
         );
         lenient().doAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);
@@ -128,6 +138,7 @@ class VentaServiceTest {
         assertThat(response.getCostoEnvio()).isEqualByComparingTo("250.00");
         assertThat(response.getMontoPagado()).isEqualByComparingTo("2000.00");
         assertThat(response.getMontoDeuda()).isEqualByComparingTo("1000.00");
+        assertThat(response.getFechaVenta()).isEqualTo(LocalDateTime.of(2026, 9, 14, 10, 0));
         assertThat(response.getEstadoPago()).isEqualTo("PARCIAL");
         assertThat(disco.getCantidadCopias()).isZero();
         assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
@@ -285,7 +296,7 @@ class VentaServiceTest {
     }
 
     @Test
-    void obtenerLibroIncluyePagosDeDeudaComoIngresoSeparado() {
+    void obtenerLibroIncluyePagosDeDeudaComoIngresoSeparado() throws Exception {
         Cliente cliente = cliente(1L);
         Venta venta = Venta.builder()
                 .idVenta(200L)
@@ -295,14 +306,15 @@ class VentaServiceTest {
                 .clienteNombreSnapshot("Cliente")
                 .totalFinal(new BigDecimal("1000"))
                 .precioVenta(new BigDecimal("1000"))
-                .montoPagado(new BigDecimal("400"))
-                .montoDeuda(new BigDecimal("600"))
+                .montoPagado(new BigDecimal("700"))
+                .montoDeuda(new BigDecimal("300"))
                 .build();
         Deuda deuda = Deuda.builder()
                 .idDeuda(300L)
                 .venta(venta)
                 .cliente(cliente)
                 .montoTotal(new BigDecimal("1000"))
+                .montoPagadoInicial(new BigDecimal("400"))
                 .montoPagado(new BigDecimal("700"))
                 .montoPendiente(new BigDecimal("300"))
                 .activa(true)
@@ -328,6 +340,7 @@ class VentaServiceTest {
         when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of(venta));
         when(envioRepository.findByVentaIdVenta(200L)).thenReturn(Optional.empty());
         when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago, pagoAnulado));
+        when(deudaRepository.findByVentaIdVenta(200L)).thenReturn(Optional.of(deuda));
 
         var libro = ventaService.obtenerLibro(null, null, null, null);
 
@@ -339,6 +352,101 @@ class VentaServiceTest {
         assertThat(libro.get(0).getNumeroRecibo()).isEqualTo("1258");
         assertThat(libro.get(1).getTipoMovimiento()).isEqualTo("VENTA");
         assertThat(libro.get(1).getMontoMovimiento()).isEqualByComparingTo("400");
+
+        byte[] export = new ExcelExportService(profitCalculationService).exportarLibroMovimientos(libro);
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(export))) {
+            assertThat(workbook.getSheetAt(0).getRow(4).getCell(8).getNumericCellValue()).isEqualTo(700.00);
+        }
+    }
+
+    @Test
+    void obtenerLibroUsaPagoInicialEnVentaParcialSinCobrosPosteriores() {
+        Cliente cliente = cliente(3L);
+        Venta venta = Venta.builder()
+                .idVenta(202L)
+                .cliente(cliente)
+                .fechaVenta(LocalDateTime.of(2026, 6, 1, 10, 0))
+                .totalFinal(new BigDecimal("1000"))
+                .precioVenta(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("400"))
+                .montoDeuda(new BigDecimal("600"))
+                .build();
+        Deuda deuda = Deuda.builder()
+                .idDeuda(302L)
+                .venta(venta)
+                .cliente(cliente)
+                .montoTotal(new BigDecimal("1000"))
+                .montoPagadoInicial(new BigDecimal("400"))
+                .montoPagado(new BigDecimal("400"))
+                .montoPendiente(new BigDecimal("600"))
+                .activa(true)
+                .build();
+
+        when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of(venta));
+        when(envioRepository.findByVentaIdVenta(202L)).thenReturn(Optional.empty());
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of());
+        when(deudaRepository.findByVentaIdVenta(202L)).thenReturn(Optional.of(deuda));
+
+        var libro = ventaService.obtenerLibro(null, null, null, null);
+
+        assertThat(libro).hasSize(1);
+        assertThat(libro.get(0).getTipoMovimiento()).isEqualTo("VENTA");
+        assertThat(libro.get(0).getMontoMovimiento()).isEqualByComparingTo("400");
+    }
+
+    @Test
+    void obtenerLibroManualDebtSoloIncluyePagosSinVentaSintetica() {
+        Cliente cliente = cliente(4L);
+        Deuda deuda = Deuda.builder().idDeuda(303L).cliente(cliente).build();
+        PagoDeuda pago = PagoDeuda.builder()
+                .idPagoDeuda(403L)
+                .deuda(deuda)
+                .monto(new BigDecimal("300"))
+                .fechaPago(LocalDate.of(2026, 6, 2))
+                .build();
+
+        when(ventaRepository.findAllByOrderByFechaVentaDesc()).thenReturn(java.util.List.of());
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago));
+
+        var libro = ventaService.obtenerLibro(null, null, null, null);
+
+        assertThat(libro).hasSize(1);
+        assertThat(libro.get(0).getIdVenta()).isNull();
+        assertThat(libro.get(0).getTipoMovimiento()).isEqualTo("PAGO_DEUDA");
+        assertThat(libro.get(0).getMontoMovimiento()).isEqualByComparingTo("300");
+    }
+
+    @Test
+    void estadisticasPorMesUsaPagoInicialYNoDuplicaPagoPosterior() {
+        Cliente cliente = cliente(5L);
+        Venta venta = Venta.builder()
+                .idVenta(204L)
+                .cliente(cliente)
+                .fechaVenta(LocalDateTime.of(2026, 6, 1, 10, 0))
+                .totalFinal(new BigDecimal("1000"))
+                .precioVenta(new BigDecimal("1000"))
+                .montoPagado(new BigDecimal("1000"))
+                .build();
+        Deuda deuda = Deuda.builder()
+                .idDeuda(304L)
+                .venta(venta)
+                .montoPagadoInicial(new BigDecimal("400"))
+                .build();
+        PagoDeuda pago = PagoDeuda.builder()
+                .idPagoDeuda(404L)
+                .deuda(deuda)
+                .monto(new BigDecimal("600"))
+                .fechaPago(LocalDate.of(2026, 6, 2))
+                .build();
+
+        when(ventaRepository.findAll()).thenReturn(java.util.List.of(venta));
+        when(pagoDeudaRepository.findAll()).thenReturn(java.util.List.of(pago));
+        when(deudaRepository.findByVentaIdVenta(204L)).thenReturn(Optional.of(deuda));
+
+        var estadisticas = ventaService.obtenerEstadisticasPorMes();
+
+        assertThat(estadisticas).hasSize(1);
+        assertThat(estadisticas.get(0).getTotalMonto()).isEqualByComparingTo("1000");
     }
 
     @Test

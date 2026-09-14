@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
@@ -39,7 +40,8 @@ class PreVentaServiceTest {
                 new ProfitCalculationService(ventas,
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoRepository.class),
                         org.mockito.Mockito.mock(com.sonograma.repository.PedidoItemRepository.class),
-                        org.mockito.Mockito.mock(CatalogPricingService.class)));
+                        org.mockito.Mockito.mock(CatalogPricingService.class)),
+                new BusinessTime(Clock.systemUTC()));
         cliente = new Cliente(); cliente.setIdCliente(3L); cliente.setNombre("Ana"); cliente.setApellido("Pérez"); cliente.setActivo(true);
         when(clientes.findById(3L)).thenReturn(Optional.of(cliente));
         when(preVentas.save(any())).thenAnswer(i -> {

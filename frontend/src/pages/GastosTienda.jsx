@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/sonograma'
 import { CATEGORY_LABELS, EXPENSE_CATEGORIES, normalizeExpenseCategory } from './gastosCategorias'
+import { businessDateInMontevideo } from '../utils/businessDate'
 
 function fmtMoney(value) {
   return `UYU $${Number(value || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function fechaInputLocal(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return businessDateInMontevideo(date)
 }
 
 function currentMonth() {

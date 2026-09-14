@@ -106,7 +106,42 @@ cd /opt/sonograma/app
 ./deploy/deploy.sh
 ```
 
-El script hace automáticamente: backup DB → git pull → aplicar migraciones SQL (incluida la normalización idempotente de categorías legacy de gastos) → build frontend → build Docker → restart → healthcheck.
+El script hace automáticamente: backup DB → git pull → verificar PostgreSQL y el ledger → validar checksums → aplicar solo migraciones nuevas con `ON_ERROR_STOP=1` → build frontend → build Docker → restart → healthcheck. Si PostgreSQL, el ledger o una migración no pasan la validación, el deploy se aborta antes de compilar o reemplazar servicios; una migración fallida no se trata como "ya aplicada".
+
+### Primera actualización después del tracking de migraciones
+
+La producción verificada ya contiene el esquema y los resultados de las migraciones `001` a `047`. No se deben volver a ejecutar esas migraciones para poblar el ledger.
+
+Ejecutar la siguiente secuencia deliberada en el servidor:
+
+1. **Verificación read-only de producción**: confirmar el checkout `/opt/sonograma/app`, el contenedor `sonograma-postgres` y que el esquema corresponde al estado verificado hasta `047`. No ejecutar SQL de las migraciones.
+2. **Backup fresco**:
+   ```bash
+   /opt/sonograma/app/deploy/backup-db.sh
+   ```
+3. **Baseline explícito, sin ejecutar migraciones históricas**:
+   ```bash
+   cd /opt/sonograma/app
+   ./deploy/baseline-migrations.sh --confirm-production-baseline
+   ```
+   El script registra los nombres completos y checksums SHA-256 de los 50 archivos con prefijo `001`–`047` en `sonograma_schema_migrations`. Si encuentra un checksum distinto, se detiene.
+4. **Verificar el ledger** con una consulta SELECT-only:
+   ```bash
+   set -a; source /etc/sonograma/sonograma.env; set +a
+   docker exec sonograma-postgres psql -Atq \
+       -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
+       -d sonograma_db \
+       -c "SELECT COUNT(*), MIN(filename), MAX(filename) FROM sonograma_schema_migrations;"
+   ```
+   Deben existir 50 filas históricas (hay prefijos duplicados `010`, `021` y `025`) y los checksums deben coincidir con el checkout desplegado.
+5. **Deploy normal**:
+   ```bash
+   ./deploy/deploy.sh
+   ```
+   El deploy valida el baseline y omite los 50 archivos `001`–`047`; solo ejecuta un archivo nuevo ausente del ledger, y lo registra después de que el SQL termina correctamente.
+6. **Health checks**: confirmar backend `/api/actuator/health`, Nginx y la URL pública de la aplicación. Un fallo detiene el script con código no cero.
+
+El ledger usa el nombre de archivo completo porque existen prefijos duplicados como `010`, `021` y `025`. Los archivos históricos no deben renombrarse ni modificarse; un cambio de checksum aborta el deploy.
 
 Para el deploy acotado de Google OAuth, configuración de Google Cloud, pruebas y rollback sin tocar PostgreSQL, seguir [docs/GOOGLE_AUTH.md](../docs/GOOGLE_AUTH.md).
 

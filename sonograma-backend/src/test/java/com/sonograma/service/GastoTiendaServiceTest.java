@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Optional;
 
@@ -23,7 +24,7 @@ class GastoTiendaServiceTest {
     @BeforeEach
     void setUp() {
         repository = mock(GastoTiendaRepository.class);
-        service = new GastoTiendaService(repository);
+        service = new GastoTiendaService(repository, new BusinessTime(Clock.systemUTC()));
         when(repository.save(any(GastoTienda.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 

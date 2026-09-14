@@ -17,6 +17,9 @@ vi.mock('../api/sonograma', () => ({
       actualizarPago: vi.fn(),
       eliminarPago: vi.fn(),
     },
+    deudas: {
+      eliminarPago: vi.fn(),
+    },
     discos: {
       porId: vi.fn(),
     },
@@ -291,6 +294,23 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(rowContaining(table, 'Ana Pérez'))
     expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancelar venta' })).toBeInTheDocument()
+  })
+
+  it('annuls a debt payment and emits the shared financial refresh event', async () => {
+    api.deudas.eliminarPago.mockResolvedValue(undefined)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Eva López'))
+    fireEvent.click(screen.getByRole('button', { name: 'Anular pago' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(api.deudas.eliminarPago).toHaveBeenCalledWith(5))
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'sonograma:financial-data-changed',
+    }))
+    dispatchSpy.mockRestore()
   })
 
   it('switches a normal sale in the existing panel without opening a second modal', async () => {

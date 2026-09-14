@@ -24,7 +24,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.Month;
-import java.time.ZoneId;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,12 +40,12 @@ import java.util.stream.Collectors;
 public class EstadisticasService {
 
     private static final WeekFields ISO = WeekFields.ISO;
-    private static final ZoneId ZONA_URUGUAY = ZoneId.of("America/Montevideo");
-
     private final VentaRepository ventaRepository;
     private final DiscoRepository discoRepository;
     private final PagoDeudaRepository pagoDeudaRepository;
     private final IngresoLibroCalculator ingresoLibroCalculator;
+    private final BusinessTime businessTime;
+    private final FinancialMovementPolicy financialMovementPolicy;
 
     public EstadisticasResponseDTO obtenerCatalogoInventarioVentas() {
         List<Venta> ventas = ventaRepository.findAll().stream()
@@ -80,7 +79,7 @@ public class EstadisticasService {
     public IngresoSerieResponseDTO obtenerSerieIngresos(String periodo) {
         SeriePeriodo seriePeriodo = SeriePeriodo.from(periodo);
         List<IngresoMovimiento> movimientos = ingresosVigentes();
-        RangoPeriodo actual = seriePeriodo.rangoActual(LocalDate.now(ZONA_URUGUAY));
+        RangoPeriodo actual = seriePeriodo.rangoActual(businessTime.today());
         RangoPeriodo anterior = seriePeriodo.rangoAnterior(actual);
 
         List<IngresoSerieBucketDTO> buckets = seriePeriodo.construirBuckets(actual, movimientos);
@@ -150,7 +149,7 @@ public class EstadisticasService {
 
     private List<PagoDeuda> pagosVigentes() {
         return pagoDeudaRepository.findAll().stream()
-                .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
+                .filter(financialMovementPolicy::isReportableDebtPayment)
                 .toList();
     }
 

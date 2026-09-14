@@ -7,6 +7,7 @@ import com.sonograma.entity.Cliente;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.service.DeudaService;
+import com.sonograma.service.BusinessTime;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
@@ -19,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.security.Principal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +34,7 @@ public class DeudaController {
 
     private final DeudaService deudaService;
     private final ClienteRepository clienteRepository;
+    private final BusinessTime businessTime;
 
     @GetMapping
     public List<DeudaConsolidadaResponseDTO> listar(@RequestParam(required = false) String q) {
@@ -99,8 +102,9 @@ public class DeudaController {
     @DeleteMapping({"/pagos/{idPagoDeuda}", "/{idDeuda}/pagos/{idPagoDeuda}"})
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
     public ResponseEntity<Void> eliminarPago(
-            @PathVariable Long idPagoDeuda) {
-        deudaService.eliminarPago(idPagoDeuda);
+            @PathVariable Long idPagoDeuda,
+            Principal principal) {
+        deudaService.eliminarPago(idPagoDeuda, principal != null ? principal.getName() : null);
         return ResponseEntity.noContent().build();
     }
 
@@ -146,7 +150,7 @@ public class DeudaController {
 
                     BigDecimal monto = new BigDecimal(montoStr.replace(",", "."));
                     String notasFila = str(row, cols.get("notas"));
-                    LocalDate fecha = LocalDate.now();
+                    LocalDate fecha = businessTime.today();
                     String fechaStr = str(row, cols.get("fecha"));
                     if (fechaStr != null && !fechaStr.isBlank()) {
                         try { fecha = LocalDate.parse(fechaStr); } catch (DateTimeParseException ignored) {}

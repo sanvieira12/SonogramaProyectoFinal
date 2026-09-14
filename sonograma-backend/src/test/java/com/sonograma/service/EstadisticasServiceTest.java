@@ -7,14 +7,17 @@ import com.sonograma.entity.Deuda;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.enums.EstadoVenta;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.repository.DeudaRepository;
 import com.sonograma.repository.VentaRepository;
 import com.sonograma.repository.PagoDeudaRepository;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,7 +47,8 @@ class EstadisticasServiceTest {
         VentaRepository ventaRepository = mock(VentaRepository.class);
         DiscoRepository discoRepository = mock(DiscoRepository.class);
         PagoDeudaRepository pagoDeudaRepository = mock(PagoDeudaRepository.class);
-        EstadisticasService service = new EstadisticasService(ventaRepository, discoRepository, pagoDeudaRepository, new IngresoLibroCalculator());
+        DeudaRepository deudaRepository = mock(DeudaRepository.class);
+        EstadisticasService service = new EstadisticasService(ventaRepository, discoRepository, pagoDeudaRepository, new IngresoLibroCalculator(deudaRepository), new BusinessTime(Clock.systemUTC()), new FinancialMovementPolicy());
 
         Venta venta = Venta.builder()
                 .fechaVenta(LocalDateTime.of(2026, 6, 15, 10, 0))
@@ -68,24 +72,27 @@ class EstadisticasServiceTest {
         VentaRepository ventaRepository = mock(VentaRepository.class);
         DiscoRepository discoRepository = mock(DiscoRepository.class);
         PagoDeudaRepository pagoDeudaRepository = mock(PagoDeudaRepository.class);
-        EstadisticasService service = new EstadisticasService(ventaRepository, discoRepository, pagoDeudaRepository, new IngresoLibroCalculator());
+        DeudaRepository deudaRepository = mock(DeudaRepository.class);
+        EstadisticasService service = new EstadisticasService(ventaRepository, discoRepository, pagoDeudaRepository, new IngresoLibroCalculator(deudaRepository), new BusinessTime(Clock.systemUTC()), new FinancialMovementPolicy());
 
         Venta venta = Venta.builder().idVenta(1L)
                 .fechaVenta(LocalDateTime.of(2026, 6, 15, 10, 0))
                 .estado(EstadoVenta.COMPLETADA).precioVenta(new BigDecimal("8000"))
-                .montoPagado(new BigDecimal("5000")).build();
-        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta).build();
+                .montoPagado(new BigDecimal("8000")).build();
+        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta)
+                .montoPagadoInicial(new BigDecimal("3000")).build();
         PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(3L).deuda(deuda)
                 .monto(new BigDecimal("5000")).fechaPago(java.time.LocalDate.of(2026, 7, 10))
                 .createdAt(LocalDateTime.of(2026, 7, 10, 12, 0)).build();
         when(ventaRepository.findAll()).thenReturn(List.of(venta));
         when(discoRepository.findAll()).thenReturn(List.of());
         when(pagoDeudaRepository.findAll()).thenReturn(List.of(pago));
+        when(deudaRepository.findByVentaIdVenta(1L)).thenReturn(Optional.of(deuda));
 
         EstadisticasResponseDTO response = service.obtenerCatalogoInventarioVentas();
 
         assertThat(response.getVentasPorMes()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
-                .containsExactly("2026-06:5000", "2026-07:5000");
+                .containsExactly("2026-06:3000", "2026-07:5000");
         assertThat(response.getVentasPorMes().get(0).getCantidad()).isEqualTo(1);
         assertThat(response.getVentasPorMes().get(1).getCantidadPagosDeuda()).isEqualTo(1);
     }
@@ -108,19 +115,21 @@ class EstadisticasServiceTest {
     void dashboardCuentaPagosParcialesYCompletosComoTransaccionesIndependientes() {
         Fixture fixture = new Fixture();
         Venta venta = venta(1L, LocalDateTime.of(2026, 7, 1, 9, 0), "5000", "5000", EstadoVenta.COMPLETADA);
-        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta).build();
+        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta)
+                .montoPagadoInicial(new BigDecimal("1000")).build();
         PagoDeuda parcial = pago(10L, deuda, "1500", LocalDate.of(2026, 7, 6));
-        PagoDeuda finalPago = pago(11L, deuda, "3500", LocalDate.of(2026, 7, 7));
+        PagoDeuda finalPago = pago(11L, deuda, "2500", LocalDate.of(2026, 7, 7));
         fixture.stub(List.of(venta), List.of(parcial, finalPago));
+        when(fixture.deudas.findByVentaIdVenta(1L)).thenReturn(Optional.of(deuda));
 
         var response = fixture.service.obtenerCatalogoInventarioVentas();
         var julio = response.getVentasPorMes().get(0);
 
-        assertThat(julio.getTotalMonto()).isEqualByComparingTo("10000");
+        assertThat(julio.getTotalMonto()).isEqualByComparingTo("5000");
         assertThat(julio.getCantidad()).isEqualTo(1);
         assertThat(julio.getCantidadPagosDeuda()).isEqualTo(2);
         assertThat(response.getVentasPorSemana()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
-                .containsExactly("2026-S27:5000", "2026-S28:5000");
+                .containsExactly("2026-S27:1000", "2026-S28:4000");
     }
 
     @Test
@@ -156,26 +165,43 @@ class EstadisticasServiceTest {
     }
 
     @Test
+    void dashboardExcluyeSoloElPagoExplicitamenteAnulado() {
+        Fixture fixture = new Fixture();
+        Deuda deuda = Deuda.builder().idDeuda(2L).activa(false).build();
+        PagoDeuda valido = pago(10L, deuda, "100", LocalDate.of(2026, 7, 2));
+        PagoDeuda anulado = pago(11L, deuda, "900", LocalDate.of(2026, 7, 2));
+        anulado.setAnulado(true);
+        fixture.stub(List.of(), List.of(valido, anulado));
+
+        var response = fixture.service.obtenerCatalogoInventarioVentas();
+
+        assertThat(response.getVentasPorMes()).extracting(i -> i.getClave() + ":" + i.getTotalMonto())
+                .containsExactly("2026-07:100");
+    }
+
+    @Test
     void serieMensualReplicaLosMovimientosDelLibroIncluyendoPagosSeparados() {
         Fixture fixture = new Fixture();
         LocalDate hoy = LocalDate.now();
-        Venta venta = venta(1L, hoy.withDayOfMonth(1).atTime(10, 0), "3000", "3000", EstadoVenta.COMPLETADA);
+        Venta venta = venta(1L, hoy.withDayOfMonth(1).atTime(10, 0), "3000", "1200", EstadoVenta.COMPLETADA);
         Venta preVentaPagada = venta(2L, hoy.withDayOfMonth(Math.min(2, hoy.getDayOfMonth())).atTime(16, 0), "1800", "1800", EstadoVenta.COMPLETADA);
         preVentaPagada.setOrigen("PRE_VENTA");
         preVentaPagada.setIdPreVentaOrigen(99L);
-        Deuda deuda = Deuda.builder().idDeuda(4L).venta(venta).build();
+        Deuda deuda = Deuda.builder().idDeuda(4L).venta(venta)
+                .montoPagadoInicial(new BigDecimal("1000")).build();
         PagoDeuda pago = pago(3L, deuda, "2000", hoy);
         fixture.stub(List.of(venta, preVentaPagada), List.of(pago));
+        when(fixture.deudas.findByVentaIdVenta(1L)).thenReturn(Optional.of(deuda));
 
         IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos("mes");
 
         assertThat(response.getPeriodo()).isEqualTo("mes");
-        assertThat(response.getTotalMonto()).isEqualByComparingTo("6800");
+        assertThat(response.getTotalMonto()).isEqualByComparingTo("4800");
         assertThat(response.getBuckets()).isNotEmpty();
         assertThat(response.getBuckets().stream()
                 .map(bucket -> bucket.getTotalMonto())
                 .reduce(BigDecimal.ZERO, BigDecimal::add))
-                .isEqualByComparingTo("6800");
+                .isEqualByComparingTo("4800");
     }
 
     @Test
@@ -201,9 +227,11 @@ class EstadisticasServiceTest {
         Fixture fixture = new Fixture();
         LocalDate hoy = LocalDate.now();
         Venta venta = venta(1L, hoy.atTime(10, 0), "1000", "1000", EstadoVenta.COMPLETADA);
-        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta).build();
+        Deuda deuda = Deuda.builder().idDeuda(2L).venta(venta)
+                .montoPagadoInicial(new BigDecimal("800")).build();
         PagoDeuda pago = pago(3L, deuda, "200", hoy);
         fixture.stub(List.of(venta), List.of(pago));
+        when(fixture.deudas.findByVentaIdVenta(1L)).thenReturn(Optional.of(deuda));
 
         for (String periodo : List.of("dia", "semana", "mes", "trimestre", "semestre", "anio")) {
             IngresoSerieResponseDTO response = fixture.service.obtenerSerieIngresos(periodo);
@@ -212,7 +240,7 @@ class EstadisticasServiceTest {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             assertThat(response.getTotalMonto()).as(periodo).isEqualByComparingTo(totalBuckets);
-            assertThat(response.getTotalMonto()).as(periodo).isEqualByComparingTo("1200");
+            assertThat(response.getTotalMonto()).as(periodo).isEqualByComparingTo("1000");
             assertThat(response.getCantidadVentas()).as(periodo).isEqualTo(1);
             assertThat(response.getCantidadPagosDeuda()).as(periodo).isEqualTo(1);
         }
@@ -264,7 +292,8 @@ class EstadisticasServiceTest {
         private final VentaRepository ventas = mock(VentaRepository.class);
         private final DiscoRepository discos = mock(DiscoRepository.class);
         private final PagoDeudaRepository pagos = mock(PagoDeudaRepository.class);
-        private final EstadisticasService service = new EstadisticasService(ventas, discos, pagos, new IngresoLibroCalculator());
+        private final DeudaRepository deudas = mock(DeudaRepository.class);
+        private final EstadisticasService service = new EstadisticasService(ventas, discos, pagos, new IngresoLibroCalculator(deudas), new BusinessTime(Clock.systemUTC()), new FinancialMovementPolicy());
 
         private void stub(List<Venta> ventasResult, List<PagoDeuda> pagosResult) {
             when(ventas.findAll()).thenReturn(ventasResult);

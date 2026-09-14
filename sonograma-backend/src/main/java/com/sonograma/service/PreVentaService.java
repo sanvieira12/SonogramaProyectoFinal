@@ -45,6 +45,7 @@ public class PreVentaService {
     private final EnvioRepository envioRepository;
     private final DeudaRepository deudaRepository;
     private final ProfitCalculationService profitCalculationService;
+    private final BusinessTime businessTime;
 
     @Transactional(readOnly = true)
     public List<PreVentaResponseDTO> listar() {
@@ -71,7 +72,7 @@ public class PreVentaService {
         PreVenta preVenta = PreVenta.builder()
             .cliente(cliente)
             .disco(disco)
-            .fecha(request.getFecha() != null ? request.getFecha() : LocalDate.now())
+            .fecha(request.getFecha() != null ? request.getFecha() : businessTime.today())
             .cantidad(request.getCantidad())
             .precio(request.getPrecio())
             .estado("PENDIENTE")
@@ -225,7 +226,7 @@ public class PreVentaService {
         int cantidad = preVenta.getCantidad() != null ? preVenta.getCantidad() : 1;
         if (cantidad <= 0) throw new NegocioException("La cantidad debe ser positiva");
 
-        LocalDateTime fechaPago = LocalDateTime.now();
+        LocalDateTime fechaPago = businessTime.now();
         String clienteNombre = (preVenta.getCliente().getNombre() + " "
             + (preVenta.getCliente().getApellido() != null ? preVenta.getCliente().getApellido() : "")).trim();
         Venta venta = Venta.builder()

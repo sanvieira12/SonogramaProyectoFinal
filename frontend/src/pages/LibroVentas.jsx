@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
 import ConfirmModal from '../components/ConfirmModal'
+import { businessDateInMontevideo } from '../utils/businessDate'
 
 const ESTADO_PAGO_STYLES = {
   PAGADO:   'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -10,7 +11,7 @@ const ESTADO_PAGO_STYLES = {
 }
 
 function fechaInputLocal(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return businessDateInMontevideo(date)
 }
 
 function rangoPeriodo(mes, hoy = fechaInputLocal()) {

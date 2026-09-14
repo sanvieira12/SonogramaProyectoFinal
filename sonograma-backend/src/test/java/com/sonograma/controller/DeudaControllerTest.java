@@ -6,6 +6,10 @@ import com.sonograma.service.DeudaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.sonograma.service.BusinessTime;
+import java.time.Clock;
+import java.security.Principal;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,7 +23,7 @@ class DeudaControllerTest {
     @BeforeEach
     void setUp() {
         deudaService = mock(DeudaService.class);
-        controller = new DeudaController(deudaService, mock(ClienteRepository.class));
+        controller = new DeudaController(deudaService, mock(ClienteRepository.class), new BusinessTime(Clock.systemUTC()));
     }
 
     @Test
@@ -36,5 +40,14 @@ class DeudaControllerTest {
         controller.eliminar(42L, "ELIMINAR");
 
         verify(deudaService).eliminar(42L);
+    }
+
+    @Test
+    void transmiteElUsuarioAutenticadoAlAnularUnPago() {
+        Principal principal = () -> "operador-1";
+
+        controller.eliminarPago(17L, principal);
+
+        verify(deudaService).eliminarPago(17L, "operador-1");
     }
 }

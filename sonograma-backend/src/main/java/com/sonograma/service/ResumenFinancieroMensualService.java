@@ -22,7 +22,6 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +33,6 @@ import java.util.Objects;
 @Transactional(readOnly = true)
 public class ResumenFinancieroMensualService {
 
-    private static final ZoneId URUGUAY = ZoneId.of("America/Montevideo");
     private static final DateTimeFormatter PERIOD_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
@@ -43,11 +41,15 @@ public class ResumenFinancieroMensualService {
     private final GastoTiendaRepository gastoTiendaRepository;
     private final ProfitCalculationService profitCalculationService;
     private final IngresoLibroCalculator ingresoLibroCalculator;
+    private final BusinessTime businessTime;
+    private final FinancialMovementPolicy financialMovementPolicy;
 
     public ResumenFinancieroMensualDTO obtener(String periodo) {
         PeriodoSeleccionado selected = seleccionarPeriodo(periodo);
         List<Venta> ventas = ventaRepository.findAllForProfitPeriod(selected.desde.atStartOfDay(), selected.hasta.atTime(23, 59, 59, 999_999_999));
-        List<PagoDeuda> pagos = pagoDeudaRepository.findValidosEntre(selected.desde, selected.hasta);
+        List<PagoDeuda> pagos = pagoDeudaRepository.findEntre(selected.desde, selected.hasta).stream()
+                .filter(financialMovementPolicy::isReportableDebtPayment)
+                .toList();
         List<GastoTienda> gastos = gastoTiendaRepository.findByFechaBetweenOrderByFechaAscIdGastoAsc(selected.desde, selected.hasta);
 
         List<VentaResumenMensualDTO> ventasDTO = new ArrayList<>();
@@ -136,7 +138,7 @@ public class ResumenFinancieroMensualService {
     }
 
     private BigDecimal ingresoVentaEnFechaDeVenta(Venta venta) {
-        if (venta.getMontoPagado() != null) return money(venta.getMontoPagado());
+        if (venta.getMontoPagado() != null) return money(ingresoLibroCalculator.montoVenta(venta));
         return venta.getEstadoPago() == EstadoPago.PAGADO ? money(ingresoLibroCalculator.montoVenta(venta)) : ZERO;
     }
 
@@ -168,7 +170,7 @@ public class ResumenFinancieroMensualService {
     }
 
     private PeriodoSeleccionado seleccionarPeriodo(String raw) {
-        LocalDate hoy = LocalDate.now(URUGUAY);
+        LocalDate hoy = businessTime.today();
         YearMonth current = YearMonth.from(hoy);
         YearMonth selected;
         try {

@@ -20,6 +20,7 @@ import java.util.List;
 public class GastoTiendaService {
 
     private final GastoTiendaRepository repository;
+    private final BusinessTime businessTime;
 
     @Transactional(readOnly = true)
     public List<GastoTiendaDTO> listar() {
@@ -28,7 +29,7 @@ public class GastoTiendaService {
 
     public GastoTiendaDTO crear(GastoTiendaRequestDTO request) {
         GastoTienda gasto = GastoTienda.builder()
-            .fecha(request.getFecha() != null ? request.getFecha() : LocalDate.now())
+            .fecha(request.getFecha() != null ? request.getFecha() : businessTime.today())
             .descripcion(request.getDescripcion())
             .monto(request.getMonto())
             .categoria(request.getCategoria())
@@ -55,7 +56,7 @@ public class GastoTiendaService {
 
     @Transactional(readOnly = true)
     public GastoTiendaResumenDTO resumenMesActual() {
-        LocalDate now = LocalDate.now();
+        LocalDate now = businessTime.today();
         LocalDate desde = now.withDayOfMonth(1);
         LocalDate hasta = now.withDayOfMonth(now.lengthOfMonth());
         BigDecimal total = repository.findByFechaBetween(desde, hasta).stream()

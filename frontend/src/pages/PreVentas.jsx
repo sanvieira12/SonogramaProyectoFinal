@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
 import { calculatePreVentaGroupSummary, groupPreVentasByClient } from './preVentaGrouping'
+import { businessDateInMontevideo } from '../utils/businessDate'
 
 const emptyManualForm = () => ({ descripcion: '', codigo: '', cantidad: '1', precio: '', notas: '' })
-const emptyMetaForm = () => ({ fecha: new Date().toISOString().slice(0, 10), notas: '' })
+const emptyMetaForm = () => ({ fecha: businessDateInMontevideo(), notas: '' })
 
 const ESTADO_LABELS = {
   DISPONIBLE: 'Disponible',

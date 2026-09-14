@@ -43,6 +43,20 @@ const debt = {
   }],
 }
 
+const linkedDebt = {
+  ...debt,
+  montoTotal: 1900,
+  montoPagado: 1500,
+  montoPendiente: 400,
+  movimientos: [{
+    ...debt.movimientos[0],
+    idVenta: 25,
+    montoTotal: 1900,
+    montoPagado: 1500,
+    montoPendiente: 400,
+  }],
+}
+
 describe('Deudas deletion flow', () => {
   let currentDebts
 
@@ -131,6 +145,7 @@ describe('Deudas deletion flow', () => {
 
   it('keeps Registrar pago as the dedicated payment endpoint', async () => {
     api.deudas.registrarPago.mockResolvedValue(debt)
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     render(<Deudas />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
@@ -140,6 +155,31 @@ describe('Deudas deletion flow', () => {
 
     await waitFor(() => expect(api.deudas.registrarPago).toHaveBeenCalledWith(
       7, 1500, null, null, expect.any(String),
+    ))
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'sonograma:financial-data-changed',
+    }))
+    dispatchSpy.mockRestore()
+  })
+
+  it('makes a sale-linked debt total read-only and keeps the sale total as the source', async () => {
+    currentDebts = [linkedDebt]
+    api.deudas.actualizar.mockResolvedValue(linkedDebt)
+
+    render(<Deudas />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+
+    const totalInput = screen.getByDisplayValue('1900')
+    expect(totalInput).toHaveAttribute('readonly')
+    expect(screen.getByText(/proviene de la venta vinculada/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar deuda' }))
+
+    await waitFor(() => expect(api.deudas.actualizar).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ montoTotal: 1900 }),
     ))
   })
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
+import { businessDateInMontevideo } from '../utils/businessDate'
 
 const ESTADO_STYLES = {
   PENDIENTE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-white',
@@ -17,7 +18,7 @@ const EMPTY_DEUDA = {
   descripcion: '',
   montoTotal: '',
   montoPagado: '0',
-  fechaDeuda: new Date().toISOString().slice(0, 10),
+  fechaDeuda: businessDateInMontevideo(),
   estadoPago: 'PENDIENTE',
   notas: '',
 }
@@ -47,7 +48,7 @@ function buildForm(deuda) {
     descripcion: deuda.descripcion || '',
     montoTotal: deuda.montoTotal ?? '',
     montoPagado: deuda.montoPagado ?? '0',
-    fechaDeuda: deuda.fechaDeuda || deuda.fechaVenta || new Date().toISOString().slice(0, 10),
+    fechaDeuda: deuda.fechaDeuda || deuda.fechaVenta || businessDateInMontevideo(),
     estadoPago: deuda.estadoPago || 'PENDIENTE',
     notas: deuda.notas || '',
   }
@@ -75,6 +76,7 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
 
   const movimientos = deuda?.movimientos?.length ? deuda.movimientos : (deuda?.idDeuda ? [deuda] : [])
   const movimiento = movimientos.find(m => m.idDeuda === movimientoId) || movimientos[0] || null
+  const deudaVinculada = movimiento?.idVenta != null
 
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -107,7 +109,8 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
       const saved = movimiento?.idDeuda
         ? await api.deudas.actualizar(movimiento.idDeuda, payload())
         : await api.deudas.crear(payload())
-      onSaved(saved)
+      await onSaved(saved)
+      window.dispatchEvent(new CustomEvent(FINANCIAL_DATA_CHANGED_EVENT, { detail: { source: 'deudas' } }))
       setMode('view')
       setMessage('Deuda guardada')
     } catch (e) {
@@ -135,7 +138,8 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
         payment.numeroRecibo.trim() || null,
         payment.idempotencyKey,
       )
-      onPaid(updated)
+      await onPaid(updated)
+      window.dispatchEvent(new CustomEvent(FINANCIAL_DATA_CHANGED_EVENT, { detail: { source: 'deudas' } }))
       setPayment({ monto: '', notas: '', numeroRecibo: '', idempotencyKey: nuevoIdempotencyKey() })
       setMessage('Pago registrado')
     } catch (e) {
@@ -208,7 +212,17 @@ function DeudaPanel({ deuda, clientes, onClose, onSaved, onPaid, onDelete, delet
               </div>
               <div>
                 <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Total *</label>
-                <input type="number" step="0.01" min="0" className="input w-full" value={form.montoTotal} onChange={e => set('montoTotal', e.target.value)} />
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  readOnly={deudaVinculada}
+                  aria-describedby={deudaVinculada ? 'linked-debt-total-help' : undefined}
+                  className={`input w-full ${deudaVinculada ? 'bg-slate-100 dark:bg-stone-900 cursor-not-allowed' : ''}`}
+                  value={form.montoTotal}
+                  onChange={e => set('montoTotal', e.target.value)}
+                />
+                {deudaVinculada && <p id="linked-debt-total-help" className="mt-1 text-xs text-slate-400 dark:text-white/60">El total proviene de la venta vinculada. Editá la venta para cambiarlo.</p>}
               </div>
               <div>
                 <label className="block text-xs text-slate-500 dark:text-white/70 mb-1">Pagado (historial)</label>

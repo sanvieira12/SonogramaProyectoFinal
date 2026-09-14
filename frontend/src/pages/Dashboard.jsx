@@ -6,6 +6,7 @@ import {
 import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 import { useTheme } from '../context/useTheme'
 import { cantidadPagosLabel, cantidadVentasLabel, ingresosPeriodoLabel } from '../utils/dashboardIncome'
+import { financialMovementKey } from '../utils/financialMovementKey'
 
 const PERIODOS = [
   { key: 'dia', label: 'Día' },
@@ -354,7 +355,7 @@ export default function Dashboard() {
                       || '—'
                     return (
                       <tr
-                        key={v.idVenta}
+                        key={financialMovementKey(v)}
                         onClick={() => navigate('/libro-ventas')}
                         className="hover:bg-slate-50 dark:hover:bg-stone-900/40 transition-colors cursor-pointer"
                       >

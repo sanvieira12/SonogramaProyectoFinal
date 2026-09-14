@@ -74,6 +74,8 @@ public class VentaService {
     private final DiscoQrCopyService discoQrCopyService;
     private final DiscoEstadoService discoEstadoService;
     private final IngresoLibroCalculator ingresoLibroCalculator;
+    private final BusinessTime businessTime;
+    private final FinancialMovementPolicy financialMovementPolicy;
 
     private static final BigDecimal CIEN = new BigDecimal("100");
 
@@ -87,7 +89,7 @@ public class VentaService {
         CanalVenta canal = parseCanal(dto.getCanalVenta());
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
         DacBranchCatalog.Branch sucursalDac = validarSucursalDac(dto, entrega);
-        LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : LocalDateTime.now();
+        LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : businessTime.now();
         String numeroFactura = generarNumeroFactura(fechaVenta.getYear());
         String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
 
@@ -322,7 +324,7 @@ public class VentaService {
         ventaRepository.save(venta);
         deudaRepository.findByVentaIdVentaAndActivaTrue(id).ifPresent(deuda -> {
             deuda.setActiva(false);
-            deuda.setUpdatedAt(LocalDateTime.now());
+            deuda.setUpdatedAt(businessTime.now());
             deudaRepository.save(deuda);
         });
     }
@@ -357,21 +359,13 @@ public class VentaService {
         }
         java.util.Map<String, MesIngreso> meses = new TreeMap<>();
         List<PagoDeuda> pagos = pagoDeudaRepository.findAll().stream()
-                .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
+                .filter(financialMovementPolicy::isReportableDebtPayment)
                 .toList();
-        java.util.Map<Long, BigDecimal> pagosPorVenta = pagos.stream()
-                .filter(p -> p.getDeuda() != null && p.getDeuda().getVenta() != null)
-                .collect(Collectors.groupingBy(
-                        p -> p.getDeuda().getVenta().getIdVenta(),
-                        Collectors.reducing(BigDecimal.ZERO, PagoDeuda::getMonto, BigDecimal::add)));
         ventaRepository.findAll().stream()
                 .filter(v -> v.getEstado() != EstadoVenta.CANCELADA)
                 .forEach(v -> {
                     String mes = "%04d-%02d".formatted(v.getFechaVenta().getYear(), v.getFechaVenta().getMonthValue());
-                    BigDecimal acumulado = v.getMontoPagado() != null ? v.getMontoPagado() : VentaTotals.totalProductos(v);
-                    BigDecimal ingreso = acumulado
-                            .subtract(pagosPorVenta.getOrDefault(v.getIdVenta(), BigDecimal.ZERO))
-                            .max(BigDecimal.ZERO);
+                    BigDecimal ingreso = ingresoLibroCalculator.montoVenta(v);
                     meses.put(mes, meses.getOrDefault(mes, new MesIngreso(0, BigDecimal.ZERO)).sumarVenta(ingreso));
                 });
         pagos.forEach(p -> {
@@ -409,7 +403,7 @@ public class VentaService {
 
         if (canal == null || canal.isBlank()) {
             pagoDeudaRepository.findAll().stream()
-                    .filter(p -> !Boolean.TRUE.equals(p.getAnulado()))
+                    .filter(financialMovementPolicy::isReportableDebtPayment)
                     .filter(p -> pagoDentroDeRango(p, desdeDate, hastaDate))
                     .map(this::mapearPagoDeudaADTO)
                     .filter(v -> coincideMovimiento(v, qLower))
