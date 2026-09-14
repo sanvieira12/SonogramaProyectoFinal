@@ -5,6 +5,7 @@ import com.sonograma.dto.DeudaConsolidadaResponseDTO;
 import com.sonograma.dto.DeudaResponseDTO;
 import com.sonograma.dto.DetalleVentaResponseDTO;
 import com.sonograma.dto.PagoDeudaDTO;
+import com.sonograma.dto.PagoDeudaUpdateRequest;
 import com.sonograma.entity.Cliente;
 import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Deuda;
@@ -401,6 +402,69 @@ public class DeudaService {
         if (deuda.getMontoPagadoInicial() == null) deuda.setMontoPagadoInicial(BigDecimal.ZERO);
         recalcularEstado(deuda);
         deudaRepository.save(deuda);
+    }
+
+    /**
+     * Updates the existing payment row in place. Payment-owned fields may be
+     * corrected, but the debt and linked sale totals remain authoritative and
+     * are never changed by this operation.
+     */
+    public DeudaResponseDTO actualizarPago(Long idPagoDeuda, PagoDeudaUpdateRequest request) {
+        PagoDeuda pago = pagoDeudaRepository.findByIdPagoDeudaForUpdate(idPagoDeuda)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Pago de deuda", idPagoDeuda));
+
+        if (Boolean.TRUE.equals(pago.getAnulado())) {
+            throw new NegocioException("El pago de deuda ya fue anulado");
+        }
+        if (request == null || request.getMonto() == null
+                || request.getMonto().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new NegocioException("El monto del pago debe ser positivo");
+        }
+        if (request.getFechaPago() == null) {
+            throw new NegocioException("La fecha del pago es obligatoria");
+        }
+
+        Deuda deudaRelacionada = pago.getDeuda();
+        if (deudaRelacionada == null || deudaRelacionada.getIdDeuda() == null) {
+            throw new NegocioException("El pago de deuda no tiene una deuda asociada");
+        }
+        // Keep the payment relationship authoritative, including for historical
+        // rows whose debt is inactive or whose linked sale total diverges.
+        Deuda deuda = deudaRepository.findByIdForUpdate(deudaRelacionada.getIdDeuda())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Deuda", deudaRelacionada.getIdDeuda()));
+
+        List<PagoDeuda> pagos = pagoDeudaRepository
+                .findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(deuda.getIdDeuda());
+        BigDecimal otrosPagos = (pagos == null ? List.<PagoDeuda>of() : pagos).stream()
+                .filter(financialMovementPolicy::isReportableDebtPayment)
+                .filter(otro -> !Objects.equals(otro.getIdPagoDeuda(), pago.getIdPagoDeuda()))
+                .filter(otro -> otro.getMonto() != null && otro.getMonto().compareTo(BigDecimal.ZERO) > 0)
+                .map(PagoDeuda::getMonto)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal montoInicial = Objects.requireNonNullElse(deuda.getMontoPagadoInicial(), BigDecimal.ZERO);
+        BigDecimal montoTotal = Objects.requireNonNullElse(deuda.getMontoTotal(), BigDecimal.ZERO);
+        if (montoInicial.add(otrosPagos).add(request.getMonto()).compareTo(montoTotal) > 0) {
+            throw new NegocioException("El monto actualizado excede la deuda pendiente");
+        }
+
+        // All validation is complete before mutating either the payment or its
+        // related aggregates, so rejected edits cannot partially change state.
+        pago.setMonto(request.getMonto());
+        pago.setFechaPago(request.getFechaPago());
+        pago.setNotas(textoNulo(request.getNotas()));
+        pago.setNumeroRecibo(textoNulo(request.getNumeroRecibo()));
+        pagoDeudaRepository.save(pago);
+        pagoDeudaRepository.flush();
+
+        LocalDate fechaUltimoPago = (pagos == null ? List.<PagoDeuda>of() : pagos).stream()
+                .filter(financialMovementPolicy::isReportableDebtPayment)
+                .max(Comparator.comparing(PagoDeuda::getFechaPago,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .map(PagoDeuda::getFechaPago).orElse(null);
+        deuda.setFechaUltimoPago(fechaUltimoPago);
+        deuda.setUpdatedAt(businessTime.now());
+        recalcularEstado(deuda);
+        return toDTO(deudaRepository.save(deuda));
     }
 
     private void aplicarRequest(Deuda deuda, DeudaRequestDTO request, boolean creando) {

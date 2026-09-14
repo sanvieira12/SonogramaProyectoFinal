@@ -19,6 +19,7 @@ vi.mock('../api/sonograma', () => ({
     },
     deudas: {
       eliminarPago: vi.fn(),
+      actualizarPago: vi.fn(),
     },
     discos: {
       porId: vi.fn(),
@@ -307,6 +308,47 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => expect(api.deudas.eliminarPago).toHaveBeenCalledWith(5))
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'sonograma:financial-data-changed',
+    }))
+    dispatchSpy.mockRestore()
+  })
+
+  it('edits a debt payment in the same drawer and refreshes financial data', async () => {
+    const updated = {
+      ...movements[4],
+      fechaVenta: '2026-07-19T10:00:00',
+      montoMovimiento: 200,
+      totalFinal: 200,
+      numeroRecibo: 'B-2',
+      observaciones: 'Corrección de boleta',
+    }
+    api.deudas.actualizarPago.mockResolvedValue({})
+    api.libro.listar.mockResolvedValueOnce(movements).mockResolvedValue([updated])
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Eva López'))
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Anular pago' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar' }))
+    expect(screen.getByText('Editar pago de deuda')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Monto pagado'), { target: { value: '200' } })
+    fireEvent.change(screen.getByLabelText('Fecha de pago'), { target: { value: '2026-07-19' } })
+    fireEvent.change(screen.getByLabelText('Número de boleta'), { target: { value: 'B-2' } })
+    fireEvent.change(screen.getByLabelText('Observaciones'), { target: { value: 'Corrección de boleta' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(api.deudas.actualizarPago).toHaveBeenCalledWith(5, {
+      monto: 200,
+      fechaPago: '2026-07-19',
+      numeroRecibo: 'B-2',
+      notas: 'Corrección de boleta',
+    }))
+    await waitFor(() => expect(screen.getByText('Pago de deuda actualizado correctamente.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Anular pago' })).toBeInTheDocument()
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'sonograma:financial-data-changed',
     }))

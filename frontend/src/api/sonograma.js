@@ -243,6 +243,8 @@ export const api = {
       request('POST', `/deudas/${idDeuda}/registrar-pago`, { monto, notas, numeroRecibo, idempotencyKey }),
     eliminarPago: (idPagoDeuda) =>
       request('DELETE', `/deudas/pagos/${idPagoDeuda}`),
+    actualizarPago: (idPagoDeuda, payload) =>
+      request('PUT', `/deudas/pagos/${idPagoDeuda}`, payload),
   },
 
   libro: {

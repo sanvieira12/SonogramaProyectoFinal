@@ -98,6 +98,31 @@ describe('normalizeApiBase', () => {
     }))
   })
 
+  it('actualiza un pago usando su id estable y campos propios del movimiento', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{}'),
+    })
+
+    await api.deudas.actualizarPago(66, {
+      monto: 200,
+      fechaPago: '2026-07-19',
+      numeroRecibo: 'B-2',
+      notas: 'Corrección',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/deudas/pagos/66', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        monto: 200,
+        fechaPago: '2026-07-19',
+        numeroRecibo: 'B-2',
+        notas: 'Corrección',
+      }),
+    }))
+  })
+
   it('exports VinylFuture ZIP from an import id', async () => {
     vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
     const blob = new Blob(['zip'])

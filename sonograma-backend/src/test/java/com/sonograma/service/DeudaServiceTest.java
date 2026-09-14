@@ -8,6 +8,7 @@ import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.dto.PagoDeudaDTO;
+import com.sonograma.dto.PagoDeudaUpdateRequest;
 import com.sonograma.dto.DeudaRequestDTO;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoCopiaDisco;
@@ -432,6 +433,170 @@ class DeudaServiceTest {
         verify(pagoDeudaRepository, org.mockito.Mockito.times(2)).save(pago);
         verify(deudaRepository, org.mockito.Mockito.atLeastOnce()).save(deuda);
         org.mockito.Mockito.verify(pagoDeudaRepository, org.mockito.Mockito.never()).delete(any(PagoDeuda.class));
+    }
+
+    @Test
+    void editaPagoExistenteReduciendoMontoYRecalculaSoloLosCaches() {
+        Venta venta = Venta.builder().idVenta(40L).totalFinal(new BigDecimal("2000"))
+                .montoPagado(new BigDecimal("1500")).montoDeuda(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        Deuda deuda = Deuda.builder().idDeuda(40L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("2000")).montoPagadoInicial(new BigDecimal("500"))
+                .montoPagado(new BigDecimal("1500")).montoPendiente(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(400L).deuda(deuda)
+                .monto(new BigDecimal("1000")).fechaPago(LocalDate.of(2026, 7, 10))
+                .numeroRecibo("B-1").notas("Original").idempotencyKey("stable-key").build();
+
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(400L)).thenReturn(Optional.of(pago));
+        when(deudaRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(40L))
+                .thenReturn(List.of(pago));
+        when(pagoDeudaRepository.save(any(PagoDeuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.actualizarPago(400L, PagoDeudaUpdateRequest.builder()
+                .monto(new BigDecimal("700"))
+                .fechaPago(LocalDate.of(2026, 7, 11))
+                .numeroRecibo("B-2")
+                .notas("Corregido")
+                .build());
+
+        assertThat(pago.getIdPagoDeuda()).isEqualTo(400L);
+        assertThat(pago.getMonto()).isEqualByComparingTo("700");
+        assertThat(pago.getFechaPago()).isEqualTo(LocalDate.of(2026, 7, 11));
+        assertThat(pago.getNumeroRecibo()).isEqualTo("B-2");
+        assertThat(pago.getNotas()).isEqualTo("Corregido");
+        assertThat(pago.getIdempotencyKey()).isEqualTo("stable-key");
+        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("2000");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("1200");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("800");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("2000");
+        assertThat(venta.getMontoPagado()).isEqualByComparingTo("1200");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("800");
+        assertThat(venta.getEstadoPago()).isEqualTo(EstadoPago.PARCIAL);
+        verify(pagoDeudaRepository).save(pago);
+        verify(deudaRepository).save(deuda);
+    }
+
+    @Test
+    void editaPagoExistenteAumentandoMontoSinCrearOtroMovimiento() {
+        Venta venta = Venta.builder().idVenta(41L).totalFinal(new BigDecimal("2000"))
+                .montoPagado(new BigDecimal("1200")).montoDeuda(new BigDecimal("800"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        Deuda deuda = Deuda.builder().idDeuda(41L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("2000")).montoPagadoInicial(new BigDecimal("500"))
+                .montoPagado(new BigDecimal("1200")).montoPendiente(new BigDecimal("800"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(410L).deuda(deuda)
+                .monto(new BigDecimal("700")).fechaPago(LocalDate.of(2026, 7, 11)).build();
+
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(410L)).thenReturn(Optional.of(pago));
+        when(deudaRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(41L))
+                .thenReturn(List.of(pago));
+        when(pagoDeudaRepository.save(any(PagoDeuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.actualizarPago(410L, PagoDeudaUpdateRequest.builder()
+                .monto(new BigDecimal("1000"))
+                .fechaPago(LocalDate.of(2026, 7, 12))
+                .build());
+
+        assertThat(pago.getMonto()).isEqualByComparingTo("1000");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("1500");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("500");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("2000");
+        assertThat(venta.getMontoPagado()).isEqualByComparingTo("1500");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("500");
+        verify(pagoDeudaRepository).save(pago);
+    }
+
+    @Test
+    void rechazaEdicionDePagoExcesivaSinMutacionParcial() {
+        Venta venta = Venta.builder().idVenta(42L).totalFinal(new BigDecimal("2000"))
+                .montoPagado(new BigDecimal("1500")).montoDeuda(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        Deuda deuda = Deuda.builder().idDeuda(42L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("2000")).montoPagadoInicial(new BigDecimal("500"))
+                .montoPagado(new BigDecimal("1500")).montoPendiente(new BigDecimal("500"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(420L).deuda(deuda)
+                .monto(new BigDecimal("1000")).fechaPago(LocalDate.of(2026, 7, 10)).build();
+
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(420L)).thenReturn(Optional.of(pago));
+        when(deudaRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(42L))
+                .thenReturn(List.of(pago));
+
+        assertThatThrownBy(() -> service.actualizarPago(420L, PagoDeudaUpdateRequest.builder()
+                .monto(new BigDecimal("1600"))
+                .fechaPago(LocalDate.of(2026, 7, 12))
+                .numeroRecibo("NO-GUARDAR")
+                .build()))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("El monto actualizado excede la deuda pendiente");
+
+        assertThat(pago.getMonto()).isEqualByComparingTo("1000");
+        assertThat(pago.getFechaPago()).isEqualTo(LocalDate.of(2026, 7, 10));
+        assertThat(pago.getNumeroRecibo()).isNull();
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("1500");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("500");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("2000");
+        verify(pagoDeudaRepository, org.mockito.Mockito.never()).save(any(PagoDeuda.class));
+        verify(deudaRepository, org.mockito.Mockito.never()).save(any(Deuda.class));
+    }
+
+    @Test
+    void rechazaEditarPagoAnuladoSinMutarLaFila() {
+        Deuda deuda = Deuda.builder().idDeuda(43L).activa(true)
+                .montoTotal(new BigDecimal("1000")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(BigDecimal.ZERO).montoPendiente(new BigDecimal("1000"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(430L).deuda(deuda)
+                .monto(new BigDecimal("300")).fechaPago(LocalDate.of(2026, 7, 10))
+                .anulado(true).build();
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(430L)).thenReturn(Optional.of(pago));
+
+        assertThatThrownBy(() -> service.actualizarPago(430L, PagoDeudaUpdateRequest.builder()
+                .monto(new BigDecimal("200")).fechaPago(LocalDate.of(2026, 7, 12)).build()))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("El pago de deuda ya fue anulado");
+
+        assertThat(pago.getMonto()).isEqualByComparingTo("300");
+        verify(pagoDeudaRepository, org.mockito.Mockito.never()).save(any(PagoDeuda.class));
+        org.mockito.Mockito.verifyNoInteractions(deudaRepository);
+    }
+
+    @Test
+    void editaPagoDeDeudaHistoricamenteDivergenteSinNormalizarTotales() {
+        Venta venta = Venta.builder().idVenta(34L).totalFinal(new BigDecimal("1390"))
+                .montoPagado(new BigDecimal("300")).montoDeuda(new BigDecimal("490"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        Deuda deuda = Deuda.builder().idDeuda(53L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("790")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(new BigDecimal("300")).montoPendiente(new BigDecimal("490"))
+                .estadoPago(EstadoPago.PARCIAL).build();
+        PagoDeuda pago = PagoDeuda.builder().idPagoDeuda(5300L).deuda(deuda)
+                .monto(new BigDecimal("300")).fechaPago(LocalDate.of(2026, 7, 10)).build();
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(5300L)).thenReturn(Optional.of(pago));
+        when(deudaRepository.findByIdForUpdate(53L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(53L))
+                .thenReturn(List.of(pago));
+        when(pagoDeudaRepository.save(any(PagoDeuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.actualizarPago(5300L, PagoDeudaUpdateRequest.builder()
+                .monto(new BigDecimal("200")).fechaPago(LocalDate.of(2026, 7, 11)).build());
+
+        assertThat(pago.getMonto()).isEqualByComparingTo("200");
+        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("790");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("200");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("590");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("1390");
+        assertThat(venta.getMontoPagado()).isEqualByComparingTo("200");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("590");
+        assertThat(venta.getEstadoPago()).isEqualTo(EstadoPago.PARCIAL);
     }
 
     @Test

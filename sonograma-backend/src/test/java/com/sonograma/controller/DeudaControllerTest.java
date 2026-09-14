@@ -1,6 +1,7 @@
 package com.sonograma.controller;
 
 import com.sonograma.exception.NegocioException;
+import com.sonograma.dto.PagoDeudaUpdateRequest;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.service.DeudaService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,5 +50,14 @@ class DeudaControllerTest {
         controller.eliminarPago(17L, principal);
 
         verify(deudaService).eliminarPago(17L, "operador-1");
+    }
+
+    @Test
+    void transmiteLaEdicionDePagoAlServicio() {
+        PagoDeudaUpdateRequest request = PagoDeudaUpdateRequest.builder().build();
+
+        controller.actualizarPago(18L, request);
+
+        verify(deudaService).actualizarPago(18L, request);
     }
 }

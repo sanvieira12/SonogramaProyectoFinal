@@ -3,6 +3,7 @@ package com.sonograma.controller;
 import com.sonograma.dto.DeudaRequestDTO;
 import com.sonograma.dto.DeudaConsolidadaResponseDTO;
 import com.sonograma.dto.DeudaResponseDTO;
+import com.sonograma.dto.PagoDeudaUpdateRequest;
 import com.sonograma.entity.Cliente;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
@@ -106,6 +107,14 @@ public class DeudaController {
             Principal principal) {
         deudaService.eliminarPago(idPagoDeuda, principal != null ? principal.getName() : null);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/pagos/{idPagoDeuda}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+    public ResponseEntity<DeudaResponseDTO> actualizarPago(
+            @PathVariable Long idPagoDeuda,
+            @RequestBody PagoDeudaUpdateRequest request) {
+        return ResponseEntity.ok(deudaService.actualizarPago(idPagoDeuda, request));
     }
 
     @PostMapping("/importar-excel")
