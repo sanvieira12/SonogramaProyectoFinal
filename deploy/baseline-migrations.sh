@@ -66,12 +66,15 @@ for MIGRATION in "$MIGRATION_DIR"/*.sql; do
 
     BASELINE_COUNT=$((BASELINE_COUNT + 1))
     CHECKSUM=$(file_checksum "$MIGRATION") || die "No se pudo calcular checksum para $MIGRATION_NAME"
-    if ! LEDGER_CHECKSUM=$(docker exec sonograma-postgres \
+    if ! LEDGER_CHECKSUM=$(docker exec -i sonograma-postgres \
         psql -Atq \
-        -v migration_filename="$MIGRATION_NAME" \
+        -v "migration_filename=$MIGRATION_NAME" \
         -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
         -d sonograma_db \
-        -c "SELECT checksum FROM sonograma_schema_migrations WHERE filename = :'migration_filename';"); then
+        <<'SQL'
+SELECT checksum FROM sonograma_schema_migrations WHERE filename = :'migration_filename';
+SQL
+    ); then
         die "No se pudo consultar el ledger para $MIGRATION_NAME."
     fi
 
@@ -82,13 +85,15 @@ for MIGRATION in "$MIGRATION_DIR"/*.sql; do
         continue
     fi
 
-    docker exec sonograma-postgres \
+    docker exec -i sonograma-postgres \
         psql -v ON_ERROR_STOP=1 \
-        -v migration_filename="$MIGRATION_NAME" \
-        -v migration_checksum="$CHECKSUM" \
+        -v "migration_filename=$MIGRATION_NAME" \
+        -v "migration_checksum=$CHECKSUM" \
         -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
         -d sonograma_db \
-        -c "INSERT INTO sonograma_schema_migrations (filename, checksum) VALUES (:'migration_filename', :'migration_checksum');"
+        <<'SQL'
+INSERT INTO sonograma_schema_migrations (filename, checksum) VALUES (:'migration_filename', :'migration_checksum');
+SQL
     log "Baseline registrado sin ejecutar SQL: $MIGRATION_NAME"
 done
 

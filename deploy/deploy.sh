@@ -32,24 +32,28 @@ is_historical_migration() {
 
 read_ledger_checksum() {
     local filename="$1"
-    docker exec sonograma-postgres \
+    docker exec -i sonograma-postgres \
         psql -Atq \
-        -v migration_filename="$filename" \
+        -v "migration_filename=$filename" \
         -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
         -d sonograma_db \
-        -c "SELECT checksum FROM sonograma_schema_migrations WHERE filename = :'migration_filename';"
+        <<'SQL'
+SELECT checksum FROM sonograma_schema_migrations WHERE filename = :'migration_filename';
+SQL
 }
 
 record_migration() {
     local filename="$1"
     local checksum="$2"
-    docker exec sonograma-postgres \
+    docker exec -i sonograma-postgres \
         psql -v ON_ERROR_STOP=1 \
-        -v migration_filename="$filename" \
-        -v migration_checksum="$checksum" \
+        -v "migration_filename=$filename" \
+        -v "migration_checksum=$checksum" \
         -U "${SPRING_DATASOURCE_USERNAME:-sonograma_user}" \
         -d sonograma_db \
-        -c "INSERT INTO sonograma_schema_migrations (filename, checksum) VALUES (:'migration_filename', :'migration_checksum');"
+        <<'SQL'
+INSERT INTO sonograma_schema_migrations (filename, checksum) VALUES (:'migration_filename', :'migration_checksum');
+SQL
 }
 
 APP_DIR="${APP_DIR:-/opt/sonograma/app}"
