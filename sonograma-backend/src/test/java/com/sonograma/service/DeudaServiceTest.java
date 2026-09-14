@@ -377,6 +377,85 @@ class DeudaServiceTest {
     }
 
     @Test
+    void pagoYReversionPreservanTotalesDeDeudaVinculadaHistoricamenteDivergente() {
+        Venta venta = Venta.builder().idVenta(34L).totalFinal(new BigDecimal("1390"))
+                .montoPagado(BigDecimal.ZERO).montoDeuda(new BigDecimal("790"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        Deuda deuda = Deuda.builder().idDeuda(53L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("790")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(BigDecimal.ZERO).montoPendiente(new BigDecimal("790"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        List<PagoDeuda> pagos = new ArrayList<>();
+        when(deudaRepository.findByIdForUpdate(53L)).thenReturn(Optional.of(deuda));
+        when(pagoDeudaRepository.findByDeudaIdDeudaAndIdempotencyKey(53L, "historical-divergent-payment"))
+                .thenReturn(Optional.empty());
+        when(pagoDeudaRepository.findByDeudaIdDeudaOrderByFechaPagoDescCreatedAtDesc(53L))
+                .thenAnswer(invocation -> List.copyOf(pagos));
+        when(pagoDeudaRepository.save(any(PagoDeuda.class))).thenAnswer(invocation -> {
+            PagoDeuda pago = invocation.getArgument(0);
+            pago.setIdPagoDeuda(5300L);
+            if (!pagos.contains(pago)) {
+                pagos.add(pago);
+            }
+            return pago;
+        });
+        when(deudaRepository.save(any(Deuda.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.registrarPago(53L, new BigDecimal("300"), null, null,
+                "historical-divergent-payment");
+
+        assertThat(response.getMontoPagado()).isEqualByComparingTo("300");
+        assertThat(response.getMontoPendiente()).isEqualByComparingTo("490");
+        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("790");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("300");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("490");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("1390");
+        assertThat(venta.getMontoPagado()).isEqualByComparingTo("300");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("490");
+        assertThat(venta.getEstadoPago()).isEqualTo(EstadoPago.PARCIAL);
+
+        PagoDeuda pago = pagos.get(0);
+        when(pagoDeudaRepository.findByIdPagoDeudaForUpdate(5300L)).thenReturn(Optional.of(pago));
+
+        service.eliminarPago(5300L, "historical-operator");
+
+        assertThat(pago.getAnulado()).isTrue();
+        assertThat(pago.getMonto()).isEqualByComparingTo("300");
+        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("790");
+        assertThat(deuda.getMontoPagado()).isEqualByComparingTo("0");
+        assertThat(deuda.getMontoPendiente()).isEqualByComparingTo("790");
+        assertThat(deuda.getEstadoPago()).isEqualTo(EstadoPago.PENDIENTE);
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("1390");
+        assertThat(venta.getMontoPagado()).isEqualByComparingTo("0");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("790");
+        assertThat(venta.getEstadoPago()).isEqualTo(EstadoPago.PENDIENTE);
+        verify(pagoDeudaRepository, org.mockito.Mockito.times(2)).save(pago);
+        verify(deudaRepository, org.mockito.Mockito.atLeastOnce()).save(deuda);
+        org.mockito.Mockito.verify(pagoDeudaRepository, org.mockito.Mockito.never()).delete(any(PagoDeuda.class));
+    }
+
+    @Test
+    void edicionDirectaRechazaCambiarElTotalDeUnaDeudaHistoricamenteDivergente() {
+        Venta venta = Venta.builder().idVenta(34L).totalFinal(new BigDecimal("1390"))
+                .montoPagado(BigDecimal.ZERO).montoDeuda(new BigDecimal("790"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        Deuda deuda = Deuda.builder().idDeuda(53L).venta(venta).activa(true)
+                .montoTotal(new BigDecimal("790")).montoPagadoInicial(BigDecimal.ZERO)
+                .montoPagado(BigDecimal.ZERO).montoPendiente(new BigDecimal("790"))
+                .estadoPago(EstadoPago.PENDIENTE).build();
+        when(deudaRepository.findById(53L)).thenReturn(Optional.of(deuda));
+
+        assertThatThrownBy(() -> service.actualizar(53L, DeudaRequestDTO.builder()
+                .montoTotal(new BigDecimal("1000")).build()))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("La deuda vinculada no coincide con el total de la venta; editá la venta para cambiarlo");
+
+        assertThat(deuda.getMontoTotal()).isEqualByComparingTo("790");
+        assertThat(venta.getTotalFinal()).isEqualByComparingTo("1390");
+        assertThat(venta.getMontoDeuda()).isEqualByComparingTo("790");
+    }
+
+    @Test
     void edicionDeVentaSincronizaElNuevoTotalConLaDeudaVinculada() {
         Cliente cliente = cliente(8L, "Cliente");
         Venta venta = Venta.builder().idVenta(8L).totalFinal(new BigDecimal("2300"))
