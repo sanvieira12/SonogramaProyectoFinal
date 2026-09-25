@@ -52,6 +52,7 @@ public class DiscogsImportJobService {
     private final DiscogsImportRowRepository rowRepository;
     private final DiscoRepository discoRepository;
     private final DiscogsCoverService coverService;
+    private final DiscogsLinkParser linkParser;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper;
     private final AudioPreviewService audioPreviewService;
@@ -1008,7 +1009,7 @@ public class DiscogsImportJobService {
                         row.getManualPriceUyu() == null ? PricingMode.AUTO : PricingMode.MANUAL,
                         row.getCountry(), row.getStyle(), row.getTracklist(), row.getImageUrl(), null,
                         firstNonBlank(row.getInternalCode(), generateCode(row)),
-                        ImportMetadataNormalizer.SOURCE_DISCOGS, catalogNotes(row)
+                        ImportMetadataNormalizer.SOURCE_DISCOGS, catalogNotes(row), catalogDiscogsUrl(row)
                 ),
                 incomingCopyState
         );
@@ -1220,7 +1221,21 @@ public class DiscogsImportJobService {
 
     private String catalogDiscogsUrl(DiscogsImportRow row) {
         Long releaseId = releaseIdentity(row);
-        return releaseId == null ? row.getNormalizedDiscogsUrl() : canonicalReleaseUrl(releaseId);
+        if (releaseId == null) return row.getNormalizedDiscogsUrl();
+        String source = firstNonBlank(row.getHyperlinkUrl(), row.getVisibleCellValue());
+        if (isHttpUrl(source)) {
+            Optional<DiscogsLinkParser.DiscogsLink> parsed = linkParser.parse(source);
+            if (parsed.isPresent() && "release".equalsIgnoreCase(parsed.get().type())
+                    && parsed.get().id() == releaseId) {
+                return source.trim();
+            }
+        }
+        return canonicalReleaseUrl(releaseId);
+    }
+
+    private boolean isHttpUrl(String value) {
+        return value != null && (value.regionMatches(true, 0, "https://", 0, 8)
+                || value.regionMatches(true, 0, "http://", 0, 7));
     }
 
     private String canonicalReleaseUrl(Long releaseId) {

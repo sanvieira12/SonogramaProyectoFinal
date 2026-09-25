@@ -254,7 +254,8 @@ public class PreVentaService {
             .costoAdquisicionFuente(acquisition != null ? acquisition.source() : null)
             .artistaSnap(preVenta.getDisco() != null ? preVenta.getDisco().getArtista() : preVenta.getArtistaSnap())
             .albumSnap(preVenta.getDisco() != null ? preVenta.getDisco().getAlbum() : preVenta.getAlbumSnap())
-            .descripcionSnap(preVenta.getDescripcionSnap()).codigoSnap(preVenta.getCodigoDisco()).build();
+            .descripcionSnap(preVenta.getDescripcionSnap()).codigoSnap(preVenta.getCodigoDisco())
+            .clasificacionItem(clasificacionDesdeCatalogo(preVenta.getDisco())).build();
         venta.getDetalles().add(detalleVentaRepository.save(detalle));
 
         preVenta.setEstado("PAGADA");
@@ -270,6 +271,15 @@ public class PreVentaService {
         AcquisitionCostResolution acquisition = profitCalculationService.acquisitionCostForDisco(disco);
         return acquisition.isComplete()
             ? acquisition.unitCostUyu().multiply(BigDecimal.valueOf(cantidad)) : null;
+    }
+
+    private ClasificacionItemVenta clasificacionDesdeCatalogo(Disco disco) {
+        if (disco == null || disco.getCondicion() == null) return null;
+        return switch (disco.getCondicion()) {
+            case NUEVO -> ClasificacionItemVenta.NUEVO;
+            case USADO -> ClasificacionItemVenta.USADO;
+            case CONSIGNACION, CATALOGO -> null;
+        };
     }
 
     public void eliminar(Long id) {

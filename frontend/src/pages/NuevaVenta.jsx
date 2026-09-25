@@ -119,6 +119,7 @@ export default function NuevaVenta() {
     codigo: '',
     cantidad: '1',
     precioUnitario: '',
+    clasificacionItem: '',
   })
 
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
@@ -300,6 +301,10 @@ export default function NuevaVenta() {
     const precio = toNumber(manualForm.precioUnitario)
     const descripcion = manualForm.descripcion.trim()
       || [manualForm.artista, manualForm.album].map(v => v.trim()).filter(Boolean).join(' — ')
+    if (!manualForm.clasificacionItem) {
+      setErrores(prev => ({ ...prev, disco: 'Seleccioná si el ítem manual es nuevo o usado' }))
+      return
+    }
     if (!descripcion || precio <= 0) {
       setErrores(prev => ({ ...prev, disco: 'Completá descripción y precio del disco fuera de catálogo' }))
       return
@@ -313,8 +318,9 @@ export default function NuevaVenta() {
       codigo: manualForm.codigo.trim(),
       cantidad: String(cantidad),
       precioUnitario: String(precio),
+      clasificacionItem: manualForm.clasificacionItem,
     }])
-    setManualForm({ descripcion: '', artista: '', album: '', codigo: '', cantidad: '1', precioUnitario: '' })
+    setManualForm({ descripcion: '', artista: '', album: '', codigo: '', cantidad: '1', precioUnitario: '', clasificacionItem: '' })
     setMostrarManual(false)
     setErrores(prev => ({ ...prev, disco: undefined }))
   }
@@ -422,6 +428,7 @@ export default function NuevaVenta() {
     carrito.forEach(item => {
       if (!item.manualItem && !['DISPONIBLE', 'RESERVADO'].includes(item.disco.estado))
         e.disco = `"${item.disco.artista}" está ${ESTADO_LABELS[item.disco.estado]?.toLowerCase() || item.disco.estado}`
+      if (item.manualItem && !item.clasificacionItem) e.disco = 'Seleccioná si el ítem manual es nuevo o usado'
       if (cantidadItem(item) <= 0) e.disco = 'La cantidad debe ser mayor a cero'
       if (toNumber(item.precioUnitario) <= 0) e.disco = 'Ingresá un precio válido para cada ítem'
     })
@@ -454,6 +461,7 @@ export default function NuevaVenta() {
           codigo: item.manualItem ? item.codigo : undefined,
           codigoQr: item.codigoQr || undefined,
           manualItem: Boolean(item.manualItem),
+          clasificacionItem: item.manualItem ? item.clasificacionItem : undefined,
           cantidad: cantidadItem(item),
           precioUnitario: Number(toNumber(item.precioUnitario).toFixed(2)),
         })),
@@ -544,7 +552,7 @@ export default function NuevaVenta() {
                     </div>
                     <div className="text-xs text-slate-400 dark:text-stone-500 truncate">
                       {item.manualItem
-                        ? [item.codigo && `Código ${item.codigo}`, item.artista, item.album].filter(Boolean).join(' · ')
+                        ? [item.clasificacionItem && (item.clasificacionItem === 'NUEVO' ? 'Nuevo' : 'Usado'), item.codigo && `Código ${item.codigo}`, item.artista, item.album].filter(Boolean).join(' · ')
                         : item.disco.codigoInterno || ''}
                     </div>
                   </div>
@@ -617,6 +625,19 @@ export default function NuevaVenta() {
                       className="input"
                       placeholder="Código o notas"
                     />
+                    <label className="text-xs text-slate-500 dark:text-stone-400">
+                      Tipo
+                      <select
+                        value={manualForm.clasificacionItem}
+                        onChange={e => setManualForm(f => ({ ...f, clasificacionItem: e.target.value }))}
+                        className="input mt-1 w-full"
+                        aria-label="Tipo de ítem manual"
+                      >
+                        <option value="">Seleccionar tipo</option>
+                        <option value="NUEVO">Nuevo</option>
+                        <option value="USADO">Usado</option>
+                      </select>
+                    </label>
                     <div className="grid grid-cols-2 gap-3">
                       <input
                         type="number"

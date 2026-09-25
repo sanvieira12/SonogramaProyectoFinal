@@ -1,5 +1,6 @@
 package com.sonograma.entity;
 
+import com.sonograma.enums.ClasificacionItemVenta;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -70,6 +71,11 @@ public class DetalleVenta {
     @Column(name = "manual_item", nullable = false)
     @Builder.Default
     private Boolean manualItem = false;
+
+    /** Commercial classification at the time of sale; nullable for legacy/ambiguous history. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "clasificacion_item", length = 10, updatable = false)
+    private ClasificacionItemVenta clasificacionItem;
 
     @Column(name = "copy_ids_snapshot", columnDefinition = "TEXT")
     private String copyIdsSnapshot;

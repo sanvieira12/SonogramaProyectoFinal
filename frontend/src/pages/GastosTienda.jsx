@@ -3,8 +3,16 @@ import { api } from '../api/sonograma'
 import { CATEGORY_LABELS, EXPENSE_CATEGORIES, normalizeExpenseCategory } from './gastosCategorias'
 import { businessDateInMontevideo } from '../utils/businessDate'
 
+const PERSONAL_EXPENSE_MONTHLY_LIMIT = 25000
+
 function fmtMoney(value) {
   return `UYU $${Number(value || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function personalExpenseStatus(amount) {
+  if (amount >= PERSONAL_EXPENSE_MONTHLY_LIMIT) return 'red'
+  if (amount >= 15000) return 'yellow'
+  return 'green'
 }
 
 function fechaInputLocal(date = new Date()) {
@@ -224,15 +232,30 @@ export default function GastosTienda() {
         <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">Registro manual de gastos del local.</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="card p-4 text-center">
           <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Total gastos</p>
           <p className="text-xl font-bold mt-1 tabular-nums text-slate-900 dark:text-white">{fmtMoney(summary.total)}</p>
         </div>
         {summary.categories.map(category => (
-          <div key={category.key} className="card p-4 text-center">
+          <div
+            key={category.key}
+            data-testid={category.key === 'PERSONAL_EXPENSES' ? 'personal-expenses-card' : undefined}
+            data-personal-status={category.key === 'PERSONAL_EXPENSES' ? personalExpenseStatus(category.total) : undefined}
+            className={`card p-4 text-center ${category.key === 'PERSONAL_EXPENSES' ? ({
+              green: 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20',
+              yellow: 'border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20',
+              red: 'border-red-300 bg-red-50/60 dark:border-red-800 dark:bg-red-950/20',
+            }[personalExpenseStatus(category.total)]) : ''}`}
+          >
             <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{category.label}</p>
-            <p className="text-xl font-bold mt-1 tabular-nums text-slate-900 dark:text-white">{fmtMoney(category.total)}</p>
+            {category.key === 'PERSONAL_EXPENSES' ? (
+              <p className="text-sm sm:text-base font-bold mt-1 leading-tight tabular-nums text-slate-900 dark:text-white">
+                {fmtMoney(category.total)} / {fmtMoney(PERSONAL_EXPENSE_MONTHLY_LIMIT)}
+              </p>
+            ) : (
+              <p className="text-xl font-bold mt-1 tabular-nums text-slate-900 dark:text-white">{fmtMoney(category.total)}</p>
+            )}
           </div>
         ))}
       </div>

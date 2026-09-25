@@ -364,9 +364,21 @@ run_baseline
 [ "$(count_lines '^RECORD|' "$LOG_FILE")" -eq 50 ] || fail 'repeat baseline inserted duplicate records'
 
 before_compose=$(count_lines '^COMPOSE|' "$LOG_FILE")
+pending_migrations=0
+for migration in "$APP_DIR"/docs/migraciones/*.sql; do
+    [ -f "$migration" ] || continue
+    prefix=$(basename "$migration" | cut -d_ -f1)
+    if [[ "$prefix" =~ ^[0-9]{3}$ ]] && (( 10#$prefix > 47 )); then
+        pending_migrations=$((pending_migrations + 1))
+    fi
+done
 run_deploy "$STATE_FILE" env
-[ "$(count_lines '^SQL|' "$LOG_FILE")" -eq 0 ] || fail 'already-applied migrations were replayed'
+[ "$(count_lines '^SQL|' "$LOG_FILE")" -eq "$pending_migrations" ] || fail 'pending migrations were not applied exactly once'
 [ "$(count_lines '^COMPOSE|' "$LOG_FILE")" -gt "$before_compose" ] || fail 'successful deployment did not reach continuation'
+
+before_sql=$(count_lines '^SQL|' "$LOG_FILE")
+run_deploy "$STATE_FILE" env
+[ "$(count_lines '^SQL|' "$LOG_FILE")" -eq "$before_sql" ] || fail 'already-applied migrations were replayed'
 
 cp "$APP_DIR/docs/migraciones/047_discogs_manual_batches.sql" "$APP_DIR/docs/migraciones/048_mock_new.sql"
 printf '%s\n' '-- MOCK_MIGRATION_NAME=048_mock_new.sql' >> "$APP_DIR/docs/migraciones/048_mock_new.sql"

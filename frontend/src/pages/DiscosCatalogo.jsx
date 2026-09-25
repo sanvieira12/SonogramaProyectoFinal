@@ -143,6 +143,7 @@ function logicalManualSource(customerCode, sources) {
     batchId: representative?.batchId,
     productos: copies,
     copyCount: copies,
+    porcentajeSonograma: representative?.porcentajeSonograma ?? null,
   }
 }
 
@@ -789,6 +790,7 @@ export default function DiscosCatalogo() {
   const [batchPorFinalizar, setBatchPorFinalizar] = useState(null)
   const [finalizandoBatch, setFinalizandoBatch] = useState(false)
   const [errorFinalizacionBatch, setErrorFinalizacionBatch] = useState('')
+  const [porcentajeSonogramaBatch, setPorcentajeSonogramaBatch] = useState('')
   const debounceRef = useRef(null)
 
   useEffect(() => {
@@ -829,6 +831,7 @@ export default function DiscosCatalogo() {
     setErrorExportacionZip('')
     setBatchPorFinalizar(null)
     setErrorFinalizacionBatch('')
+    setPorcentajeSonogramaBatch('')
     setPagina(1)
     setLoading(true)
     setError('')
@@ -879,18 +882,23 @@ export default function DiscosCatalogo() {
 
   async function finalizarBatch() {
     if (finalizandoBatch || !batchPorFinalizar) return
+    if (!porcentajeSonogramaBatch) {
+      setErrorFinalizacionBatch('Seleccioná el porcentaje Sonograma para finalizar el batch.')
+      return
+    }
     const batchId = batchPorFinalizar.batchId
       || String(batchPorFinalizar.key || '').replace(/^manual:/i, '')
     setFinalizandoBatch(true)
     setErrorFinalizacionBatch('')
     try {
-      const finalized = await api.importaciones.discogsManualBatchFinalize(batchId)
+      const finalized = await api.importaciones.discogsManualBatchFinalize(batchId, Number(porcentajeSonogramaBatch))
       setFuentesImportacionDiscogs(prev => prev.map(source => (
         source.batchId === batchPorFinalizar.batchId
-          ? { ...source, status: finalized.status || 'FINALIZED', label: null }
+          ? { ...source, status: finalized.status || 'FINALIZED', label: null, porcentajeSonograma: finalized.porcentajeSonograma }
           : source
       )))
       setBatchPorFinalizar(null)
+      setPorcentajeSonogramaBatch('')
       await cargarFuentesImportacionDiscogs()
     } catch (err) {
       setErrorFinalizacionBatch(err.message || 'No se pudo finalizar el batch Discogs.')
@@ -1144,6 +1152,11 @@ export default function DiscosCatalogo() {
                 Preparando Excel… Generando archivo… Descargando…
               </div>
             )}
+            {batchManualSeleccionado.status === 'FINALIZED' && batchManualSeleccionado.porcentajeSonograma != null && (
+              <p className="mt-1 text-xs text-slate-500 dark:text-stone-400">
+                Porcentaje Sonograma: {batchManualSeleccionado.porcentajeSonograma}%
+              </p>
+            )}
             {errorExportacionExcel && (
               <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{errorExportacionExcel}</p>
             )}
@@ -1178,6 +1191,7 @@ export default function DiscosCatalogo() {
                 type="button"
                 onClick={() => {
                   setErrorFinalizacionBatch('')
+                  setPorcentajeSonogramaBatch('')
                   setBatchPorFinalizar(batchManualSeleccionado)
                 }}
                 disabled={finalizandoBatch}
@@ -1438,6 +1452,26 @@ export default function DiscosCatalogo() {
           cargandoTexto="Finalizando…"
           confirmarTexto="Finalizar importación"
           confirmarClassName="bg-[#B8975E] hover:bg-[#9f814c]"
+          confirmarDeshabilitado={!porcentajeSonogramaBatch}
+          contenido={(
+            <label className="block text-sm text-slate-600 dark:text-white/80 mb-6">
+              Porcentaje Sonograma
+              <select
+                className="input w-full mt-2"
+                value={porcentajeSonogramaBatch}
+                onChange={event => {
+                  setPorcentajeSonogramaBatch(event.target.value)
+                  setErrorFinalizacionBatch('')
+                }}
+                aria-label="Porcentaje Sonograma"
+              >
+                <option value="">Seleccionar porcentaje</option>
+                {[10, 15, 20, 25, 30, 35, 40, 45].map(value => (
+                  <option key={value} value={value}>{value}%</option>
+                ))}
+              </select>
+            </label>
+          )}
           error={errorFinalizacionBatch}
         />
       )}

@@ -12,6 +12,9 @@ import com.sonograma.entity.Envio;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoDisco;
+import com.sonograma.enums.ClasificacionItemVenta;
+import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.EstadoVenta;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.repository.DetalleVentaRepository;
@@ -41,6 +44,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -151,6 +155,8 @@ class VentaServiceTest {
         Cliente cliente = cliente(1L);
         Disco discoA = disco(10L, "A", "Uno", "400", "1000", 1);
         Disco discoB = disco(11L, "B", "Dos", "600", "2000", 2);
+        discoA.setCondicion(CondicionDisco.NUEVO);
+        discoB.setCondicion(CondicionDisco.USADO);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(discoA));
         when(discoRepository.findById(11L)).thenReturn(Optional.of(discoB));
@@ -187,7 +193,97 @@ class VentaServiceTest {
         assertThat(response.getEstadoPago()).isEqualTo("PAGADO");
         assertThat(discoA.getCantidadCopias()).isZero();
         assertThat(discoB.getCantidadCopias()).isEqualTo(1);
+        assertThat(response.getDetalles()).extracting(com.sonograma.dto.DetalleVentaResponseDTO::getClasificacionItem)
+                .containsExactly(ClasificacionItemVenta.NUEVO, ClasificacionItemVenta.USADO);
         verify(deudaRepository, never()).save(any(Deuda.class));
+    }
+
+    @Test
+    void registrarVentaCapturaClasificacionCatalogoEnElDetalle() {
+        Cliente cliente = cliente(1L);
+        Disco disco = disco(10L, "A", "Uno", "400", "1000", 1);
+        disco.setCondicion(CondicionDisco.NUEVO);
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
+        when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(104L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaResponseDTO response = ventaService.registrarVenta(VentaRequestDTO.builder()
+                .idCliente(1L)
+                .detalles(java.util.List.of(DetalleVentaDTO.builder().idDisco(10L).precioUnitario(new BigDecimal("1000")).build()))
+                .canalVenta("LOCAL").tipoEntrega("RETIRO").total(new BigDecimal("1000")).build());
+
+        assertThat(response.getDetalles()).singleElement()
+                .extracting(com.sonograma.dto.DetalleVentaResponseDTO::getClasificacionItem)
+                .isEqualTo(ClasificacionItemVenta.NUEVO);
+    }
+
+    @Test
+    void registrarVentaNoAdivinaClasificacionConsignacion() {
+        Cliente cliente = cliente(1L);
+        Disco disco = disco(12L, "A", "Consignado", "400", "1000", 1);
+        disco.setCondicion(CondicionDisco.CONSIGNACION);
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(discoRepository.findById(12L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(12L, 12L, 1)));
+        when(discoQrCopyService.countAvailableCopies(12L)).thenReturn(1L, 0L);
+        when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(12L, 12L, 1)));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(107L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaResponseDTO response = ventaService.registrarVenta(VentaRequestDTO.builder().idCliente(1L)
+                .detalles(java.util.List.of(DetalleVentaDTO.builder().idDisco(12L).precioUnitario(new BigDecimal("1000")).build()))
+                .canalVenta("LOCAL").tipoEntrega("RETIRO").total(new BigDecimal("1000")).build());
+
+        assertThat(response.getDetalles()).singleElement()
+                .extracting(com.sonograma.dto.DetalleVentaResponseDTO::getClasificacionItem)
+                .isNull();
+    }
+
+    @Test
+    void registrarVentaManualExigeClasificacion() {
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente(1L)));
+        VentaRequestDTO request = VentaRequestDTO.builder().idCliente(1L)
+                .detalles(java.util.List.of(DetalleVentaDTO.builder().descripcion("Manual").precioUnitario(new BigDecimal("500")).build()))
+                .canalVenta("LOCAL").tipoEntrega("RETIRO").total(new BigDecimal("500")).build();
+
+        assertThatThrownBy(() -> ventaService.registrarVenta(request))
+                .isInstanceOf(NegocioException.class)
+                .hasMessageContaining("nuevo o usado");
+    }
+
+    @Test
+    void actualizarVentaPreservaSnapshotManualExistenteAunqueElPayloadNoLoRepita() {
+        Cliente cliente = cliente(1L);
+        DetalleVenta anterior = DetalleVenta.builder().idDetalle(77L).venta(null).disco(null)
+                .precioUnitario(new BigDecimal("500")).cantidad(1).manualItem(true)
+                .descripcionSnap("Manual histórico").clasificacionItem(ClasificacionItemVenta.USADO).build();
+        Venta venta = Venta.builder().idVenta(106L).cliente(cliente).fechaVenta(LocalDateTime.of(2026, 9, 1, 10, 0))
+                .estado(EstadoVenta.COMPLETADA).origen("VENTA").detalles(new java.util.ArrayList<>(java.util.List.of(anterior)))
+                .build();
+        anterior.setVenta(venta);
+        when(ventaRepository.findById(106L)).thenReturn(Optional.of(venta));
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ventaService.actualizarVenta(106L, VentaRequestDTO.builder().idCliente(1L).canalVenta("LOCAL")
+                .tipoEntrega("RETIRO").total(new BigDecimal("650"))
+                .detalles(java.util.List.of(DetalleVentaDTO.builder().idDetalle(77L).descripcion("Manual histórico")
+                        .precioUnitario(new BigDecimal("650")).build())).build());
+
+        verify(detalleVentaRepository).save(argThat(d -> d.getClasificacionItem() == ClasificacionItemVenta.USADO));
     }
 
     @Test
@@ -237,6 +333,7 @@ class VentaServiceTest {
                                 .cantidad(2)
                                 .precioUnitario(new BigDecimal("750"))
                                 .manualItem(true)
+                                .clasificacionItem(ClasificacionItemVenta.USADO)
                                 .build()
                 ))
                 .canalVenta("LOCAL")
@@ -254,9 +351,30 @@ class VentaServiceTest {
             assertThat(detalle.getIdDisco()).isNull();
             assertThat(detalle.getManualItem()).isTrue();
             assertThat(detalle.getCantidad()).isEqualTo(2);
+            assertThat(detalle.getClasificacionItem()).isEqualTo(ClasificacionItemVenta.USADO);
         });
         verify(discoRepository, never()).save(any(Disco.class));
         verify(deudaService).sincronizarVenta(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void registrarVentaManualCapturaClasificacionNueva() {
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente(1L)));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(105L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaResponseDTO response = ventaService.registrarVenta(VentaRequestDTO.builder().idCliente(1L)
+                .detalles(java.util.List.of(DetalleVentaDTO.builder().descripcion("Manual nuevo")
+                        .precioUnitario(new BigDecimal("500")).clasificacionItem(ClasificacionItemVenta.NUEVO).build()))
+                .canalVenta("LOCAL").tipoEntrega("RETIRO").total(new BigDecimal("500")).build());
+
+        assertThat(response.getDetalles()).singleElement()
+                .extracting(com.sonograma.dto.DetalleVentaResponseDTO::getClasificacionItem)
+                .isEqualTo(ClasificacionItemVenta.NUEVO);
     }
 
     @Test
@@ -279,7 +397,7 @@ class VentaServiceTest {
                 .idCliente(1L)
                 .detalles(java.util.List.of(
                         DetalleVentaDTO.builder().idDisco(10L).cantidad(2).precioUnitario(new BigDecimal("1000")).build(),
-                        DetalleVentaDTO.builder().descripcion("Disco feria").cantidad(1).precioUnitario(new BigDecimal("400")).manualItem(true).build()
+                        DetalleVentaDTO.builder().descripcion("Disco feria").cantidad(1).precioUnitario(new BigDecimal("400")).manualItem(true).clasificacionItem(ClasificacionItemVenta.USADO).build()
                 ))
                 .canalVenta("LOCAL")
                 .tipoEntrega("RETIRO")

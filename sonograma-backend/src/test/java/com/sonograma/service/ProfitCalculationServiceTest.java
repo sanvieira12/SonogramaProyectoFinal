@@ -2,6 +2,8 @@ package com.sonograma.service;
 
 import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PedidoItem;
 import com.sonograma.entity.Venta;
@@ -26,6 +28,7 @@ class ProfitCalculationServiceTest {
     private com.sonograma.repository.PedidoRepository pedidoRepository;
     private com.sonograma.repository.PedidoItemRepository pedidoItemRepository;
     private CatalogPricingService catalogPricingService;
+    private com.sonograma.repository.DiscoQrCopyRepository copyRepository;
     private ProfitCalculationService service;
 
     @BeforeEach
@@ -34,7 +37,9 @@ class ProfitCalculationServiceTest {
         pedidoRepository = mock(com.sonograma.repository.PedidoRepository.class);
         pedidoItemRepository = mock(com.sonograma.repository.PedidoItemRepository.class);
         catalogPricingService = mock(CatalogPricingService.class);
-        service = new ProfitCalculationService(ventaRepository, pedidoRepository, pedidoItemRepository, catalogPricingService);
+        copyRepository = mock(com.sonograma.repository.DiscoQrCopyRepository.class);
+        service = new ProfitCalculationService(ventaRepository, pedidoRepository, pedidoItemRepository,
+                catalogPricingService, copyRepository);
     }
 
     @Test
@@ -120,6 +125,179 @@ class ProfitCalculationServiceTest {
         assertThat(result.acquisitionCost()).isEqualByComparingTo("791.505000");
         assertThat(result.netProfit()).isEqualByComparingTo("474.50");
         assertThat(result.costSource()).isEqualTo("STOCK_REAL_COST_UYU");
+    }
+
+    @Test
+    void manualDiscogsPercentageUsesRealizedUnitPriceNotAskingPriceOrDiscoCost() {
+        Disco disco = Disco.builder().idDisco(901L)
+                .precioVenta(new BigDecimal("1000"))
+                .costo(new BigDecimal("12.34"))
+                .build();
+        DetalleVenta detail = manualDetail("900", 901L, disco, 30);
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(901L)))
+                .thenReturn(List.of(manualCopy(901L, 901L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("900", null, detail)).items().getFirst();
+
+        assertThat(result.netProfit()).isEqualByComparingTo("270.00");
+        assertThat(result.netProfit()).isNotEqualByComparingTo("300.00");
+        assertThat(result.costSource()).isEqualTo("MANUAL_DISCOGS_BATCH_PERCENTAGE");
+        assertThat(disco.getCosto()).isEqualByComparingTo("12.34");
+    }
+
+    @Test
+    void acceptsEveryAllowedBatchPercentage() {
+        for (int percentage : List.of(10, 15, 20, 25, 30, 35, 40, 45)) {
+            long copyId = 1000L + percentage;
+            Disco disco = Disco.builder().idDisco(copyId).precioVenta(new BigDecimal("1000")).build();
+            DetalleVenta detail = manualDetail("900", copyId, disco, percentage);
+            when(copyRepository.findAllWithManualBatchByIdIn(List.of(copyId)))
+                    .thenReturn(List.of(manualCopy(copyId, copyId, percentage)));
+            assertThat(service.netProfitForSale(sale("900", null, detail)).netProfit())
+                    .isEqualByComparingTo(new BigDecimal(percentage * 9).setScale(2));
+        }
+    }
+
+    @Test
+    void roundsFractionalManualDiscogsProfitPerCopyWithHalfUp() {
+        Disco disco = Disco.builder().idDisco(902L).build();
+        DetalleVenta detail = manualDetail("999.99", 902L, disco, 30);
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(902L)))
+                .thenReturn(List.of(manualCopy(902L, 902L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("999.99", null, detail)).items().getFirst();
+
+        assertThat(result.netProfit()).isEqualByComparingTo("300.00");
+    }
+
+    @Test
+    void calculatesEachCopyWhenOneDetailContainsTwoCopiesFromTheSameBatch() {
+        Disco disco = Disco.builder().idDisco(903L).build();
+        DetalleVenta detail = manualDetail("900", 903L, disco, 30);
+        detail.setCantidad(2);
+        detail.setCopyIdsSnapshot("9031,9032");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9031L, 9032L)))
+                .thenReturn(List.of(manualCopy(9031L, 903L, 30), manualCopy(9032L, 903L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("1800", null, detail)).items().getFirst();
+
+        assertThat(result.actualSaleAmount()).isEqualByComparingTo("1800.00");
+        assertThat(result.netProfit()).isEqualByComparingTo("540.00");
+        assertThat(result.acquisitionCost()).isEqualByComparingTo("1260.000000");
+    }
+
+    @Test
+    void calculatesDifferentBatchPercentagesPerCopyAndAggregatesThem() {
+        Disco disco = Disco.builder().idDisco(904L).build();
+        DetalleVenta detail = manualDetail("900", 904L, disco, 30);
+        detail.setCantidad(2);
+        detail.setCopyIdsSnapshot("9041,9042");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9041L, 9042L)))
+                .thenReturn(List.of(manualCopy(9041L, 904L, 30), manualCopy(9042L, 904L, 20)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("1800", null, detail)).items().getFirst();
+
+        assertThat(result.netProfit()).isEqualByComparingTo("450.00");
+    }
+
+    @Test
+    void nullBatchPercentageIsUnavailableAndNeverInvented() {
+        Disco disco = Disco.builder().idDisco(905L).costo(new BigDecimal("1")).build();
+        DetalleVenta detail = manualDetail("900", 905L, disco, null);
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(905L)))
+                .thenReturn(List.of(manualCopy(905L, 905L, null)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("900", null, detail)).items().getFirst();
+
+        assertThat(result.status()).isEqualTo(ProfitStatus.UNAVAILABLE);
+        assertThat(result.netProfit()).isNull();
+        assertThat(result.unavailableReason()).contains("percentage");
+    }
+
+    @Test
+    void invalidAndMissingCopyIdsProduceKnownPartialProfitWithoutSubstringCollisions() {
+        Disco disco = Disco.builder().idDisco(906L).build();
+        DetalleVenta detail = manualDetail("900", 906L, disco, 30);
+        detail.setCantidad(2);
+        detail.setCopyIdsSnapshot("9061,not-a-number");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9061L)))
+                .thenReturn(List.of(manualCopy(9061L, 906L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("1800", null, detail)).items().getFirst();
+
+        assertThat(result.status()).isEqualTo(ProfitStatus.UNAVAILABLE);
+        assertThat(result.netProfit()).isEqualByComparingTo("270.00");
+    }
+
+    @Test
+    void extraCopyIdsAreNotCalculatedBeyondDetailQuantity() {
+        Disco disco = Disco.builder().idDisco(907L).build();
+        DetalleVenta detail = manualDetail("900", 907L, disco, 30);
+        detail.setCantidad(2);
+        detail.setCopyIdsSnapshot("9071,9072,9073");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9071L, 9072L)))
+                .thenReturn(List.of(manualCopy(9071L, 907L, 30), manualCopy(9072L, 907L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("1800", null, detail)).items().getFirst();
+
+        assertThat(result.status()).isEqualTo(ProfitStatus.UNAVAILABLE);
+        assertThat(result.netProfit()).isEqualByComparingTo("540.00");
+    }
+
+    @Test
+    void missingSnapshotKeepsGenericStockProfitPath() {
+        Disco disco = Disco.builder().idDisco(908L).costo(new BigDecimal("10")).build();
+        DetalleVenta detail = detailWithDisco("900", null, disco);
+        when(catalogPricingService.realCostUyuForStock(disco)).thenReturn(new BigDecimal("400"));
+
+        ProfitItemResult result = service.netProfitForSale(sale("900", null, detail)).items().getFirst();
+
+        assertThat(result.netProfit()).isEqualByComparingTo("500.00");
+        assertThat(result.costSource()).isEqualTo("STOCK_REAL_COST_UYU");
+    }
+
+    @Test
+    void vinylFutureCopyWithoutManualBatchKeepsGenericStockCostSemantics() {
+        Disco disco = disco(910L, "9.49");
+        DetalleVenta detail = detailWithDisco("900", null, disco);
+        detail.setCopyIdsSnapshot("9101");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9101L))).thenReturn(List.of(
+                DiscoQrCopy.builder().id(9101L).idDisco(910L).copyNumber(1).build()));
+        when(catalogPricingService.realCostUyuForStock(disco)).thenReturn(new BigDecimal("500"));
+
+        ProfitItemResult result = service.netProfitForSale(sale("900", null, detail)).items().getFirst();
+
+        assertThat(result.netProfit()).isEqualByComparingTo("400.00");
+        assertThat(result.costSource()).isEqualTo("STOCK_REAL_COST_UYU");
+    }
+
+    @Test
+    void blankCopyTokenCannotShiftAValidCopyIntoAnotherQuantitySlot() {
+        Disco disco = Disco.builder().idDisco(911L).build();
+        DetalleVenta detail = manualDetail("900", 9111L, disco, 30);
+        detail.setCantidad(2);
+        detail.setCopyIdsSnapshot(",9111");
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(9111L)))
+                .thenReturn(List.of(manualCopy(9111L, 911L, 30)));
+
+        ProfitItemResult result = service.netProfitForSale(sale("1800", null, detail)).items().getFirst();
+
+        assertThat(result.status()).isEqualTo(ProfitStatus.UNAVAILABLE);
+        assertThat(result.netProfit()).isEqualByComparingTo("270.00");
+    }
+
+    @Test
+    void editedRealizedPriceUsesSameFixedBatchPercentage() {
+        Disco disco = Disco.builder().idDisco(909L).build();
+        DetalleVenta detail = manualDetail("900", 909L, disco, 30);
+        when(copyRepository.findAllWithManualBatchByIdIn(List.of(909L)))
+                .thenReturn(List.of(manualCopy(909L, 909L, 30)));
+        assertThat(service.netProfitForSale(sale("900", null, detail)).netProfit())
+                .isEqualByComparingTo("270.00");
+
+        detail.setPrecioUnitario(new BigDecimal("800"));
+        assertThat(service.netProfitForSale(sale("800", null, detail)).netProfit())
+                .isEqualByComparingTo("240.00");
     }
 
     @Test
@@ -327,6 +505,20 @@ class ProfitCalculationServiceTest {
         DetalleVenta detail = detail(salePrice, acquisitionCost, 1);
         detail.setDisco(disco);
         return detail;
+    }
+
+    private DetalleVenta manualDetail(String salePrice, Long copyId, Disco disco, Integer percentage) {
+        DetalleVenta detail = detailWithDisco(salePrice, null, disco);
+        detail.setCopyIdsSnapshot(String.valueOf(copyId));
+        return detail;
+    }
+
+    private DiscoQrCopy manualCopy(Long id, Long discoId, Integer percentage) {
+        return DiscoQrCopy.builder().id(id).idDisco(discoId).copyNumber(1).codigoQr("manual-" + id)
+                .precioVenta(new BigDecimal("1000"))
+                .manualDiscogsBatch(DiscogsManualBatch.builder().id(id + 10_000)
+                        .porcentajeSonograma(percentage).build())
+                .build();
     }
 
     private PedidoItem purchaseItem(Disco disco, String landedUyu, String landedEur) {

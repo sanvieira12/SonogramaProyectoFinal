@@ -166,13 +166,27 @@ class ManualDiscogsReceiptOperationServiceTest {
     }
 
     @Test
+    void manualReceiptPreservesFullDiscogsUrlForCustomerExport() {
+        String fullUrl = "https://www.discogs.com/es/release/456-ZP-Tracid";
+        DiscoImportPreviewDTO preview = pendingPreview(456L);
+        preview.setDiscogsUrl(fullUrl);
+
+        ManualDiscogsImportResultDTO result = importService.guardar(preview);
+
+        assertThat(discoRepository.findById(result.getProductId())).get()
+                .extracting(Disco::getDiscogsUrl)
+                .isEqualTo(fullUrl);
+    }
+
+    @Test
     void finalizingBatchMakesNextSameCustomerImportCreateANewBatch() {
         ManualDiscogsImportResultDTO first = importService.guardar(pendingPreview(456L));
         DiscogsManualBatch oldBatch = batchRepository.findAll().getFirst();
         java.util.List<Long> oldCopyIds = copyRepository.findByManualDiscogsBatchIdOrderByCopyNumber(oldBatch.getId())
                 .stream().map(com.sonograma.entity.DiscoQrCopy::getId).toList();
 
-        DiscogsManualBatchService.FinalizedBatch finalized = batchService.finalizeBatch(oldBatch.getId());
+        DiscogsManualBatchService.FinalizedBatch finalized = batchService.finalizeBatch(oldBatch.getId(),
+                new com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO(25));
         assertThat(finalized.status()).isEqualTo(com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED);
 
         ManualDiscogsImportResultDTO second = importService.guardar(pendingPreview(456L));

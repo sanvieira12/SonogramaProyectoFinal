@@ -153,6 +153,8 @@ class DiscogsCatalogJobFilterRepositoryTest {
         DiscogsManualBatch first = manualBatchRepository.save(manualBatch("JPH", DiscogsManualBatchStatus.OPEN));
         DiscogsManualBatch second = manualBatchRepository.save(manualBatch("jph", DiscogsManualBatchStatus.FINALIZED));
         DiscogsManualBatch otherCustomer = manualBatchRepository.save(manualBatch("SV3", DiscogsManualBatchStatus.FINALIZED));
+        otherCustomer.setPorcentajeSonograma(40);
+        manualBatchRepository.save(otherCustomer);
         Disco shared = discoRepository.save(catalogProduct(3000));
         Disco onlyInSecond = discoRepository.save(catalogProduct(3001));
 
@@ -180,6 +182,10 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .singleElement()
                 .extracting(DiscogsCatalogSourceDTO::label)
                 .isEqualTo("SV3 · 1 discos · Finalizada");
+        assertThat(discoService.listarFuentesImportacionDiscogs())
+                .filteredOn(source -> source.key().equals("manual:customer:SV3"))
+                .singleElement()
+                .satisfies(source -> assertThat(source.porcentajeSonograma()).isEqualTo(40));
         assertThat(discoService.obtenerTodos(null, "manual:customer:jph"))
                 .extracting(dto -> dto.getIdDisco())
                 .containsExactlyInAnyOrder(shared.getIdDisco(), onlyInSecond.getIdDisco());

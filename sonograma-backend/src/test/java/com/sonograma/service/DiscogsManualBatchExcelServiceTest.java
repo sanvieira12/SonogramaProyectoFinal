@@ -10,10 +10,13 @@ import com.sonograma.enums.EstadoDisco;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscoRepository;
 import com.sonograma.repository.DiscogsManualBatchRepository;
+import com.sonograma.service.importacion.DiscogsExcelParser;
+import com.sonograma.service.importacion.DiscogsLinkParser;
 import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
@@ -38,7 +41,8 @@ class DiscogsManualBatchExcelServiceTest {
     @Test
     void exportsOneRowPerExactCopyWithCanonicalColumnsAndValues() throws Exception {
         DiscogsManualBatch batch = batch(15L, DiscogsManualBatchStatus.FINALIZED);
-        Disco first = product(10L, "https://www.discogs.com/release/111", "Tech House", "INTERNAL-1", EstadoDisco.VENDIDO);
+        String fullUrl = "https://www.discogs.com/es/release/111-ZP-Tracid";
+        Disco first = product(10L, fullUrl, "Tech House", "INTERNAL-1", EstadoDisco.VENDIDO);
         Disco second = product(20L, null, "Techno", "INTERNAL-2", EstadoDisco.DISPONIBLE);
         DiscoQrCopy firstAvailable = copy(101L, first, 1, new BigDecimal("937.50"), "VG+", EstadoCopiaDisco.DISPONIBLE);
         DiscoQrCopy firstSold = copy(102L, first, 2, null, "ROTO", EstadoCopiaDisco.VENDIDO);
@@ -64,9 +68,9 @@ class DiscogsManualBatchExcelServiceTest {
             assertThat(sheet.getRow(0).getCell(5).getStringCellValue()).isEqualTo("CODIGO ");
 
             assertThat(sheet.getRow(1).getCell(0).getStringCellValue())
-                    .isEqualTo("https://www.discogs.com/release/111");
+                    .isEqualTo(fullUrl);
             assertThat(sheet.getRow(1).getCell(0).getHyperlink().getAddress())
-                    .isEqualTo("https://www.discogs.com/release/111");
+                    .isEqualTo(fullUrl);
             assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("$937,50");
             assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("VG+");
             assertThat(sheet.getRow(1).getCell(3).getStringCellValue()).isBlank();
@@ -89,6 +93,13 @@ class DiscogsManualBatchExcelServiceTest {
                     sheet.getRow(1).getCell(1).getCellStyle().getFontIndexAsInt());
             assertThat(sheet.getRow(2).getCell(2).getCellStyle().getFillPattern())
                     .isEqualTo(FillPatternType.NO_FILL);
+
+            DiscogsExcelParser.ParsedSheet parsed = new DiscogsExcelParser(new DiscogsLinkParser()).parse(
+                    new MockMultipartFile("file", generated.filename(),
+                            DiscogsManualBatchExcelService.XLSX_MEDIA_TYPE, generated.content()));
+            assertThat(parsed.rows()).hasSize(3);
+            assertThat(parsed.rows().getFirst().discogsId()).isEqualTo(111L);
+            assertThat(parsed.rows().getFirst().hyperlinkUrl()).isEqualTo(fullUrl);
         }
     }
 

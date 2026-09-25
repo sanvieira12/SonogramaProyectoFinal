@@ -57,6 +57,7 @@ const movements = [
       gananciaNeta: 320,
       estadoGanancia: 'POSITIVE',
       manualItem: false,
+      clasificacionItem: 'USADO',
     }],
   },
   {
@@ -211,6 +212,9 @@ describe('LibroVentas profit display', () => {
     api.ventas.resumenMensual.mockResolvedValue({
       cantidadVentas: 4,
       cantidadItems: 4,
+      cantidadItemsNuevos: 3,
+      cantidadItemsUsados: 1,
+      cantidadItemsSinClasificar: 0,
       totalVentas: 3470,
       ingresosRegistrados: 2850,
       gananciaItems: 170,
@@ -218,6 +222,56 @@ describe('LibroVentas profit display', () => {
       balanceFinal: 2850,
       advertenciaGanancia: '20 ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida.',
     })
+  })
+
+  it('keeps the existing sold-items total and shows the New/Used breakdown', async () => {
+    render(<LibroVentas />)
+
+    const label = await screen.findByText('Ítems vendidos')
+    const card = label.closest('.card')
+    expect(within(card).getByText('4', { selector: 'p' })).toBeInTheDocument()
+    expect(within(card).getByText('Nuevos 3')).toBeInTheDocument()
+    expect(within(card).getByText('Usados 1')).toBeInTheDocument()
+    expect(within(card).queryByText(/Sin clasificar/)).not.toBeInTheDocument()
+  })
+
+  it('shows unknown units only when present and keeps summary independent from table search', async () => {
+    api.ventas.resumenMensual.mockResolvedValue({
+      cantidadVentas: 2,
+      cantidadItems: 5,
+      cantidadItemsNuevos: 2,
+      cantidadItemsUsados: 1,
+      cantidadItemsSinClasificar: 2,
+      totalVentas: 1000,
+      ingresosRegistrados: 1000,
+      gananciaItems: 100,
+      gastos: 0,
+      balanceFinal: 1000,
+    })
+    render(<LibroVentas />)
+
+    expect(await screen.findByText('Sin clasificar 2')).toBeInTheDocument()
+    const search = screen.getByPlaceholderText('Cliente, artista, álbum…')
+    fireEvent.change(search, { target: { value: 'Pink Floyd' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+
+    expect(screen.getByText('Sin clasificar 2')).toBeInTheDocument()
+    expect(screen.getByText('Nuevos 2')).toBeInTheDocument()
+    expect(screen.getByText('Usados 1')).toBeInTheDocument()
+  })
+
+  it('reloads the breakdown when the selected month is applied', async () => {
+    api.ventas.resumenMensual
+      .mockResolvedValueOnce({ cantidadItems: 4, cantidadItemsNuevos: 3, cantidadItemsUsados: 1, cantidadItemsSinClasificar: 0 })
+      .mockResolvedValueOnce({ cantidadItems: 6, cantidadItemsNuevos: 2, cantidadItemsUsados: 2, cantidadItemsSinClasificar: 2 })
+    render(<LibroVentas />)
+    expect(await screen.findByText('Nuevos 3')).toBeInTheDocument()
+
+    fireEvent.change(document.querySelector('input[type="month"]'), { target: { value: '2026-08' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+
+    expect(await screen.findByText('Nuevos 2')).toBeInTheDocument()
+    expect(screen.getByText('Sin clasificar 2')).toBeInTheDocument()
   })
 
   it('replaces the payment-method column and renders profit statuses without changing row clicks', async () => {
@@ -406,7 +460,7 @@ describe('LibroVentas profit display', () => {
 
     await waitFor(() => expect(api.ventas.actualizar).toHaveBeenCalledWith(1, expect.objectContaining({
       total: 1500,
-      detalles: [expect.objectContaining({ cantidad: 1, precioUnitario: 1500 })],
+      detalles: [expect.objectContaining({ idDetalle: 11, cantidad: 1, precioUnitario: 1500, clasificacionItem: 'USADO' })],
     })))
     await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
 

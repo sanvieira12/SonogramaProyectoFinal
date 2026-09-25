@@ -39,6 +39,25 @@ class GastoTiendaServiceTest {
     }
 
     @Test
+    void creaLeeYActualizaUnGastoPersonal() {
+        var created = service.crear(request(CategoriaGasto.PERSONAL_EXPENSES));
+        assertThat(created.getCategoria()).isEqualTo(CategoriaGasto.PERSONAL_EXPENSES);
+
+        var existing = GastoTienda.builder().idGasto(9L).fecha(LocalDate.of(2026, 7, 1))
+                .descripcion("Nafta").monto(new BigDecimal("3000"))
+                .categoria(CategoriaGasto.PERSONAL_EXPENSES).build();
+        when(repository.findById(9L)).thenReturn(Optional.of(existing));
+
+        var updated = service.actualizar(9L, request(CategoriaGasto.PERSONAL_EXPENSES));
+
+        assertThat(updated.getCategoria()).isEqualTo(CategoriaGasto.PERSONAL_EXPENSES);
+        when(repository.findAllByOrderByFechaDescIdGastoDesc()).thenReturn(java.util.List.of(existing));
+        assertThat(service.listar()).singleElement()
+                .extracting(resultDto -> resultDto.getCategoria())
+                .isEqualTo(CategoriaGasto.PERSONAL_EXPENSES);
+    }
+
+    @Test
     void actualizaLaCategoria() {
         var existing = GastoTienda.builder().idGasto(7L).fecha(LocalDate.now())
                 .descripcion("Compra").monto(new BigDecimal("100")).categoria(CategoriaGasto.USED_ORDERS).build();

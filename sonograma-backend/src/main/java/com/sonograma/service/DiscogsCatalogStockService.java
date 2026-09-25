@@ -50,7 +50,8 @@ public class DiscogsCatalogStockService {
             throw new ConflictoNegocioException("El producto encontrado tiene otra identidad Discogs; requiere revisión.");
         }
         disco.setDiscogsReleaseId(command.discogsReleaseId());
-        disco.setDiscogsUrl(canonicalReleaseUrl(command.discogsReleaseId()));
+        disco.setDiscogsUrl(firstNonBlank(command.metadata().discogsUrl(),
+                canonicalReleaseUrl(command.discogsReleaseId())));
 
         int previousAvailable = isNew ? 0 : availableStock(disco);
         int incomingAvailable = command.incomingCopyState() == EstadoCopiaDisco.DISPONIBLE
@@ -131,6 +132,7 @@ public class DiscogsCatalogStockService {
                 .tracklist(metadata.tracklist())
                 .imagenUrl(metadata.imagenUrl())
                 .previewUrl(metadata.previewUrl())
+                .discogsUrl(metadata.discogsUrl())
                 .procedencia(metadata.procedencia())
                 .notas(metadata.notas())
                 .build();
@@ -148,6 +150,7 @@ public class DiscogsCatalogStockService {
         if (!blank(metadata.tracklist())) disco.setTracklist(metadata.tracklist());
         if (!blank(metadata.imagenUrl())) disco.setImagenUrl(metadata.imagenUrl());
         if (metadata.previewUrl() != null) disco.setPreviewUrl(metadata.previewUrl());
+        if (!blank(metadata.discogsUrl())) disco.setDiscogsUrl(metadata.discogsUrl().trim());
         if (!blank(metadata.codigoInterno())) disco.setCodigoInterno(metadata.codigoInterno());
         if (!blank(metadata.formato())) disco.setFormato(metadata.formato());
         if (metadata.tipoDisco() != null) disco.setTipoDisco(metadata.tipoDisco());
@@ -204,6 +207,10 @@ public class DiscogsCatalogStockService {
 
     private boolean blank(String value) { return value == null || value.isBlank(); }
 
+    private String firstNonBlank(String preferred, String fallback) {
+        return blank(preferred) ? fallback : preferred.trim();
+    }
+
     public enum ProductStatus { NEW_PRODUCT, EXISTING_PRODUCT }
 
     public record ReceiptResult(
@@ -235,5 +242,16 @@ public class DiscogsCatalogStockService {
             CondicionDisco condicion, String condicionFisica, TipoDisco tipoDisco, String formato,
             BigDecimal costo, BigDecimal precioVenta, PricingMode pricingMode, String pais, String estilo,
             String tracklist, String imagenUrl, String previewUrl, String codigoInterno, String procedencia,
-            String notas) {}
+            String notas, String discogsUrl) {
+        public DiscogsMetadata(
+                String artista, String album, String genero, String selloDiscografico, Integer anio,
+                CondicionDisco condicion, String condicionFisica, TipoDisco tipoDisco, String formato,
+                BigDecimal costo, BigDecimal precioVenta, PricingMode pricingMode, String pais, String estilo,
+                String tracklist, String imagenUrl, String previewUrl, String codigoInterno, String procedencia,
+                String notas) {
+            this(artista, album, genero, selloDiscografico, anio, condicion, condicionFisica, tipoDisco,
+                    formato, costo, precioVenta, pricingMode, pais, estilo, tracklist, imagenUrl, previewUrl,
+                    codigoInterno, procedencia, notas, null);
+        }
+    }
 }

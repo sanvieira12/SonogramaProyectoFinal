@@ -18,6 +18,7 @@ import com.sonograma.entity.Envio;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.CanalVenta;
+import com.sonograma.enums.ClasificacionItemVenta;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoVenta;
@@ -167,7 +168,7 @@ public class VentaService {
             }
         } else {
             reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null,
-                    costoHistorico(discoLegacy), null, null));
+                    costoHistorico(discoLegacy), null, null, clasificacionDesdeCatalogo(discoLegacy)));
         }
 
         actualizarGananciaHistorica(venta);
@@ -210,6 +211,7 @@ public class VentaService {
         // Keep the immutable historical cost when the same catalog item remains
         // in the edited sale. The new entered price is always used below.
         Map<Long, LinkedList<HistoricalCost>> previousCosts = historicalCostsByDisco(venta);
+        Map<Long, ClasificacionItemVenta> previousClassifications = historicalClassificationsByDetail(venta);
         restaurarStockVenta(venta);
         detalleVentaRepository.deleteAll(new ArrayList<>(venta.getDetalles()));
         venta.getDetalles().clear();
@@ -235,7 +237,11 @@ public class VentaService {
 
         if (tieneDetalles) {
             for (DetalleVentaDTO d : dto.getDetalles()) {
-                PreparedDetalle preparado = prepararDetalle(d);
+                boolean existingDetail = d.getIdDetalle() != null && previousClassifications.containsKey(d.getIdDetalle());
+                PreparedDetalle preparado = prepararDetalle(d, !existingDetail);
+                if (d.getIdDetalle() != null && previousClassifications.containsKey(d.getIdDetalle())) {
+                    preparado = preparado.withClassification(previousClassifications.get(d.getIdDetalle()));
+                }
                 if (preparado.disco() != null) {
                     LinkedList<HistoricalCost> costsForItem = previousCosts.get(preparado.disco().getIdDisco());
                     if (costsForItem != null && !costsForItem.isEmpty()) {
@@ -300,7 +306,7 @@ public class VentaService {
             }
         } else {
             reservarStock(new PreparedDetalle(discoLegacy, dto.getPrecioVenta(), 1, false, null, null, null, null,
-                    costoHistorico(discoLegacy), null, null));
+                    costoHistorico(discoLegacy), null, null, clasificacionDesdeCatalogo(discoLegacy)));
         }
 
         actualizarGananciaHistorica(venta);
@@ -555,6 +561,7 @@ public class VentaService {
                         .tipoCambioUsado(itemProfit != null ? itemProfit.exchangeRateUsed() : null)
                         .costoCompleto(itemProfit != null ? itemProfit.costComplete() : false)
                         .manualItem(Boolean.TRUE.equals(d.getManualItem()) || d.getDisco() == null)
+                        .clasificacionItem(d.getClasificacionItem())
                         .build());
             }
         }
@@ -614,6 +621,10 @@ public class VentaService {
     }
 
     private PreparedDetalle prepararDetalle(DetalleVentaDTO dto) {
+        return prepararDetalle(dto, true);
+    }
+
+    private PreparedDetalle prepararDetalle(DetalleVentaDTO dto, boolean requireManualClassification) {
         if (dto == null) {
             throw new NegocioException("Detalle de venta inválido");
         }
@@ -642,7 +653,8 @@ public class VentaService {
                     disco.getCodigoInterno(),
                     costoHistorico(disco),
                     dto.getCopyId(),
-                    dto.getCodigoQr()
+                    dto.getCodigoQr(),
+                    clasificacionDesdeCatalogo(disco)
             );
         }
 
@@ -661,8 +673,26 @@ public class VentaService {
                 textoNulo(dto.getCodigo()),
                 null,
                 null,
-                null
+                null,
+                clasificacionManual(dto, requireManualClassification)
         );
+    }
+
+    private ClasificacionItemVenta clasificacionManual(DetalleVentaDTO dto, boolean required) {
+        if (dto.getClasificacionItem() == null) {
+            if (!required) return null;
+            throw new NegocioException("Seleccioná si el ítem manual es nuevo o usado");
+        }
+        return dto.getClasificacionItem();
+    }
+
+    private ClasificacionItemVenta clasificacionDesdeCatalogo(Disco disco) {
+        if (disco == null || disco.getCondicion() == null) return null;
+        return switch (disco.getCondicion()) {
+            case NUEVO -> ClasificacionItemVenta.NUEVO;
+            case USADO -> ClasificacionItemVenta.USADO;
+            case CONSIGNACION, CATALOGO -> null;
+        };
     }
 
     private DetalleVenta detalleDesdePreparado(Venta venta, PreparedDetalle preparado, String copyIdsSnapshot) {
@@ -677,6 +707,7 @@ public class VentaService {
                 .albumSnap(preparado.albumSnap())
                 .descripcionSnap(preparado.descripcionSnap())
                 .codigoSnap(preparado.codigoSnap())
+                .clasificacionItem(preparado.clasificacionItem())
                 .costoAdquisicionUnitario(cost != null ? cost.originalAmount() : null)
                 .costoAdquisicionUnitarioUyu(cost != null ? cost.unitCostUyu() : null)
                 .costoAdquisicionMonedaOriginal(cost != null ? cost.originalCurrency() : null)
@@ -896,11 +927,17 @@ public class VentaService {
             String codigoSnap,
             AcquisitionCostResolution costoAdquisicion,
             Long copyId,
-            String codigoQr
+            String codigoQr,
+            ClasificacionItemVenta clasificacionItem
     ) {
         PreparedDetalle withCost(AcquisitionCostResolution cost) {
             return new PreparedDetalle(disco, precioUnitario, cantidad, manualItem, artistaSnap,
-                    albumSnap, descripcionSnap, codigoSnap, cost, copyId, codigoQr);
+                    albumSnap, descripcionSnap, codigoSnap, cost, copyId, codigoQr, clasificacionItem);
+        }
+
+        PreparedDetalle withClassification(ClasificacionItemVenta classification) {
+            return new PreparedDetalle(disco, precioUnitario, cantidad, manualItem, artistaSnap,
+                    albumSnap, descripcionSnap, codigoSnap, costoAdquisicion, copyId, codigoQr, classification);
         }
     }
 
@@ -918,6 +955,17 @@ public class VentaService {
             if (resolution.isComplete()) {
                 result.computeIfAbsent(detail.getDisco().getIdDisco(), ignored -> new LinkedList<>())
                         .add(new HistoricalCost(resolution));
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, ClasificacionItemVenta> historicalClassificationsByDetail(Venta venta) {
+        Map<Long, ClasificacionItemVenta> result = new HashMap<>();
+        if (venta.getDetalles() == null) return result;
+        for (DetalleVenta detail : venta.getDetalles()) {
+            if (detail.getIdDetalle() != null) {
+                result.put(detail.getIdDetalle(), detail.getClasificacionItem());
             }
         }
         return result;

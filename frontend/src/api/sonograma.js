@@ -556,8 +556,10 @@ export const api = {
       }
     },
 
-    discogsManualBatchFinalize: (batchId) =>
-      request('POST', `/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/finalize`),
+    discogsManualBatchFinalize: (batchId, porcentajeSonograma) =>
+      request('POST', `/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/finalize`, {
+        porcentajeSonograma,
+      }),
 
     discogsDesdeExcel: async (file) => {
       const fd = new FormData()

@@ -34,7 +34,25 @@ public class DiscogsEnrichmentService {
         DiscogsCoverService.CoverResult cover = result.resolvedReleaseId() == null
                 ? DiscogsCoverService.CoverResult.missing("No se pudo resolver el release")
                 : coverService.download(result.imageUrl(), result.resolvedReleaseId());
-        return EnrichmentResult.success(result, link.normalizedUrl(), cover);
+        return EnrichmentResult.success(result, authoritativeReleaseUrl(link, result), cover);
+    }
+
+    private String authoritativeReleaseUrl(DiscogsLinkParser.DiscogsLink link,
+                                           DiscogsApiClient.FetchResult result) {
+        if (result.resolvedReleaseId() != null
+                && "release".equalsIgnoreCase(link.type())
+                && link.id() == result.resolvedReleaseId()
+                && isHttpUrl(link.originalUrl())) {
+            return link.originalUrl().trim();
+        }
+        return result.resolvedReleaseId() == null
+                ? link.normalizedUrl()
+                : "https://www.discogs.com/release/" + result.resolvedReleaseId();
+    }
+
+    private boolean isHttpUrl(String value) {
+        return value != null && (value.regionMatches(true, 0, "https://", 0, 8)
+                || value.regionMatches(true, 0, "http://", 0, 7));
     }
 
     public record EnrichmentResult(

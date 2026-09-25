@@ -6,6 +6,7 @@ import com.sonograma.dto.DiscogsCoverDownloadDTO;
 import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.dto.DiscogsZipStatusDTO;
 import com.sonograma.dto.ManualDiscogsImportResultDTO;
+import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
@@ -147,8 +148,9 @@ public class ImportacionController {
 
     @PostMapping("/discogs/manual-batches/{batchId}/finalize")
     public ResponseEntity<DiscogsManualBatchService.FinalizedBatch> finalizeDiscogsManualBatch(
-            @PathVariable Long batchId) {
-        return ResponseEntity.ok(discogsManualBatchService.finalizeBatch(batchId));
+            @PathVariable Long batchId,
+            @RequestBody DiscogsManualBatchFinalizeRequestDTO request) {
+        return ResponseEntity.ok(discogsManualBatchService.finalizeBatch(batchId, request));
     }
 
     // ── Discogs — Excel con links ─────────────────────────────────────────────

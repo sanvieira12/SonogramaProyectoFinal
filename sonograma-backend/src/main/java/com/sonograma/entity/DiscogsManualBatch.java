@@ -47,6 +47,10 @@ public class DiscogsManualBatch {
     @Column(name = "finalized_at")
     private LocalDateTime finalizedAt;
 
+    /** Batch-specific Sonograma commercial percentage; historical batches may be null. */
+    @Column(name = "porcentaje_sonograma")
+    private Integer porcentajeSonograma;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 

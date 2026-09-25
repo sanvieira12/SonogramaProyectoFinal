@@ -52,7 +52,7 @@ public class DiscogsImportService {
         if (!enriched.success()) {
             return errorPreview(enriched);
         }
-        DiscoImportPreviewDTO preview = toPreview(enriched.metadata(), enriched.cover());
+        DiscoImportPreviewDTO preview = toPreview(enriched.metadata(), enriched.normalizedUrl(), enriched.cover());
         applyExistingProductState(preview);
         UUID operationId = receiptOperationService.createPending(preview.getDiscogsReleaseId(), preview.getCantidadCopias());
         preview.setOperationId(operationId.toString());
@@ -125,6 +125,7 @@ public class DiscogsImportService {
     }
 
     private DiscoImportPreviewDTO toPreview(DiscogsApiClient.FetchResult result,
+                                            String discogsUrl,
                                             DiscogsCoverService.CoverResult cover) {
         return DiscoImportPreviewDTO.builder()
                 .artista(result.artist())
@@ -144,7 +145,7 @@ public class DiscogsImportService {
                         result.year(),
                         String.valueOf(result.resolvedReleaseId())
                 ))
-                .discogsUrl(canonicalReleaseUrl(result.resolvedReleaseId()))
+                .discogsUrl(discogsUrl)
                 .discogsReleaseId(result.resolvedReleaseId())
                 .estado(EstadoDisco.DISPONIBLE.name())
                 .condicion(CondicionDisco.USADO.name())
@@ -163,7 +164,7 @@ public class DiscogsImportService {
                 preview.getCosto(), salePrice,
                 salePrice != null ? PricingMode.MANUAL : PricingMode.AUTO,
                 preview.getPais(), preview.getEstilo(), preview.getTracklist(), preview.getImagenUrl(), preview.getPreviewUrl(),
-                preview.getCodigoInterno(), preview.getProcedencia(), preview.getNotas());
+                preview.getCodigoInterno(), preview.getProcedencia(), preview.getNotas(), preview.getDiscogsUrl());
     }
 
     private void validateManualBatchFields(DiscoImportPreviewDTO preview) {

@@ -213,6 +213,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onEditCa
         montoPagado: form.montoPagado === '' ? undefined : Number(form.montoPagado),
         observaciones: form.observaciones || null,
         detalles: form.detalles.map(d => ({
+          idDetalle: d.idDetalle,
           idDisco: d.idDisco,
           descripcion: d.descripcion || null,
           artista: d.artista || null,
@@ -220,6 +221,7 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onEditCa
           codigo: d.codigoInterno || null,
           cantidad: Number(d.cantidad || 1),
           manualItem: Boolean(d.manualItem) || !d.idDisco,
+          clasificacionItem: d.clasificacionItem || null,
           precioUnitario: Number(d.precioUnitario || 0),
         })),
       }
@@ -832,16 +834,33 @@ export default function LibroVentas() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: 'Ventas', value: resumen.cantidadVentas ?? 0 },
-            { label: 'Ítems vendidos', value: resumen.cantidadItems ?? 0 },
+            {
+              label: 'Ítems vendidos',
+              value: resumen.cantidadItems ?? 0,
+              secondary: (
+                <span className="flex flex-wrap justify-center gap-x-2 gap-y-0.5 text-xs font-medium normal-case tracking-normal text-slate-500 dark:text-stone-400">
+                  <span>Nuevos {resumen.cantidadItemsNuevos ?? 0}</span>
+                  <span>·</span>
+                  <span>Usados {resumen.cantidadItemsUsados ?? 0}</span>
+                  {(resumen.cantidadItemsSinClasificar ?? 0) > 0 && (
+                    <>
+                      <span>·</span>
+                      <span>Sin clasificar {resumen.cantidadItemsSinClasificar}</span>
+                    </>
+                  )}
+                </span>
+              ),
+            },
             { label: 'Total ventas', value: fmt(resumen.totalVentas) },
             { label: 'Ingresos registrados', value: fmt(resumen.ingresosRegistrados) },
             { label: 'Ganancia bruta de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
             { label: 'Gastos', value: fmt(resumen.gastos) },
             { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
-          ].map(({ label, value, tone }) => (
+          ].map(({ label, value, tone, secondary }) => (
             <div key={label} className="card p-4 text-center">
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
               <p className={`text-xl font-bold mt-1 tabular-nums ${tone || 'text-slate-900 dark:text-white'}`}>{value}</p>
+              {secondary && <div className="mt-1 leading-snug">{secondary}</div>}
             </div>
           ))}
         </div>

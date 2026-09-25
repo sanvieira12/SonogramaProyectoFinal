@@ -602,6 +602,7 @@ public class DeudaService {
                                 .cantidad(detalle.getCantidad())
                                 .precioUnitario(detalle.getPrecioUnitario())
                                 .manualItem(Boolean.TRUE.equals(detalle.getManualItem()) || detalle.getDisco() == null)
+                                .clasificacionItem(detalle.getClasificacionItem())
                                 .build()).toList()
                         : List.of())
                 .movimientos(null)

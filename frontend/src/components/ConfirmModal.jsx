@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, cargandoTexto = 'Eliminando...', confirmarTexto = 'Confirmar', confirmarClassName = 'bg-red-600 hover:bg-red-700', confirmacionRequerida, error }) {
+export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar, cargando, cargandoTexto = 'Eliminando...', confirmarTexto = 'Confirmar', confirmarClassName = 'bg-red-600 hover:bg-red-700', confirmacionRequerida, confirmarDeshabilitado = false, contenido, error }) {
   const [confirmacion, setConfirmacion] = useState('')
 
   useEffect(() => {
@@ -41,6 +41,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
             />
           </label>
         )}
+        {contenido}
         {error && <p role="alert" className="text-red-600 dark:text-red-300 text-sm mb-4">{error}</p>}
         <div className="flex gap-3">
           <button
@@ -52,7 +53,7 @@ export default function ConfirmModal({ titulo, mensaje, onConfirmar, onCancelar,
           </button>
           <button
             onClick={onConfirmar}
-            disabled={cargando || (confirmacionRequerida && confirmacion !== confirmacionRequerida)}
+            disabled={cargando || confirmarDeshabilitado || (confirmacionRequerida && confirmacion !== confirmacionRequerida)}
             className={`flex-1 ${confirmarClassName} disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-all duration-200 active:scale-95`}
           >
             {cargando ? cargandoTexto : confirmarTexto}

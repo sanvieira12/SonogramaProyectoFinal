@@ -8,6 +8,7 @@ import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.GastoTienda;
 import com.sonograma.entity.PagoDeuda;
 import com.sonograma.entity.Venta;
+import com.sonograma.enums.ClasificacionItemVenta;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.GastoTiendaRepository;
@@ -58,6 +59,9 @@ public class ResumenFinancieroMensualService {
         BigDecimal ingresosVentas = ZERO;
         BigDecimal ganancia = ZERO;
         long cantidadItems = 0;
+        long cantidadItemsNuevos = 0;
+        long cantidadItemsUsados = 0;
+        long cantidadItemsSinClasificar = 0;
         int faltantes = 0;
 
         for (Venta venta : ventas) {
@@ -72,12 +76,21 @@ public class ResumenFinancieroMensualService {
                 for (int index = 0; index < venta.getDetalles().size(); index++) {
                     DetalleVenta detalle = venta.getDetalles().get(index);
                     ProfitItemResult item = index < itemResults.size() ? itemResults.get(index) : null;
-                    cantidadItems += cantidad(detalle);
+                    int unidades = cantidad(detalle);
+                    cantidadItems += unidades;
+                    if (detalle.getClasificacionItem() == ClasificacionItemVenta.NUEVO) {
+                        cantidadItemsNuevos += unidades;
+                    } else if (detalle.getClasificacionItem() == ClasificacionItemVenta.USADO) {
+                        cantidadItemsUsados += unidades;
+                    } else {
+                        cantidadItemsSinClasificar += unidades;
+                    }
                     itemsDTO.add(itemDto(venta, detalle, item));
                 }
             } else if (!profit.items().isEmpty()) {
                 ProfitItemResult item = profit.items().get(0);
                 cantidadItems += item.quantity();
+                cantidadItemsSinClasificar += item.quantity();
                 itemsDTO.add(ItemResumenMensualDTO.builder()
                         .idVenta(venta.getIdVenta())
                         .artista(venta.getDisco() != null ? venta.getDisco().getArtista() : null)
@@ -122,6 +135,9 @@ public class ResumenFinancieroMensualService {
                 .hasta(selected.hasta)
                 .cantidadVentas((long) ventas.size())
                 .cantidadItems(cantidadItems)
+                .cantidadItemsNuevos(cantidadItemsNuevos)
+                .cantidadItemsUsados(cantidadItemsUsados)
+                .cantidadItemsSinClasificar(cantidadItemsSinClasificar)
                 .totalVentas(totalVentas)
                 .ingresosRegistrados(ingresosRegistrados)
                 .gananciaItems(ganancia)

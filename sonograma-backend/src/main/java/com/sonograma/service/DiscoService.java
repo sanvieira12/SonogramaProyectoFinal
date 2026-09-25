@@ -166,7 +166,8 @@ public class DiscoService {
                             batches.stream()
                                     .map(DiscogsManualBatch::getCreatedAt)
                                     .max(java.util.Comparator.naturalOrder())
-                                    .orElse(representative.getCreatedAt())));
+                                    .orElse(representative.getCreatedAt()),
+                            representative.getPorcentajeSonograma()));
                 })
                 .toList();
     }
@@ -244,7 +245,7 @@ public class DiscoService {
         String label = String.format("%s · %d discos · %s", source.customerCode(), source.productos(), statusLabel);
         return new DiscogsCatalogSourceDTO(
                 source.key(), source.type(), label, source.productos(), source.customerCode(),
-                source.status(), source.batchId(), source.createdAt());
+                source.status(), source.batchId(), source.createdAt(), source.porcentajeSonograma());
     }
 
     private boolean isManualSource(String source) {

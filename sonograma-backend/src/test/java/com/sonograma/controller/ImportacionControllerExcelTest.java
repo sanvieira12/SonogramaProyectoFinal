@@ -3,6 +3,7 @@ package com.sonograma.controller;
 import com.sonograma.service.DiscogsManualBatchExcelService;
 import com.sonograma.service.DiscogsManualBatchZipService;
 import com.sonograma.service.DiscogsManualBatchService;
+import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
 import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.importacion.DiscogsCoverService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
@@ -69,11 +70,11 @@ class ImportacionControllerExcelTest {
     @Test
     void finalizesManualBatchThroughLifecycleEndpoint() {
         LocalDateTime finalizedAt = LocalDateTime.of(2026, 9, 4, 12, 0);
-        when(batchService.finalizeBatch(15L)).thenReturn(new DiscogsManualBatchService.FinalizedBatch(
-                15L, com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED, finalizedAt));
+        when(batchService.finalizeBatch(15L, new DiscogsManualBatchFinalizeRequestDTO(30))).thenReturn(new DiscogsManualBatchService.FinalizedBatch(
+                15L, com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED, finalizedAt, 30));
 
         ResponseEntity<DiscogsManualBatchService.FinalizedBatch> response =
-                controller().finalizeDiscogsManualBatch(15L);
+                controller().finalizeDiscogsManualBatch(15L, new DiscogsManualBatchFinalizeRequestDTO(30));
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isNotNull();
@@ -81,6 +82,7 @@ class ImportacionControllerExcelTest {
         assertThat(response.getBody().status())
                 .isEqualTo(com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED);
         assertThat(response.getBody().finalizedAt()).isEqualTo(finalizedAt);
+        assertThat(response.getBody().porcentajeSonograma()).isEqualTo(30);
     }
 
     private ImportacionController controller() {

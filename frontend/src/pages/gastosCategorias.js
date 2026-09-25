@@ -1,6 +1,7 @@
 export const EXPENSE_CATEGORIES = [
   { value: 'FIXED_EXPENSES', label: 'Gastos fijos' },
   { value: 'STORE_EXPENSES', label: 'Gastos secundarios' },
+  { value: 'PERSONAL_EXPENSES', label: 'Gastos personales' },
   { value: 'USED_ORDERS', label: 'Pedidos usados' },
   { value: 'NEW_ORDERS', label: 'Pedidos nuevos' },
 ]

@@ -350,20 +350,22 @@ describe('normalizeApiBase', () => {
         batchId: 15,
         status: 'FINALIZED',
         finalizedAt: '2026-09-04T12:00:00',
+        porcentajeSonograma: 30,
       })),
     })
 
-    await expect(api.importaciones.discogsManualBatchFinalize(15)).resolves.toEqual({
+    await expect(api.importaciones.discogsManualBatchFinalize(15, 30)).resolves.toEqual({
       batchId: 15,
       status: 'FINALIZED',
       finalizedAt: '2026-09-04T12:00:00',
+      porcentajeSonograma: 30,
     })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/importaciones/discogs/manual-batches/15/finalize',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-1' },
-        body: undefined,
+        body: JSON.stringify({ porcentajeSonograma: 30 }),
       }),
     )
   })

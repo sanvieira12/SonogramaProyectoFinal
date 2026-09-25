@@ -1,5 +1,6 @@
 package com.sonograma.dto;
 
+import com.sonograma.enums.ClasificacionItemVenta;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -30,4 +31,5 @@ public class DetalleVentaResponseDTO {
     private BigDecimal tipoCambioUsado;
     private Boolean costoCompleto;
     private Boolean manualItem;
+    private ClasificacionItemVenta clasificacionItem;
 }

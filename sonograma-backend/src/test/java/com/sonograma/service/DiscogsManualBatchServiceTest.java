@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.enums.DiscogsManualBatchStatus;
+import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscogsManualBatchRepository;
@@ -124,10 +125,13 @@ class DiscogsManualBatchServiceTest {
         when(batchRepository.save(any(DiscogsManualBatch.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        DiscogsManualBatchService.FinalizedBatch result = service.finalizeBatch(15L);
+        DiscogsManualBatchService.FinalizedBatch result = service.finalizeBatch(15L,
+                new DiscogsManualBatchFinalizeRequestDTO(30));
 
         assertEquals(DiscogsManualBatchStatus.FINALIZED, result.status());
         assertNotNull(result.finalizedAt());
+        assertEquals(30, result.porcentajeSonograma());
+        assertEquals(30, batch.getPorcentajeSonograma());
         assertEquals(startedAt, batch.getStartedAt());
         assertEquals(createdAt, batch.getCreatedAt());
         assertSame(copy, batch.getCopies().getFirst());
@@ -142,10 +146,68 @@ class DiscogsManualBatchServiceTest {
                 .finalizedAt(LocalDateTime.of(2026, 9, 3, 10, 0)).build();
         when(batchRepository.findByIdForUpdate(16L)).thenReturn(Optional.of(finalized));
 
-        assertThrows(ConflictoNegocioException.class, () -> service.finalizeBatch(16L));
+        assertThrows(ConflictoNegocioException.class, () -> service.finalizeBatch(16L,
+                new DiscogsManualBatchFinalizeRequestDTO(30)));
         assertThrows(com.sonograma.exception.RecursoNoEncontradoException.class,
-                () -> service.finalizeBatch(17L));
+                () -> service.finalizeBatch(17L, new DiscogsManualBatchFinalizeRequestDTO(30)));
         verify(batchRepository, never()).save(any(DiscogsManualBatch.class));
+    }
+
+    @Test
+    void acceptsOnlyTheSupportedWholePercentagePointsWithoutMutatingAnOpenBatch() {
+        for (Integer percentage : DiscogsManualBatchService.PORCENTAJES_SONOGRAMA_PERMITIDOS) {
+            DiscogsManualBatch batch = DiscogsManualBatch.builder().id(100L + percentage)
+                    .status(DiscogsManualBatchStatus.OPEN).build();
+            when(batchRepository.findByIdForUpdate(batch.getId())).thenReturn(Optional.of(batch));
+            when(batchRepository.save(any(DiscogsManualBatch.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            assertEquals(percentage, service.finalizeBatch(batch.getId(),
+                    new DiscogsManualBatchFinalizeRequestDTO(percentage)).porcentajeSonograma());
+        }
+
+        for (Integer invalid : java.util.Arrays.asList(null, -10, 0, 5, 12, 50, 100, 10_00)) {
+            LocalDateTime unchangedFinalizedAt = LocalDateTime.of(2026, 9, 5, 10, 0);
+            DiscogsManualBatch batch = DiscogsManualBatch.builder().id(300L + (invalid == null ? 1 : invalid))
+                    .status(DiscogsManualBatchStatus.OPEN).finalizedAt(unchangedFinalizedAt).build();
+            when(batchRepository.findByIdForUpdate(batch.getId())).thenReturn(Optional.of(batch));
+            assertThrows(com.sonograma.exception.NegocioException.class,
+                    () -> service.finalizeBatch(batch.getId(), new DiscogsManualBatchFinalizeRequestDTO(invalid)));
+            assertEquals(DiscogsManualBatchStatus.OPEN, batch.getStatus());
+            assertEquals(unchangedFinalizedAt, batch.getFinalizedAt());
+            assertNull(batch.getPorcentajeSonograma());
+        }
+    }
+
+    @Test
+    void requiresFinalizeRequestBody() {
+        DiscogsManualBatch batch = DiscogsManualBatch.builder().id(400L)
+                .status(DiscogsManualBatchStatus.OPEN).build();
+        when(batchRepository.findByIdForUpdate(400L)).thenReturn(Optional.of(batch));
+        assertThrows(com.sonograma.exception.NegocioException.class,
+                () -> service.finalizeBatch(400L, null));
+        verify(batchRepository, never()).save(any());
+    }
+
+    @Test
+    void finalizesOnlyTheExactBatchIdWhenCustomerHasHistoricalBatches() {
+        DiscogsManualBatch historical = DiscogsManualBatch.builder().id(501L)
+                .customerCode("LO").normalizedCustomerCode("LO")
+                .status(DiscogsManualBatchStatus.FINALIZED)
+                .porcentajeSonograma(20)
+                .finalizedAt(LocalDateTime.of(2026, 9, 1, 10, 0)).build();
+        DiscogsManualBatch open = DiscogsManualBatch.builder().id(503L)
+                .customerCode("LO").normalizedCustomerCode("LO")
+                .status(DiscogsManualBatchStatus.OPEN).build();
+        when(batchRepository.findByIdForUpdate(503L)).thenReturn(Optional.of(open));
+        when(batchRepository.save(any(DiscogsManualBatch.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.finalizeBatch(503L, new DiscogsManualBatchFinalizeRequestDTO(30));
+
+        assertEquals(30, open.getPorcentajeSonograma());
+        assertEquals(DiscogsManualBatchStatus.FINALIZED, open.getStatus());
+        assertEquals(20, historical.getPorcentajeSonograma());
+        assertEquals(DiscogsManualBatchStatus.FINALIZED, historical.getStatus());
+        verify(batchRepository).findByIdForUpdate(503L);
+        verify(batchRepository, never()).findByIdForUpdate(501L);
     }
 
     @Test
@@ -167,6 +229,7 @@ class DiscogsManualBatchServiceTest {
 
         assertSame(newBatch, assigned);
         assertEquals(DiscogsManualBatchStatus.OPEN, newBatch.getStatus());
+        assertNull(newBatch.getPorcentajeSonograma());
         assertSame(newBatch, copy.getManualDiscogsBatch());
         assertEquals("JPH", oldBatch.getNormalizedCustomerCode());
         assertEquals(DiscogsManualBatchStatus.FINALIZED, oldBatch.getStatus());

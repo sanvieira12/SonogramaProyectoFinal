@@ -1,5 +1,6 @@
 package com.sonograma.dto;
 
+import com.sonograma.enums.ClasificacionItemVenta;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -9,6 +10,7 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @Builder
 public class DetalleVentaDTO {
+    private Long idDetalle;
     private Long idDisco;
     private String artista;
     private String album;
@@ -19,4 +21,5 @@ public class DetalleVentaDTO {
     private Boolean manualItem;
     private Long copyId;
     private String codigoQr;
+    private ClasificacionItemVenta clasificacionItem;
 }

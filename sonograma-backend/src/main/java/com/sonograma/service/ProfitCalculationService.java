@@ -2,14 +2,17 @@ package com.sonograma.service;
 
 import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Disco;
+import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.entity.Pedido;
 import com.sonograma.entity.PedidoItem;
 import com.sonograma.entity.Venta;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.PedidoItemRepository;
 import com.sonograma.repository.PedidoRepository;
 import com.sonograma.repository.VentaRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,10 +21,14 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Single source of truth for historical sale profit.
@@ -32,7 +39,6 @@ import java.util.Locale;
  * acquisition-cost workflows that are unrelated to Sales Book reporting.
  */
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ProfitCalculationService {
 
@@ -44,10 +50,36 @@ public class ProfitCalculationService {
     private final PedidoRepository pedidoRepository;
     private final PedidoItemRepository pedidoItemRepository;
     private final CatalogPricingService catalogPricingService;
+    private final DiscoQrCopyRepository discoQrCopyRepository;
+
+    /** Compatibility constructor for isolated callers that do not resolve physical copies. */
+    public ProfitCalculationService(
+            VentaRepository ventaRepository,
+            PedidoRepository pedidoRepository,
+            PedidoItemRepository pedidoItemRepository,
+            CatalogPricingService catalogPricingService) {
+        this(ventaRepository, pedidoRepository, pedidoItemRepository, catalogPricingService, null);
+    }
+
+    @Autowired
+    public ProfitCalculationService(
+            VentaRepository ventaRepository,
+            PedidoRepository pedidoRepository,
+            PedidoItemRepository pedidoItemRepository,
+            CatalogPricingService catalogPricingService,
+            DiscoQrCopyRepository discoQrCopyRepository) {
+        this.ventaRepository = ventaRepository;
+        this.pedidoRepository = pedidoRepository;
+        this.pedidoItemRepository = pedidoItemRepository;
+        this.catalogPricingService = catalogPricingService;
+        this.discoQrCopyRepository = discoQrCopyRepository;
+    }
 
     /** Calculates one line using its recorded unit sale amount without sale-level allocation. */
     public ProfitItemResult netProfitForSoldItem(DetalleVenta detalle) {
         Objects.requireNonNull(detalle, "detalle");
+        ProfitItemResult percentageResult = percentageProfitForDetail(detalle);
+        if (percentageResult != null) return percentageResult;
         int quantity = quantityOf(detalle);
         BigDecimal actualAmount = money(nvl(detalle.getPrecioUnitario())
                 .multiply(BigDecimal.valueOf(quantity)));
@@ -221,6 +253,8 @@ public class ProfitCalculationService {
     }
 
     private ProfitItemResult calculateSalesBookItem(DetalleVenta detail) {
+        ProfitItemResult percentageResult = percentageProfitForDetail(detail);
+        if (percentageResult != null) return percentageResult;
         int quantity = quantityOf(detail);
         BigDecimal actualAmount = money(nvl(detail.getPrecioUnitario())
                 .multiply(BigDecimal.valueOf(quantity)));
@@ -246,6 +280,148 @@ public class ProfitCalculationService {
             return detail == null ? unavailableCost() : acquisitionCostForDetail(detail);
         }
         return salesBookCostForDisco(detail.getDisco());
+    }
+
+    /**
+     * Calculates a stock detail from authoritative physical-copy attribution when
+     * at least one resolved copy belongs to a manual Discogs batch. A null return
+     * means there is no evidence that this detail is a manual Discogs detail, so
+     * callers must preserve the generic stock-cost path.
+     */
+    private ProfitItemResult percentageProfitForDetail(DetalleVenta detail) {
+        CopySnapshot snapshot = resolveCopySnapshot(detail);
+        if (!snapshot.hasManualDiscogsEvidence()) return null;
+
+        int quantity = quantityOf(detail);
+        BigDecimal unitPrice = detail.getPrecioUnitario();
+        BigDecimal actualSaleAmount = unitPrice == null
+                ? null : money(unitPrice.multiply(BigDecimal.valueOf(quantity)));
+        BigDecimal knownProfit = BigDecimal.ZERO;
+        BigDecimal knownOwnerPortion = BigDecimal.ZERO;
+        int knownUnits = 0;
+        boolean hasGenericUnit = false;
+        boolean incomplete = snapshot.hasMismatch() || unitPrice == null;
+        String reason = unitPrice == null ? "Missing realized unit sale price" : null;
+
+        for (CopySlot slot : snapshot.slots()) {
+            DiscoQrCopy copy = slot.copy();
+            if (copy == null || detail.getDisco() == null
+                    || !Objects.equals(copy.getIdDisco(), detail.getDisco().getIdDisco())) {
+                incomplete = true;
+                reason = "Missing authoritative sold-copy attribution";
+                continue;
+            }
+
+            DiscogsManualBatch batch = copy.getManualDiscogsBatch();
+            BigDecimal unitProfit = null;
+            BigDecimal unitOwnerPortion = null;
+            if (batch != null) {
+                Integer percentage = batch.getPorcentajeSonograma();
+                if (percentage != null && unitPrice != null) {
+                    unitProfit = money(unitPrice
+                            .multiply(BigDecimal.valueOf(percentage))
+                            .divide(BigDecimal.valueOf(100), COST_SCALE, RoundingMode.HALF_UP));
+                    unitOwnerPortion = money(unitPrice.subtract(unitProfit));
+                } else {
+                    incomplete = true;
+                    reason = "Manual Discogs batch percentage unavailable";
+                }
+            } else {
+                hasGenericUnit = true;
+                AcquisitionCostResolution generic = salesBookCostForDisco(detail.getDisco());
+                if (generic.isComplete() && unitPrice != null) {
+                    BigDecimal unitCost = generic.unitCostUyu();
+                    unitProfit = money(unitPrice.subtract(unitCost));
+                    unitOwnerPortion = costMoney(unitCost);
+                } else {
+                    incomplete = true;
+                    reason = "Missing stock REAL COST (UYU)";
+                }
+            }
+
+            if (unitProfit != null) {
+                knownUnits++;
+                knownProfit = knownProfit.add(unitProfit);
+                knownOwnerPortion = knownOwnerPortion.add(unitOwnerPortion);
+            }
+        }
+
+        if (knownUnits < quantity) {
+            incomplete = true;
+            if (reason == null) reason = "One or more sold copies lack authoritative profit attribution";
+        }
+        BigDecimal profit = knownUnits == 0 ? null : money(knownProfit);
+        BigDecimal ownerPortion = knownUnits == 0 ? null : costMoney(knownOwnerPortion);
+        ProfitStatus status = incomplete ? ProfitStatus.UNAVAILABLE : statusFor(profit);
+        String source = hasGenericUnit
+                ? "MIXED_MANUAL_DISCOGS_PERCENTAGE_AND_STOCK_COST"
+                : "MANUAL_DISCOGS_BATCH_PERCENTAGE";
+        return new ProfitItemResult(
+                detail.getIdDetalle(),
+                detail.getDisco() != null ? detail.getDisco().getIdDisco() : null,
+                quantity,
+                actualSaleAmount,
+                ownerPortion,
+                profit,
+                status,
+                reason,
+                source,
+                "UYU",
+                null,
+                !incomplete);
+    }
+
+    private CopySnapshot resolveCopySnapshot(DetalleVenta detail) {
+        if (detail == null || detail.getDisco() == null || discoQrCopyRepository == null
+                || detail.getCopyIdsSnapshot() == null || detail.getCopyIdsSnapshot().isBlank()) {
+            return CopySnapshot.none();
+        }
+
+        List<String> tokens = Arrays.stream(detail.getCopyIdsSnapshot().split(",", -1))
+                .map(String::trim)
+                .toList();
+        if (tokens.isEmpty()) return CopySnapshot.none();
+
+        List<Long> validIds = tokens.stream()
+                .limit(quantityOf(detail))
+                .filter(token -> token.matches("\\d+"))
+                .map(this::positiveLongOrNull)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, DiscoQrCopy> copiesById = validIds.isEmpty()
+                ? Map.of()
+                : discoQrCopyRepository.findAllWithManualBatchByIdIn(validIds).stream()
+                        .filter(copy -> copy.getId() != null)
+                        .collect(java.util.stream.Collectors.toMap(DiscoQrCopy::getId, copy -> copy,
+                                (first, ignored) -> first));
+
+        int quantity = quantityOf(detail);
+        Set<Long> seen = new HashSet<>();
+        List<CopySlot> slots = new ArrayList<>();
+        boolean hasManualEvidence = false;
+        int slotsToInspect = Math.min(quantity, tokens.size());
+        for (int index = 0; index < slotsToInspect; index++) {
+            String token = tokens.get(index);
+            Long id = token.matches("\\d+") ? positiveLongOrNull(token) : null;
+            DiscoQrCopy copy = id != null && seen.add(id) ? copiesById.get(id) : null;
+            if (copy != null && Objects.equals(copy.getIdDisco(), detail.getDisco().getIdDisco())
+                    && copy.getManualDiscogsBatch() != null) {
+                hasManualEvidence = true;
+            }
+            slots.add(new CopySlot(copy));
+        }
+        while (slots.size() < quantity) slots.add(new CopySlot(null));
+        return new CopySnapshot(List.copyOf(slots), hasManualEvidence, tokens.size() != quantity);
+    }
+
+    private Long positiveLongOrNull(String raw) {
+        try {
+            long value = Long.parseLong(raw);
+            return value > 0 ? value : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private AcquisitionCostResolution salesBookCostForDisco(Disco disco) {
@@ -397,11 +573,12 @@ public class ProfitCalculationService {
         int unavailable = 0;
         boolean hasUnavailable = false;
         for (ProfitItemResult item : resultItems) {
+            if (item.netProfit() != null) {
+                total = total.add(item.netProfit());
+            }
             if (!item.isAvailable()) {
                 unavailable++;
                 hasUnavailable = true;
-            } else {
-                total = total.add(item.netProfit());
             }
         }
         BigDecimal netProfit = money(total);
@@ -449,5 +626,13 @@ public class ProfitCalculationService {
 
     private BigDecimal cost(BigDecimal value) {
         return costMoney(value);
+    }
+
+    private record CopySlot(DiscoQrCopy copy) {}
+
+    private record CopySnapshot(List<CopySlot> slots, boolean hasManualDiscogsEvidence, boolean hasMismatch) {
+        private static CopySnapshot none() {
+            return new CopySnapshot(List.of(), false, false);
+        }
     }
 }

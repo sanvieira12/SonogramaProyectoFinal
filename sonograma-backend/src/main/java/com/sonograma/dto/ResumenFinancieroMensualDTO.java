@@ -16,6 +16,9 @@ public class ResumenFinancieroMensualDTO {
     private LocalDate hasta;
     private Long cantidadVentas;
     private Long cantidadItems;
+    private Long cantidadItemsNuevos;
+    private Long cantidadItemsUsados;
+    private Long cantidadItemsSinClasificar;
     private BigDecimal totalVentas;
     private BigDecimal ingresosRegistrados;
     private BigDecimal gananciaItems;

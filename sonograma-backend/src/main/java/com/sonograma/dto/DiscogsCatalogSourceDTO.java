@@ -13,16 +13,17 @@ public record DiscogsCatalogSourceDTO(
         String customerCode,
         DiscogsManualBatchStatus status,
         Long batchId,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Integer porcentajeSonograma
 ) {
     /** Compatibility constructor for historical Excel source projections. */
     public DiscogsCatalogSourceDTO(String key, String label, long productos) {
-        this(keyWithExcelPrefix(key), "EXCEL", label, productos, null, null, null, null);
+        this(keyWithExcelPrefix(key), "EXCEL", label, productos, null, null, null, null, null);
     }
 
     /** Historical Excel projection with its newest job timestamp. */
     public DiscogsCatalogSourceDTO(String key, String label, long productos, LocalDateTime createdAt) {
-        this(keyWithExcelPrefix(key), "EXCEL", label, productos, null, null, null, createdAt);
+        this(keyWithExcelPrefix(key), "EXCEL", label, productos, null, null, null, createdAt, null);
     }
 
     /** Manual batch projection; the stable key is derived from its persistent id. */
@@ -33,7 +34,20 @@ public record DiscogsCatalogSourceDTO(
             Long batchId,
             LocalDateTime createdAt
     ) {
-        this("manual:" + batchId, "MANUAL", null, copyCount, customerCode, status, batchId, createdAt);
+        this(customerCode, copyCount, status, batchId, createdAt, null);
+    }
+
+    /** Manual batch projection including its persisted commercial percentage. */
+    public DiscogsCatalogSourceDTO(
+            String customerCode,
+            long copyCount,
+            DiscogsManualBatchStatus status,
+            Long batchId,
+            LocalDateTime createdAt,
+            Integer porcentajeSonograma
+    ) {
+        this("manual:" + batchId, "MANUAL", null, copyCount, customerCode, status, batchId, createdAt,
+                porcentajeSonograma);
     }
 
     /** Alias for clients that prefer the domain name over the legacy productos field. */

@@ -2,6 +2,7 @@ package com.sonograma.service;
 
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
+import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
 import com.sonograma.enums.DiscogsManualBatchStatus;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
@@ -15,6 +16,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Services for persistent manual Discogs customer batches and copy membership.
@@ -23,6 +25,9 @@ import java.util.Optional;
 @RequiredArgsConstructor
 @Transactional
 public class DiscogsManualBatchService {
+
+    public static final Set<Integer> PORCENTAJES_SONOGRAMA_PERMITIDOS =
+            Set.of(10, 15, 20, 25, 30, 35, 40, 45);
 
     private static final Object[] CUSTOMER_LOCKS = new Object[64];
 
@@ -114,7 +119,7 @@ public class DiscogsManualBatchService {
                 normalizeCustomerCode(customerCode), DiscogsManualBatchStatus.OPEN);
     }
 
-    public FinalizedBatch finalizeBatch(Long batchId) {
+    public FinalizedBatch finalizeBatch(Long batchId, DiscogsManualBatchFinalizeRequestDTO request) {
         if (batchId == null || batchId <= 0) {
             throw new com.sonograma.exception.NegocioException("El batch Discogs no es válido.");
         }
@@ -124,12 +129,18 @@ public class DiscogsManualBatchService {
         if (batch.getStatus() != DiscogsManualBatchStatus.OPEN) {
             throw new ConflictoNegocioException("El batch Discogs ya está finalizado.");
         }
+        Integer porcentaje = request == null ? null : request.porcentajeSonograma();
+        if (porcentaje == null || !PORCENTAJES_SONOGRAMA_PERMITIDOS.contains(porcentaje)) {
+            throw new com.sonograma.exception.NegocioException(
+                    "El porcentaje Sonograma es obligatorio y debe ser uno de: 10, 15, 20, 25, 30, 35, 40 o 45.");
+        }
 
         LocalDateTime finalizedAt = LocalDateTime.now();
         batch.setStatus(DiscogsManualBatchStatus.FINALIZED);
         batch.setFinalizedAt(finalizedAt);
+        batch.setPorcentajeSonograma(porcentaje);
         batchRepository.save(batch);
-        return new FinalizedBatch(batch.getId(), batch.getStatus(), batch.getFinalizedAt());
+        return new FinalizedBatch(batch.getId(), batch.getStatus(), batch.getFinalizedAt(), batch.getPorcentajeSonograma());
     }
 
     @Transactional(readOnly = true)
@@ -148,6 +159,7 @@ public class DiscogsManualBatchService {
     public record FinalizedBatch(
             Long batchId,
             DiscogsManualBatchStatus status,
-            LocalDateTime finalizedAt
+            LocalDateTime finalizedAt,
+            Integer porcentajeSonograma
     ) {}
 }

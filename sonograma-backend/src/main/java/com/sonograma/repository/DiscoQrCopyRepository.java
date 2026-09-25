@@ -20,6 +20,15 @@ public interface DiscoQrCopyRepository extends JpaRepository<DiscoQrCopy, Long> 
 
     List<DiscoQrCopy> findByManualDiscogsBatchIdOrderByCopyNumber(Long batchId);
 
+    /** Resolves sold-copy attribution and its batch in one fetch for profit reporting. */
+    @Query("""
+            SELECT c
+            FROM DiscoQrCopy c
+            LEFT JOIN FETCH c.manualDiscogsBatch
+            WHERE c.id IN :ids
+            """)
+    List<DiscoQrCopy> findAllWithManualBatchByIdIn(@Param("ids") List<Long> ids);
+
     @Query("""
             SELECT c
             FROM DiscoQrCopy c
