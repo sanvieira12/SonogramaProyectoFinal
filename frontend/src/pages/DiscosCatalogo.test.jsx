@@ -28,6 +28,7 @@ vi.mock('../services/discoService', () => ({
   api: {
     discos: {
       porId: vi.fn(),
+      copias: vi.fn(),
       eliminarCopia: vi.fn(),
       previews: { listar: vi.fn().mockResolvedValue([]) },
     },
@@ -38,8 +39,10 @@ vi.mock('../services/discoService', () => ({
     crm: { clientesRecomendados: vi.fn() },
     importaciones: {
       discogsManualBatchExcel: vi.fn(),
+      discogsManualSourceExcel: vi.fn(),
       discogsManualBatchZip: vi.fn(),
       discogsManualBatchFinalize: vi.fn(),
+      discogsManualSourceReconciliation: vi.fn(),
     },
   },
   FINANCIAL_DATA_CHANGED_EVENT: 'sonograma:financial-data-changed',
@@ -76,6 +79,52 @@ function catalogDisco(overrides = {}) {
   }
 }
 
+function copyDetail(overrides = {}) {
+  const id = overrides.id ?? 1
+  const copyNumber = overrides.copyNumber ?? id
+  return {
+    id,
+    productId: overrides.productId ?? 42,
+    copyNumber,
+    codigoQr: `qr-${id}`,
+    estado: 'DISPONIBLE',
+    precioVenta: 1100,
+    condicionFisica: 'NM',
+    createdAt: '2026-09-01T10:00:00',
+    manualBatchId: 11,
+    sourceCustomerCode: 'LO',
+    normalizedSourceCustomerCode: 'LO',
+    dispositionReason: null,
+    dispositionNote: null,
+    disposedAt: null,
+    disposedBy: null,
+    updatedAt: '2026-09-01T10:00:00',
+    ...overrides,
+  }
+}
+
+function matchedReconciliation(overrides = {}) {
+  return {
+    sourceCustomerCode: 'JPH',
+    normalizedSourceCustomerCode: 'JPH',
+    expectedCopyCount: 2,
+    provablePhysicalCopyCount: 2,
+    availableCopyCount: 2,
+    soldCopyCount: 0,
+    removedCopyCount: 0,
+    distinctReleaseCount: 2,
+    duplicateReleaseGroupCount: 0,
+    extraDuplicateCopyCount: 0,
+    pendingOperationCount: 0,
+    completedOperationCount: 2,
+    abandonedOperationCount: 0,
+    difference: 0,
+    reconciliationStatus: 'MATCHED',
+    version: 0,
+    ...overrides,
+  }
+}
+
 describe('Catalog permanent deletion flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -86,6 +135,8 @@ describe('Catalog permanent deletion flow', () => {
     })
     discoService.getAll.mockResolvedValue([disco])
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([])
+    api.discos.copias.mockResolvedValue([])
+    api.importaciones.discogsManualSourceReconciliation.mockResolvedValue(matchedReconciliation())
   })
 
   async function openDeleteDialog() {
@@ -312,11 +363,11 @@ describe('Catalog permanent deletion flow', () => {
     })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
       {
-        type: 'MANUAL', key: 'manual:11', label: 'JPH · 2 discos · En curso',
+        type: 'MANUAL', key: 'manual:11', label: 'JPH · 2 copias físicas · En curso',
         customerCode: 'JPH', status: 'OPEN', batchId: 11, copyCount: 2,
       },
       {
-        type: 'MANUAL', key: 'manual:12', label: 'JPH · 1 discos · Finalizada',
+        type: 'MANUAL', key: 'manual:12', label: 'JPH · 1 copias físicas · Finalizada',
         customerCode: 'JPH', status: 'FINALIZED', batchId: 12, copyCount: 1,
       },
     ])
@@ -324,8 +375,8 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    expect(await screen.findByRole('option', { name: 'JPH · 3 discos · En curso' })).toBeInTheDocument()
-    expect(screen.getAllByRole('option', { name: /JPH · 3 discos/ })).toHaveLength(1)
+    expect(await screen.findByRole('option', { name: 'JPH · 3 copias físicas · En curso' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JPH · 3 copias físicas/ })).toHaveLength(1)
     fireEvent.change(screen.getByLabelText('Importación Discogs'), {
       target: { value: 'manual:customer:JPH' },
     })
@@ -333,7 +384,7 @@ describe('Catalog permanent deletion flow', () => {
     await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
       .toHaveBeenCalledWith('manual:customer:JPH'))
     expect(await screen.findByTestId('manual-batch-summary'))
-      .toHaveTextContent('JPH · 3 discos · En curso')
+      .toHaveTextContent('JPH · 3 copias físicas · En curso')
     expect(screen.getByText('Producto del batch 1')).toBeInTheDocument()
     expect(screen.getByText('VG+')).toBeInTheDocument()
     expect(screen.getByText('UYU $1.750')).toBeInTheDocument()
@@ -347,7 +398,7 @@ describe('Catalog permanent deletion flow', () => {
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
       type: 'MANUAL',
       key: 'manual:customer:JPH',
-      label: 'JPH · 3 discos · En curso',
+      label: 'JPH · 3 copias físicas · En curso',
       customerCode: 'JPH',
       status: 'OPEN',
       batchId: 12,
@@ -360,8 +411,8 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    expect(await screen.findByRole('option', { name: 'JPH · 3 discos · En curso' })).toBeInTheDocument()
-    expect(screen.getAllByRole('option', { name: /JPH · 3 discos/ })).toHaveLength(1)
+    expect(await screen.findByRole('option', { name: 'JPH · 3 copias físicas · En curso' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JPH · 3 copias físicas/ })).toHaveLength(1)
     fireEvent.change(screen.getByLabelText('Importación Discogs'), {
       target: { value: 'manual:customer:JPH' },
     })
@@ -370,6 +421,37 @@ describe('Catalog permanent deletion flow', () => {
       .toHaveBeenCalledWith('manual:customer:JPH'))
     expect(await screen.findByText('Release from first batch')).toBeInTheDocument()
     expect(screen.getByText('Release from second batch')).toBeInTheDocument()
+  })
+
+  it('keeps logical-source physical copy count distinct from deduplicated product rows', async () => {
+    const products = [
+      catalogDisco({ idDisco: 611, artista: 'Shared release with two copies' }),
+      catalogDisco({ idDisco: 612, artista: 'Second release' }),
+      catalogDisco({ idDisco: 613, artista: 'Third release' }),
+    ]
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
+      type: 'MANUAL',
+      key: 'manual:customer:TESTSOURCE',
+      label: 'TESTSOURCE · 4 copias físicas · En curso',
+      customerCode: 'TESTSOURCE',
+      status: 'OPEN',
+      batchId: 72,
+      copyCount: 4,
+    }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue(products)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    expect(await screen.findByRole('option', { name: 'TESTSOURCE · 4 copias físicas · En curso' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), {
+      target: { value: 'manual:customer:TESTSOURCE' },
+    })
+    await waitFor(() => expect(discoService.getPorFuenteImportacionDiscogs)
+      .toHaveBeenCalledWith('manual:customer:TESTSOURCE'))
+    expect(await screen.findByText('Shared release with two copies')).toBeInTheDocument()
+    expect(screen.getByText('Second release')).toBeInTheDocument()
+    expect(screen.getByText('Third release')).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /TESTSOURCE · 4 copias físicas/ })).toHaveLength(1)
   })
 
   it('keeps manual customer results visible when searching within the logical source', async () => {
@@ -381,7 +463,7 @@ describe('Catalog permanent deletion flow', () => {
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
       type: 'MANUAL',
       key: 'manual:customer:JS',
-      label: 'JS · 1 discos · Finalizada',
+      label: 'JS · 1 copias físicas · Finalizada',
       customerCode: 'JS',
       status: 'FINALIZED',
       batchId: 13,
@@ -391,7 +473,7 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    await screen.findByRole('option', { name: 'JS · 1 discos · Finalizada' })
+    await screen.findByRole('option', { name: 'JS · 1 copias físicas · Finalizada' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), {
       target: { value: 'manual:customer:JS' },
     })
@@ -417,8 +499,8 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    expect(await screen.findByRole('option', { name: 'JS · 54 discos · Finalizada' })).toBeInTheDocument()
-    expect(screen.getAllByRole('option', { name: /JS · 54 discos/ })).toHaveLength(1)
+    expect(await screen.findByRole('option', { name: 'JS · 54 copias físicas · Finalizada' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /JS · 54 copias físicas/ })).toHaveLength(1)
     expect(screen.queryByRole('option', { name: /manual:10/ })).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Importación Discogs'), {
       target: { value: 'manual:customer:JS' },
@@ -439,19 +521,24 @@ describe('Catalog permanent deletion flow', () => {
       genero: 'Tech House',
     })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
-      { type: 'MANUAL', key: 'manual:51', label: 'SV3 · 1 discos · En curso', customerCode: 'SV3', status: 'OPEN', batchId: 51, copyCount: 1 },
+      { type: 'MANUAL', key: 'manual:51', label: 'SV3 · 1 copias físicas · En curso', customerCode: 'SV3', status: 'OPEN', batchId: 51, copyCount: 1 },
     ])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 5081, productId: 508, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3' }),
+    ])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'SV3 · 1 discos · En curso' })
+    await screen.findByRole('option', { name: 'SV3 · 1 copias físicas · En curso' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:51' } })
     const artist = await screen.findByText('Z@P')
     fireEvent.mouseEnter(artist.closest('tr'))
 
     expect(await screen.findByText('Tech House')).toBeInTheDocument()
-    expect(screen.getByText('SV3', { exact: true })).toBeInTheDocument()
-    expect(screen.queryByText('Código: Z-2007-1019255')).not.toBeInTheDocument()
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(within(section).getByText('SV3', { exact: true })).toBeInTheDocument()
+    expect(screen.getByText('Z-2007-1019255')).toBeInTheDocument()
+    expect(screen.getByText('SKU del producto')).toBeInTheDocument()
   })
 
   it('exports an OPEN manual batch ZIP and triggers a browser download', async () => {
@@ -460,13 +547,13 @@ describe('Catalog permanent deletion flow', () => {
       blob, filename: 'JPH_2026-09-04_batch-31.zip',
     })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
-      type: 'MANUAL', key: 'manual:31', label: 'JPH · 1 discos · En curso',
+      type: 'MANUAL', key: 'manual:31', label: 'JPH · 1 copias físicas · En curso',
       customerCode: 'JPH', status: 'OPEN', batchId: 31, copyCount: 1,
     }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 504 })])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'JPH · 1 discos · En curso' })
+    await screen.findByRole('option', { name: 'JPH · 1 copias físicas · En curso' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:31' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Descargar ZIP' }))
 
@@ -481,13 +568,13 @@ describe('Catalog permanent deletion flow', () => {
       rejectExport = reject
     }))
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
-      type: 'MANUAL', key: 'manual:32', label: 'JPH · 1 discos · Finalizada',
+      type: 'MANUAL', key: 'manual:32', label: 'JPH · 1 copias físicas · Finalizada',
       customerCode: 'JPH', status: 'FINALIZED', batchId: 32, copyCount: 1,
     }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 505 })])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'JPH · 1 discos · Finalizada' })
+    await screen.findByRole('option', { name: 'JPH · 1 copias físicas · Finalizada' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:32' } })
 
     const zipButton = await screen.findByRole('button', { name: 'Descargar ZIP' })
@@ -509,17 +596,17 @@ describe('Catalog permanent deletion flow', () => {
     }))
     discoService.listarFuentesImportacionDiscogs
       .mockResolvedValueOnce([{
-        type: 'MANUAL', key: 'manual:41', label: 'JPH · 2 discos · En curso',
+        type: 'MANUAL', key: 'manual:41', label: 'JPH · 2 copias físicas · En curso',
         customerCode: 'JPH', status: 'OPEN', batchId: 41, copyCount: 2,
       }])
       .mockResolvedValueOnce([{
-        type: 'MANUAL', key: 'manual:41', label: 'JPH · 2 discos · Finalizada',
+        type: 'MANUAL', key: 'manual:41', label: 'JPH · 2 copias físicas · Finalizada',
         customerCode: 'JPH', status: 'FINALIZED', batchId: 41, copyCount: 2,
       }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 506 })])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'JPH · 2 discos · En curso' })
+    await screen.findByRole('option', { name: 'JPH · 2 copias físicas · En curso' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:41' } })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Finalizar importación' }))
@@ -539,12 +626,12 @@ describe('Catalog permanent deletion flow', () => {
     fireEvent.click(within(reopenedDialog).getByRole('button', { name: 'Finalizar importación' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Finalizando…' }))
     expect(api.importaciones.discogsManualBatchFinalize).toHaveBeenCalledTimes(1)
-    expect(api.importaciones.discogsManualBatchFinalize).toHaveBeenCalledWith(41, 30)
+    expect(api.importaciones.discogsManualBatchFinalize).toHaveBeenCalledWith(41, 30, false)
     expect(screen.getByRole('button', { name: 'Finalizando…' })).toBeDisabled()
 
     resolveFinalize({ batchId: 41, status: 'FINALIZED', finalizedAt: '2026-09-04T12:00:00', porcentajeSonograma: 30 })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Finalizar importación' })).not.toBeInTheDocument())
-    expect(screen.getByRole('option', { name: 'JPH · 2 discos · Finalizada' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'JPH · 2 copias físicas · Finalizada' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Descargar ZIP' })).toBeInTheDocument()
   })
@@ -552,13 +639,13 @@ describe('Catalog permanent deletion flow', () => {
   it('restores finalization action and shows a Spanish error when finalization fails', async () => {
     api.importaciones.discogsManualBatchFinalize.mockRejectedValue(new Error('El batch ya está finalizado'))
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
-      type: 'MANUAL', key: 'manual:42', label: 'JPH · 1 discos · En curso',
+      type: 'MANUAL', key: 'manual:42', label: 'JPH · 1 copias físicas · En curso',
       customerCode: 'JPH', status: 'OPEN', batchId: 42, copyCount: 1,
     }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 507 })])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'JPH · 1 discos · En curso' })
+    await screen.findByRole('option', { name: 'JPH · 1 copias físicas · En curso' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:42' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Finalizar importación' }))
     const dialog = await screen.findByRole('dialog')
@@ -570,47 +657,158 @@ describe('Catalog permanent deletion flow', () => {
       .getByRole('button', { name: 'Finalizar importación' })).toBeEnabled()
   })
 
+  it('warns when the expected count is unknown and sends an explicit finalization confirmation', async () => {
+    api.importaciones.discogsManualSourceReconciliation.mockResolvedValue(matchedReconciliation({
+      expectedCopyCount: null,
+      difference: null,
+      reconciliationStatus: 'EXPECTED_COUNT_UNKNOWN',
+    }))
+    api.importaciones.discogsManualBatchFinalize.mockResolvedValue({
+      batchId: 44,
+      status: 'FINALIZED',
+      porcentajeSonograma: 25,
+    })
+    discoService.listarFuentesImportacionDiscogs
+      .mockResolvedValueOnce([{
+        type: 'MANUAL', key: 'manual:44', label: 'UNKNOWN · 2 copias físicas · En curso',
+        customerCode: 'UNKNOWN', status: 'OPEN', batchId: 44, copyCount: 2,
+      }])
+      .mockResolvedValueOnce([{
+        type: 'MANUAL', key: 'manual:44', label: 'UNKNOWN · 2 copias físicas · Finalizada',
+        customerCode: 'UNKNOWN', status: 'FINALIZED', batchId: 44, copyCount: 2,
+      }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 509 })])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByRole('option', { name: 'UNKNOWN · 2 copias físicas · En curso' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:44' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Finalizar importación' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Resumen de conciliación')).toHaveTextContent('Cantidad esperada: No definida')
+    fireEvent.change(within(dialog).getByLabelText('Porcentaje Sonograma'), { target: { value: '25' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finalizar de todos modos' }))
+
+    await waitFor(() => expect(api.importaciones.discogsManualBatchFinalize)
+      .toHaveBeenCalledWith(44, 25, true))
+  })
+
+  it('warns about pending operations and finalizes only after explicit confirmation', async () => {
+    const pendingError = new Error('La cantidad registrada no coincide con la esperada. Hay 2 importaciones pendientes.')
+    pendingError.code = 'MANUAL_DISCOGS_RECONCILIATION_CONFIRMATION_REQUIRED'
+    pendingError.data = {
+      code: pendingError.code,
+      warnings: ['Hay 2 importaciones pendientes.'],
+      reconciliation: matchedReconciliation({
+        normalizedSourceCustomerCode: 'TESTSOURCE',
+        expectedCopyCount: 3,
+        provablePhysicalCopyCount: 1,
+        availableCopyCount: 1,
+        distinctReleaseCount: 1,
+        difference: -2,
+        pendingOperationCount: 2,
+        reconciliationStatus: 'IN_PROGRESS',
+      }),
+    }
+    api.importaciones.discogsManualBatchFinalize
+      .mockRejectedValueOnce(pendingError)
+      .mockResolvedValueOnce({ batchId: 43, status: 'FINALIZED', porcentajeSonograma: 30 })
+    discoService.listarFuentesImportacionDiscogs
+      .mockResolvedValueOnce([{
+        type: 'MANUAL', key: 'manual:43', label: 'TESTSOURCE · 1 copias físicas · En curso',
+        customerCode: 'TESTSOURCE', status: 'OPEN', batchId: 43, copyCount: 1,
+      }])
+      .mockResolvedValueOnce([{
+        type: 'MANUAL', key: 'manual:43', label: 'TESTSOURCE · 1 copias físicas · Finalizada',
+        customerCode: 'TESTSOURCE', status: 'FINALIZED', batchId: 43, copyCount: 1,
+      }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 508 })])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByRole('option', { name: 'TESTSOURCE · 1 copias físicas · En curso' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:43' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Finalizar importación' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Porcentaje Sonograma'), { target: { value: '30' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finalizar importación' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Hay 2 importaciones pendientes')
+    expect(within(dialog).getByLabelText('Resumen de conciliación')).toHaveTextContent('Faltan demostrar 2 copias')
+    expect(within(dialog).getByRole('button', { name: 'Finalizar de todos modos' })).toBeEnabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finalizar de todos modos' }))
+
+    await waitFor(() => expect(api.importaciones.discogsManualBatchFinalize).toHaveBeenNthCalledWith(2, 43, 30, true))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('shows truthful export progress, prevents duplicate clicks, and keeps re-download available', async () => {
     let resolveExport
-    api.importaciones.discogsManualBatchExcel.mockImplementation(() => new Promise(resolve => {
+    api.importaciones.discogsManualSourceExcel.mockImplementation(() => new Promise(resolve => {
       resolveExport = resolve
     }))
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
-      type: 'MANUAL', key: 'manual:21', label: 'PIN · 1 discos · Finalizada',
-      customerCode: 'PIN', status: 'FINALIZED', batchId: 21, copyCount: 1,
+      type: 'MANUAL', key: 'manual:customer:SV3', label: 'SV3 · 4 copias físicas · Finalizada',
+      customerCode: 'SV3', status: 'FINALIZED', batchId: 21, copyCount: 4,
     }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 503 })])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'PIN · 1 discos · Finalizada' })
-    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:21' } })
+    await screen.findByRole('option', { name: 'SV3 · 4 copias físicas · Finalizada' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:customer:SV3' } })
 
     const exportButton = await screen.findByRole('button', { name: 'Exportar Excel' })
     fireEvent.click(exportButton)
     fireEvent.click(exportButton)
-    expect(api.importaciones.discogsManualBatchExcel).toHaveBeenCalledTimes(1)
+    expect(api.importaciones.discogsManualSourceExcel).toHaveBeenCalledTimes(1)
+    expect(api.importaciones.discogsManualSourceExcel).toHaveBeenCalledWith('SV3')
+    expect(api.importaciones.discogsManualBatchExcel).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Generando Excel…' })).toBeDisabled()
     expect(screen.getByTestId('manual-batch-export-progress')).toHaveTextContent('Generando archivo')
 
-    resolveExport({ blob: new Blob(['xlsx']), filename: 'PIN_2026-09-04_batch-21.xlsx' })
+    resolveExport({ blob: new Blob(['xlsx']), filename: 'SV3_2026-09-30.xlsx' })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Descargar Excel' })).toBeEnabled())
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'SV3_2026-09-30.xlsx', undefined)
   })
 
   it('restores the manual export button and shows a Spanish error when export fails', async () => {
-    api.importaciones.discogsManualBatchExcel.mockRejectedValue(new Error('Batch sin copias'))
+    api.importaciones.discogsManualSourceExcel.mockRejectedValue(new Error('Fuente sin copias'))
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
-      type: 'MANUAL', key: 'manual:22', label: 'PIN · 0 discos · En curso',
+      type: 'MANUAL', key: 'manual:22', label: 'PIN · 0 copias físicas · En curso',
       customerCode: 'PIN', status: 'OPEN', batchId: 22, copyCount: 0,
     }])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
-    await screen.findByRole('option', { name: 'PIN · 0 discos · En curso' })
+    await screen.findByRole('option', { name: 'PIN · 0 copias físicas · En curso' })
     fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:22' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Exportar Excel' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Batch sin copias')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Fuente sin copias')
     expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled()
+  })
+
+  it('updates logical export scope when the selected source changes', async () => {
+    api.importaciones.discogsManualSourceExcel.mockResolvedValue({
+      blob: new Blob(['xlsx']), filename: 'source.xlsx',
+    })
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
+      { type: 'MANUAL', key: 'manual:customer:SV3', customerCode: 'sv3', status: 'FINALIZED', batchId: 8, copyCount: 4 },
+      { type: 'MANUAL', key: 'manual:customer:LO', customerCode: ' LO ', status: 'OPEN', batchId: 9, copyCount: 2 },
+    ])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([catalogDisco({ idDisco: 510 })])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const selector = screen.getByLabelText('Importación Discogs')
+    await screen.findByRole('option', { name: 'SV3 · 4 copias físicas · Finalizada' })
+
+    fireEvent.change(selector, { target: { value: 'manual:customer:SV3' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Exportar Excel' }))
+    await waitFor(() => expect(api.importaciones.discogsManualSourceExcel).toHaveBeenCalledWith('SV3'))
+
+    fireEvent.change(selector, { target: { value: 'manual:customer:LO' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Exportar Excel' }))
+    await waitFor(() => expect(api.importaciones.discogsManualSourceExcel).toHaveBeenCalledWith('LO'))
+    expect(api.importaciones.discogsManualBatchExcel).not.toHaveBeenCalled()
   })
 
   it('does not show a manual batch summary when all imports are selected', async () => {
@@ -618,5 +816,252 @@ describe('Catalog permanent deletion flow', () => {
 
     await screen.findByText('Deletion Artist')
     expect(screen.queryByTestId('manual-batch-summary')).not.toBeInTheDocument()
+  })
+
+  it('keeps one product row and switches independent source, price, condition, and state by copy', async () => {
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 101, copyNumber: 1, sourceCustomerCode: 'LO', normalizedSourceCustomerCode: 'LO', precioVenta: 1100, condicionFisica: 'NM' }),
+      copyDetail({ id: 102, copyNumber: 2, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3', precioVenta: 925, condicionFisica: 'VG', estado: 'VENDIDO' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const artist = await screen.findByText('Deletion Artist')
+    expect(within(screen.getByRole('table')).getAllByText('Deletion Artist')).toHaveLength(1)
+    fireEvent.click(artist.closest('tr'))
+
+    const section = await screen.findByTestId('physical-copy-section')
+    await waitFor(() => expect(within(section).getByText('1 disponible · 2 copias físicas')).toBeInTheDocument())
+    expect(within(section).getByText('LO')).toBeInTheDocument()
+    expect(within(section).getByText('UYU $1.100')).toBeInTheDocument()
+    expect(within(section).getByText('NM')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByText('SV3')).toBeInTheDocument()
+    expect(within(section).getByText('UYU $925')).toBeInTheDocument()
+    expect(within(section).getByText('VG')).toBeInTheDocument()
+    expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0)
+    expect(api.discos.copias).toHaveBeenCalledWith(42)
+  })
+
+  it('defaults to the active LO copy, labels the match, and shows retained removal details', async () => {
+    const filtered = catalogDisco({ idDisco: 801, artista: 'Shared LO and SV3 release' })
+    discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
+      type: 'MANUAL', key: 'manual:customer:LO', customerCode: 'LO', status: 'OPEN', batchId: 15, copyCount: 1,
+    }])
+    discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([filtered])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 201, productId: 801, copyNumber: 1, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3' }),
+      copyDetail({
+        id: 202, productId: 801, copyNumber: 2, sourceCustomerCode: 'LO', normalizedSourceCustomerCode: 'LO',
+        estado: 'REMOVED', dispositionReason: 'DAMAGED', dispositionNote: 'Rayón profundo', disposedAt: '2026-09-20T14:30:00',
+      }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    await screen.findByRole('option', { name: 'LO · 1 copias físicas · En curso' })
+    fireEvent.change(screen.getByLabelText('Importación Discogs'), { target: { value: 'manual:customer:LO' } })
+    const artist = await screen.findByText('Shared LO and SV3 release')
+    fireEvent.click(artist.closest('tr'))
+
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByText('Coincide con filtro LO')).toBeInTheDocument()
+    expect(within(section).getByText('Se muestran todas las copias; ✓ indica LO.')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Copia 1' })).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getAllByText('Retirada').length).toBeGreaterThan(0)
+    expect(within(section).getByText('Dañada')).toBeInTheDocument()
+    expect(within(section).getByText('Rayón profundo')).toBeInTheDocument()
+  })
+
+  it('prefers the first available copy and uses honest null fallbacks without product substitutions', async () => {
+    discoService.getAll.mockResolvedValue([catalogDisco({
+      idDisco: 802,
+      artista: 'Fallback release',
+      precioVenta: 9999,
+      condicionFisica: 'MINT PRODUCT',
+    })])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 301, productId: 802, copyNumber: 1, estado: 'VENDIDO', sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3' }),
+      copyDetail({
+        id: 302, productId: 802, copyNumber: 2, precioVenta: null, condicionFisica: null,
+        sourceCustomerCode: null, normalizedSourceCustomerCode: null, manualBatchId: null,
+      }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const artist = await screen.findByText('Fallback release')
+    fireEvent.click(artist.closest('tr'))
+
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getByText('Sin procedencia')).toBeInTheDocument()
+    expect(within(section).getByText('Sin precio específico')).toBeInTheDocument()
+    expect(within(section).getByText('Sin condición registrada')).toBeInTheDocument()
+    expect(within(section).queryByText('UYU $9.999')).not.toBeInTheDocument()
+    expect(within(section).queryByText('MINT PRODUCT')).not.toBeInTheDocument()
+  })
+
+  it('resolves the verified DiSKOP and Italoboyz copies independently and opens the selected exact QR', async () => {
+    const diskop = catalogDisco({
+      idDisco: 1880,
+      artista: 'DiSKOP',
+      album: 'High Hill / The Spirit',
+      codigoInterno: 'D-2017-10020965',
+      cantidadCopias: 2,
+      totalCopias: 2,
+      condicion: 'USADO',
+      condicionFisica: 'NM',
+      precioVenta: 790,
+    })
+    const italoboyz = catalogDisco({
+      idDisco: 1911,
+      artista: 'Italoboyz',
+      album: 'Episode #11',
+      codigoInterno: 'I-2018-12490535',
+      cantidadCopias: 2,
+      totalCopias: 2,
+      condicion: 'USADO',
+      condicionFisica: 'VG+',
+      precioVenta: 750,
+    })
+    const copiesByProduct = {
+      1880: [
+        copyDetail({ id: 28332, productId: 1880, copyNumber: 1, codigoQr: '323c2615-428f-43e1-a33b-9b99b041cfc1', precioVenta: 800, condicionFisica: 'NM' }),
+        copyDetail({ id: 28333, productId: 1880, copyNumber: 2, codigoQr: '45f4b046-676b-4af6-9ed9-ab06011dded0', precioVenta: 790, condicionFisica: 'NM' }),
+      ],
+      1911: [
+        copyDetail({ id: 28390, productId: 1911, copyNumber: 1, codigoQr: 'd0e63626-4277-4b08-bf70-3f6186804826', precioVenta: 800, condicionFisica: 'VG+' }),
+        copyDetail({ id: 28413, productId: 1911, copyNumber: 2, codigoQr: 'ade8eac5-fea5-4149-980c-f2a46ed89552', precioVenta: 750, condicionFisica: 'VG+' }),
+      ],
+    }
+    discoService.getAll.mockResolvedValue([diskop, italoboyz])
+    api.discos.copias.mockImplementation(id => Promise.resolve(copiesByProduct[id]))
+    api.discos.porId.mockImplementation(id => {
+      const product = id === 1880 ? diskop : italoboyz
+      return Promise.resolve({ ...product, qrCopies: copiesByProduct[id] })
+    })
+    api.qr.urlDescargaCopia.mockImplementation((id, copyNumber) => `/api/qr/${id}/${copyNumber}`)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+
+    const diskopRow = (await screen.findByText('DiSKOP')).closest('tr')
+    fireEvent.click(diskopRow)
+    let section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByRole('heading', { name: 'Copia 1' })).toBeInTheDocument()
+    expect(within(section).getAllByText('323c2615-428f-43e1-a33b-9b99b041cfc1').length).toBeGreaterThan(0)
+    expect(within(section).getByText('UYU $800')).toBeInTheDocument()
+    expect(within(section).getByText('Procedencia')).toBeInTheDocument()
+    expect(within(section).getByText('LO')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getAllByText('45f4b046-676b-4af6-9ed9-ab06011dded0').length).toBeGreaterThan(0)
+    expect(within(section).getByText('UYU $790')).toBeInTheDocument()
+    expect(within(diskopRow).getByText('UYU $790–$800')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 2' }))
+    expect(await screen.findByText('Mostrando copia 2 de 2')).toBeInTheDocument()
+    expect(screen.getAllByText('45f4b046-676b-4af6-9ed9-ab06011dded0').length).toBeGreaterThan(0)
+    expect(api.discos.porId).toHaveBeenCalledWith(1880)
+    expect(api.qr.urlDescargaCopia).toHaveBeenCalledWith(1880, 2)
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }))
+
+    const italoboyzRow = screen.getByText('Italoboyz').closest('tr')
+    fireEvent.click(italoboyzRow)
+    section = await screen.findByTestId('physical-copy-section')
+    expect((await within(section).findAllByText('d0e63626-4277-4b08-bf70-3f6186804826')).length).toBeGreaterThan(0)
+    expect(within(section).getByText('UYU $800')).toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getAllByText('ade8eac5-fea5-4149-980c-f2a46ed89552').length).toBeGreaterThan(0)
+    expect(within(section).getByText('UYU $750')).toBeInTheDocument()
+    expect(within(italoboyzRow).getByText('UYU $750–$800')).toBeInTheDocument()
+
+    expect(screen.getAllByText('2 copias').length).toBeGreaterThan(0)
+    expect(discoService.actualizarCopias).not.toHaveBeenCalled()
+    expect(api.discos.eliminarCopia).not.toHaveBeenCalled()
+  })
+
+  it('uses a compact select for five or more retained copies', async () => {
+    api.discos.copias.mockResolvedValue(Array.from({ length: 6 }, (_, index) => copyDetail({
+      id: 400 + index,
+      copyNumber: index + 1,
+      sourceCustomerCode: index % 2 ? 'SV3' : 'LO',
+      normalizedSourceCustomerCode: index % 2 ? 'SV3' : 'LO',
+    })))
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const artist = await screen.findByText('Deletion Artist')
+    fireEvent.click(artist.closest('tr'))
+
+    const selector = await screen.findByLabelText('Copia física')
+    expect(selector).toBeInTheDocument()
+    expect(within(selector).getAllByRole('option')).toHaveLength(6)
+    expect(screen.queryByRole('button', { name: /^Copia 5/ })).not.toBeInTheDocument()
+  })
+
+  it('resets selection when the product changes and reuses cached details when returning', async () => {
+    const first = catalogDisco({ idDisco: 901, artista: 'First product' })
+    const second = catalogDisco({ idDisco: 902, artista: 'Second product' })
+    discoService.getAll.mockResolvedValue([first, second])
+    api.discos.copias.mockImplementation(id => Promise.resolve(id === 901
+      ? [copyDetail({ id: 501, productId: 901, copyNumber: 1 }), copyDetail({ id: 502, productId: 901, copyNumber: 2, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3' })]
+      : [copyDetail({ id: 601, productId: 902, copyNumber: 1, sourceCustomerCode: 'P', normalizedSourceCustomerCode: 'P' })]))
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    fireEvent.click((await screen.findByText('First product')).closest('tr'))
+    let section = await screen.findByTestId('physical-copy-section')
+    fireEvent.click(await within(section).findByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Second product').closest('tr'))
+    section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByRole('heading', { name: 'Copia 1' })).toBeInTheDocument()
+    expect(within(section).getByText('P')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('First product').closest('tr'))
+    await waitFor(() => expect(within(screen.getByTestId('physical-copy-section')).getByRole('heading', { name: 'Copia 1' })).toBeInTheDocument())
+    expect(api.discos.copias.mock.calls.filter(([id]) => id === 901)).toHaveLength(1)
+  })
+
+  it('uses the same physical-copy semantics in the mobile slide-over', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 701, copyNumber: 1, sourceCustomerCode: 'LO', normalizedSourceCustomerCode: 'LO' }),
+      copyDetail({ id: 702, copyNumber: 2, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3', estado: 'VENDIDO' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    fireEvent.click((await screen.findByText('Deletion Artist')).closest('tr'))
+
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByText('LO')).toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByText('SV3')).toBeInTheDocument()
+    expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0)
+  })
+
+  it('keeps shared product data visible through local loading and retryable copy errors', async () => {
+    let rejectCopies
+    api.discos.copias.mockImplementationOnce(() => new Promise((resolve, reject) => { rejectCopies = reject }))
+      .mockResolvedValueOnce([copyDetail({ id: 801 })])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    fireEvent.click((await screen.findByText('Deletion Artist')).closest('tr'))
+
+    expect(await screen.findByText('Cargando copias físicas…')).toBeInTheDocument()
+    expect(screen.getAllByText('Deletion Album').length).toBeGreaterThan(0)
+    rejectCopies(new Error('No se pudo consultar el inventario'))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('No se pudo consultar el inventario')
+    expect(screen.getAllByText('Deletion Album').length).toBeGreaterThan(0)
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }))
+    expect(await screen.findByText('1 disponible · 1 copia física')).toBeInTheDocument()
+    expect(api.discos.copias).toHaveBeenCalledTimes(2)
   })
 })

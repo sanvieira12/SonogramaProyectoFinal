@@ -7,6 +7,11 @@ import com.sonograma.dto.DiscogsImportJobDTO;
 import com.sonograma.dto.DiscogsZipStatusDTO;
 import com.sonograma.dto.ManualDiscogsImportResultDTO;
 import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
+import com.sonograma.dto.ManualDiscogsOperationContextDTO;
+import com.sonograma.dto.ManualDiscogsOperationDTO;
+import com.sonograma.dto.ManualDiscogsExpectedCountRequestDTO;
+import com.sonograma.dto.ManualDiscogsFinalizationSnapshotDTO;
+import com.sonograma.dto.ManualDiscogsSourceReconciliationDTO;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.service.importacion.DiscogsImportService;
 import com.sonograma.service.importacion.DiscogsImportJobService;
@@ -16,6 +21,8 @@ import com.sonograma.service.VinylFutureAssetService;
 import com.sonograma.service.DiscogsManualBatchExcelService;
 import com.sonograma.service.DiscogsManualBatchZipService;
 import com.sonograma.service.DiscogsManualBatchService;
+import com.sonograma.service.importacion.ManualDiscogsReceiptOperationService;
+import com.sonograma.service.ManualDiscogsSourceReconciliationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +40,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/importaciones")
@@ -48,6 +56,8 @@ public class ImportacionController {
     private final DiscogsManualBatchExcelService discogsManualBatchExcelService;
     private final DiscogsManualBatchZipService discogsManualBatchZipService;
     private final DiscogsManualBatchService discogsManualBatchService;
+    private final ManualDiscogsReceiptOperationService manualDiscogsReceiptOperationService;
+    private final ManualDiscogsSourceReconciliationService manualDiscogsSourceReconciliationService;
 
     // ── VinylFuture Excel ─────────────────────────────────────────────────────
 
@@ -95,7 +105,15 @@ public class ImportacionController {
         if (url == null || url.isBlank()) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.ok(discogsImportService.fetchDesdeLink(url));
+        DiscoImportPreviewDTO preview = discogsImportService.fetchDesdeLink(url);
+        String source = body.get("sourceCustomerCode");
+        if (preview.getOperationId() != null && source != null && !source.isBlank()) {
+            manualDiscogsReceiptOperationService.updateContext(
+                    UUID.fromString(preview.getOperationId()),
+                    new ManualDiscogsOperationContextDTO(source, null, null));
+            preview.setCustomerCode(source.trim());
+        }
+        return ResponseEntity.ok(preview);
     }
 
     @PostMapping("/discogs/guardar")
@@ -121,6 +139,62 @@ public class ImportacionController {
                         "attachment; filename=\"discogs-release-" + releaseId + ".zip\"")
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .body(body);
+    }
+
+    @GetMapping("/discogs/manual-operations/pending")
+    public ResponseEntity<List<ManualDiscogsOperationDTO>> pendingManualDiscogsOperations(
+            @RequestParam("source") String source) {
+        return ResponseEntity.ok(manualDiscogsReceiptOperationService.listPending(source));
+    }
+
+    @GetMapping("/discogs/manual-operations/{operationId}")
+    public ResponseEntity<ManualDiscogsOperationDTO> manualDiscogsOperation(
+            @PathVariable UUID operationId) {
+        return ResponseEntity.ok(manualDiscogsReceiptOperationService.get(operationId));
+    }
+
+    @PatchMapping("/discogs/manual-operations/{operationId}/context")
+    public ResponseEntity<ManualDiscogsOperationDTO> updateManualDiscogsOperationContext(
+            @PathVariable UUID operationId,
+            @RequestBody ManualDiscogsOperationContextDTO context) {
+        return ResponseEntity.ok(manualDiscogsReceiptOperationService.updateContext(operationId, context));
+    }
+
+    @PostMapping("/discogs/manual-operations/{operationId}/abandon")
+    public ResponseEntity<ManualDiscogsOperationDTO> abandonManualDiscogsOperation(
+            @PathVariable UUID operationId) {
+        return ResponseEntity.ok(manualDiscogsReceiptOperationService.abandon(operationId));
+    }
+
+    @GetMapping("/discogs/manual-sources/{source}/reconciliation")
+    public ResponseEntity<ManualDiscogsSourceReconciliationDTO> manualDiscogsSourceReconciliation(
+            @PathVariable String source) {
+        return ResponseEntity.ok(manualDiscogsSourceReconciliationService.current(source));
+    }
+
+    @PutMapping("/discogs/manual-sources/{source}/reconciliation/expected-count")
+    public ResponseEntity<ManualDiscogsSourceReconciliationDTO> updateManualDiscogsExpectedCount(
+            @PathVariable String source,
+            @RequestBody ManualDiscogsExpectedCountRequestDTO request) {
+        return ResponseEntity.ok(manualDiscogsSourceReconciliationService.updateExpectedCount(source, request));
+    }
+
+    @GetMapping("/discogs/manual-sources/{source}/reconciliation/snapshots")
+    public ResponseEntity<List<ManualDiscogsFinalizationSnapshotDTO>> manualDiscogsFinalizationSnapshots(
+            @PathVariable String source) {
+        return ResponseEntity.ok(manualDiscogsSourceReconciliationService.snapshots(source));
+    }
+
+    @GetMapping("/discogs/manual-sources/{source}/excel")
+    public ResponseEntity<byte[]> downloadDiscogsManualSourceExcel(@PathVariable String source) {
+        DiscogsManualBatchExcelService.GeneratedWorkbook workbook =
+                discogsManualBatchExcelService.generateForSource(source);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + workbook.filename() + "\"")
+                .contentType(MediaType.parseMediaType(DiscogsManualBatchExcelService.XLSX_MEDIA_TYPE))
+                .contentLength(workbook.content().length)
+                .body(workbook.content());
     }
 
     @GetMapping("/discogs/manual-batches/{batchId}/excel")

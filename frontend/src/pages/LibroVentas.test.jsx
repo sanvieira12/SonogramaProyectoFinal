@@ -58,6 +58,8 @@ const movements = [
       estadoGanancia: 'POSITIVE',
       manualItem: false,
       clasificacionItem: 'USADO',
+      copyIds: [88],
+      copyId: 88,
     }],
   },
   {
@@ -460,7 +462,7 @@ describe('LibroVentas profit display', () => {
 
     await waitFor(() => expect(api.ventas.actualizar).toHaveBeenCalledWith(1, expect.objectContaining({
       total: 1500,
-      detalles: [expect.objectContaining({ idDetalle: 11, cantidad: 1, precioUnitario: 1500, clasificacionItem: 'USADO' })],
+      detalles: [expect.objectContaining({ idDetalle: 11, cantidad: 1, precioUnitario: 1500, clasificacionItem: 'USADO', copyId: 88 })],
     })))
     await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
 

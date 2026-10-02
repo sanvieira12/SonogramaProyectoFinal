@@ -1,6 +1,10 @@
 package com.sonograma.service;
 
 import com.sonograma.dto.DiscoRequestDTO;
+import com.sonograma.dto.DiscoQrCopyDetailDTO;
+import com.sonograma.dto.DiscoSaleSearchCopyDTO;
+import com.sonograma.dto.DiscoSaleSearchProductRow;
+import com.sonograma.dto.DiscoSaleSearchResultDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
@@ -8,6 +12,7 @@ import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.DiscogsManualBatchStatus;
 import com.sonograma.exception.ConflictoNegocioException;
@@ -34,12 +39,16 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.PageRequest;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 @Slf4j
 public class DiscoService {
+
+    private static final int DEFAULT_SALE_SEARCH_LIMIT = 20;
+    private static final int MAX_SALE_SEARCH_LIMIT = 50;
 
     private final DiscoRepository discoRepository;
     private final DiscoQrCopyRepository discoQrCopyRepository;
@@ -69,6 +78,14 @@ public class DiscoService {
         return discoRepository.findById(id)
                 .map(this::toDTO)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+    }
+
+    @Transactional(readOnly = true)
+    public List<DiscoQrCopyDetailDTO> obtenerCopias(Long id) {
+        if (!discoRepository.existsById(id)) {
+            throw new RecursoNoEncontradoException("Disco", id);
+        }
+        return qrCopyService.listDetailDtos(id);
     }
 
     public DiscoResponseDTO obtenerPorQR(String codigoQr) {
@@ -242,7 +259,7 @@ public class DiscoService {
     private DiscogsCatalogSourceDTO withManualLabel(DiscogsCatalogSourceDTO source) {
         String statusLabel = source.status() == com.sonograma.enums.DiscogsManualBatchStatus.FINALIZED
                 ? "Finalizada" : "En curso";
-        String label = String.format("%s · %d discos · %s", source.customerCode(), source.productos(), statusLabel);
+        String label = String.format("%s · %d copias físicas · %s", source.customerCode(), source.productos(), statusLabel);
         return new DiscogsCatalogSourceDTO(
                 source.key(), source.type(), label, source.productos(), source.customerCode(),
                 source.status(), source.batchId(), source.createdAt(), source.porcentajeSonograma());
@@ -314,9 +331,79 @@ public class DiscoService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<DiscoSaleSearchResultDTO> buscarParaVenta(String rawQuery, Integer requestedLimit) {
+        String query = normalizar(rawQuery);
+        if (query.length() < 2) return List.of();
+
+        int limit = requestedLimit == null
+                ? DEFAULT_SALE_SEARCH_LIMIT
+                : Math.max(1, Math.min(requestedLimit, MAX_SALE_SEARCH_LIMIT));
+        String sourceCode = DiscogsManualBatchService.normalizeCustomerCode(rawQuery);
+        List<DiscoSaleSearchProductRow> products = discoRepository.searchForSale(
+                query,
+                "%" + query + "%",
+                query + "%",
+                sourceCode,
+                PageRequest.of(0, limit));
+        if (products.isEmpty()) return List.of();
+
+        List<Long> productIds = products.stream().map(DiscoSaleSearchProductRow::idDisco).toList();
+        Map<Long, List<DiscoQrCopy>> copiesByProduct = discoQrCopyRepository
+                .findAvailableSaleChoicesByProductIds(productIds).stream()
+                .collect(Collectors.groupingBy(
+                        DiscoQrCopy::getIdDisco,
+                        java.util.LinkedHashMap::new,
+                        Collectors.toList()));
+
+        return products.stream()
+                .map(product -> toSaleSearchResult(
+                        product,
+                        copiesByProduct.getOrDefault(product.idDisco(), List.of())))
+                .toList();
+    }
+
+    private DiscoSaleSearchResultDTO toSaleSearchResult(
+            DiscoSaleSearchProductRow product,
+            List<DiscoQrCopy> copies) {
+        List<DiscoSaleSearchCopyDTO> copyChoices = copies.stream()
+                .map(copy -> {
+                    DiscogsManualBatch batch = copy.getManualDiscogsBatch();
+                    return new DiscoSaleSearchCopyDTO(
+                            copy.getId(),
+                            copy.getCopyNumber(),
+                            copy.getCodigoQr(),
+                            copy.getPrecioVenta(),
+                            copy.getCondicionFisica(),
+                            batch == null ? null : batch.getCustomerCode(),
+                            batch == null ? null : batch.getNormalizedCustomerCode(),
+                            batch == null ? null : batch.getId(),
+                            copy.getEstado().name());
+                })
+                .toList();
+        return new DiscoSaleSearchResultDTO(
+                product.idDisco(),
+                product.artista(),
+                product.album(),
+                product.anio(),
+                product.codigoInterno(),
+                product.imagenUrl(),
+                product.condicion() == null ? null : product.condicion().name(),
+                product.condicionFisica(),
+                product.tipoDisco() == null ? null : product.tipoDisco().name(),
+                product.formato(),
+                product.selloDiscografico(),
+                product.precioVenta(),
+                product.estado().name(),
+                copies.stream().anyMatch(copy -> copy.getManualDiscogsBatch() != null),
+                copyChoices.size(),
+                copyChoices);
+    }
+
     public DiscoResponseDTO actualizarDisco(Long id, DiscoRequestDTO request) {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+        rejectManualAggregateChange(disco, request.getCantidadCopias());
         DiscoMapper.updateFromRequest(disco, request);
         catalogPricingService.applyPricingToDisco(disco, request);
         return saveWithQr(disco);
@@ -325,6 +412,11 @@ public class DiscoService {
     public DiscoResponseDTO cambiarEstado(Long id, EstadoDisco nuevoEstado) {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+        if (qrCopyService.hasManualReceiptHistory(id)
+                && (nuevoEstado == EstadoDisco.VENDIDO || nuevoEstado == EstadoDisco.SIN_STOCK)) {
+            throw new ConflictoNegocioException(
+                    "El estado del stock manual USED se deriva de sus copias físicas; use el flujo exacto correspondiente.");
+        }
         disco.setEstado(nuevoEstado);
         if (nuevoEstado == EstadoDisco.VENDIDO) {
             qrCopyService.marcarDisponiblesVendidas(disco);
@@ -342,6 +434,7 @@ public class DiscoService {
         }
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
+        rejectManualAggregateChange(disco, cantidad);
         qrCopyService.synchronizeAvailableCopies(disco, cantidad);
         disco.setCantidadCopias(cantidad);
         discoEstadoService.aplicar(disco);
@@ -366,10 +459,11 @@ public class DiscoService {
         if (!idDisco.equals(copy.getIdDisco())) {
             throw new RecursoNoEncontradoException("Copia", idCopia);
         }
-        if (copyHasHistoricalCommerce(copy, idDisco)) {
+        if (copy.getManualDiscogsBatch() != null) {
             throw new ConflictoNegocioException(
-                    "No se puede eliminar la copia porque está vinculada a historial de ventas.");
+                    "La copia manual USED conserva su historial; retírela con un motivo explícito.");
         }
+        assertCopyHasNoDestructiveCommercialReferences(copy, idDisco);
 
         discoQrCopyRepository.delete(copy);
         discoQrCopyRepository.flush();
@@ -379,6 +473,45 @@ public class DiscoService {
         discoEstadoService.aplicar(disco);
         discoRepository.saveAndFlush(disco);
         return toDTO(disco);
+    }
+
+    public DiscoResponseDTO retirarCopia(
+            Long idDisco,
+            Long idCopia,
+            DisposicionCopiaReason reason,
+            String note,
+            String actor) {
+        Disco disco = discoRepository.findByIdForUpdate(idDisco)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Disco", idDisco));
+        DiscoQrCopy copy = discoQrCopyRepository.findByIdForUpdate(idCopia)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Copia", idCopia));
+        if (!idDisco.equals(copy.getIdDisco())) {
+            throw new RecursoNoEncontradoException("Copia", idCopia);
+        }
+        assertCopyHasNoDestructiveCommercialReferences(copy, idDisco);
+        qrCopyService.removePhysicalCopy(disco, idCopia, reason, note, actor);
+        discoEstadoService.aplicar(disco);
+        discoRepository.saveAndFlush(disco);
+        return toDTO(disco);
+    }
+
+    private void assertCopyHasNoDestructiveCommercialReferences(DiscoQrCopy copy, Long idDisco) {
+        if (copyHasHistoricalCommerce(copy, idDisco)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar ni retirar la copia porque está vinculada a historial de ventas.");
+        }
+
+        // Reserva and PreVenta currently identify only the product, not a physical copy.
+        // Until those legacy models carry exact-copy identity, protect commercial integrity
+        // conservatively by blocking every destructive copy operation for that product.
+        if (exists("SELECT COUNT(*) FROM reserva WHERE id_disco = :id AND estado = 'ACTIVA'", idDisco)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar ni retirar una copia mientras el disco tenga una reserva activa.");
+        }
+        if (exists("SELECT COUNT(*) FROM pre_venta WHERE id_disco = :id AND estado <> 'PAGADA'", idDisco)) {
+            throw new ConflictoNegocioException(
+                    "No se puede eliminar ni retirar una copia mientras el disco tenga una preventa pendiente.");
+        }
     }
 
     private boolean copyHasHistoricalCommerce(DiscoQrCopy copy, Long idDisco) {
@@ -445,7 +578,8 @@ public class DiscoService {
                 || exists("SELECT COUNT(*) FROM venta WHERE id_disco = :id", id)
                 || exists("SELECT COUNT(*) FROM movimiento_stock WHERE id_disco = :id", id)
                 || exists("SELECT COUNT(*) FROM reserva WHERE id_disco = :id", id)
-                || exists("SELECT COUNT(*) FROM pre_venta WHERE id_disco = :id", id);
+                || exists("SELECT COUNT(*) FROM pre_venta WHERE id_disco = :id", id)
+                || exists("SELECT COUNT(*) FROM disco_qr_copy WHERE id_disco = :id AND id_discogs_manual_batch IS NOT NULL", id);
     }
 
     private void detachImportReferences(Long id) {
@@ -488,10 +622,6 @@ public class DiscoService {
     }
 
     private DiscoResponseDTO toDTO(Disco disco) {
-        if ((disco.getCantidadCopias() == null || disco.getCantidadCopias() > 0)
-                && qrCopyService.listDtos(disco).isEmpty()) {
-            qrCopyService.synchronize(disco);
-        }
         DiscoResponseDTO dto = DiscoMapper.toDTO(disco);
         catalogPricingService.enrichDiscoResponse(disco, dto);
         dto.setAudioPreviews(audioPreviewService.listarPorDisco(disco.getIdDisco()));
@@ -504,7 +634,9 @@ public class DiscoService {
 
     private DiscoResponseDTO saveWithQr(Disco disco) {
         Disco saved = discoRepository.save(disco);
-        qrCopyService.synchronize(saved);
+        if (!qrCopyService.hasManualReceiptHistory(saved.getIdDisco())) {
+            qrCopyService.synchronize(saved);
+        }
         discoEstadoService.aplicar(saved);
         saved = discoRepository.save(saved);
         preVentaCodeMatcher.linkPendingPreSales(saved);
@@ -517,10 +649,23 @@ public class DiscoService {
         }
         long available = qrCopyService.countAvailableCopies(disco.getIdDisco());
         if (available == 0 && disco.getCantidadCopias() != null && disco.getCantidadCopias() > 0) {
-            qrCopyService.synchronizeAvailableCopies(disco, disco.getCantidadCopias());
-            available = qrCopyService.countAvailableCopies(disco.getIdDisco());
+            log.warn("Disco {} tiene cantidad agregada {} pero ninguna copia física disponible; la lectura no reparará el inventario",
+                    disco.getIdDisco(), disco.getCantidadCopias());
         }
         return (int) available;
+    }
+
+    private void rejectManualAggregateChange(Disco disco, Integer requested) {
+        if (requested == null || !qrCopyService.hasManualReceiptHistory(disco.getIdDisco())) return;
+        int available = Math.toIntExact(qrCopyService.countAvailableCopies(disco.getIdDisco()));
+        if (requested < available) {
+            throw new ConflictoNegocioException(
+                    "El stock manual USED requiere seleccionar la copia física exacta que se retirará.");
+        }
+        if (requested > available) {
+            throw new ConflictoNegocioException(
+                    "Otra copia física manual USED debe recibirse mediante el flujo de recepción exacta.");
+        }
     }
 
     private boolean contiene(String valor, String query) {

@@ -42,6 +42,9 @@ public class DiscoImportPreviewDTO {
     private String customerCode;
     /** Free-text physical grade for the exact copy received. */
     private String physicalCondition;
+    /** Explicit audit decision for a same-source/same-release physical duplicate. */
+    private Boolean duplicateOverride;
+    private String duplicateOverrideReason;
     private BigDecimal costo;
     private Integer cantidadCopias;
     private String estado;

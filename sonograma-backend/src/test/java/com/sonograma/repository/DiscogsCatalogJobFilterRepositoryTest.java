@@ -173,7 +173,7 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .filteredOn(source -> source.key().equals("manual:customer:JPH"))
                 .singleElement()
                 .satisfies(source -> {
-                    assertThat(source.label()).isEqualTo("JPH · 3 discos · En curso");
+                    assertThat(source.label()).isEqualTo("JPH · 3 copias físicas · En curso");
                     assertThat(source.status()).isEqualTo(DiscogsManualBatchStatus.OPEN);
                     assertThat(source.batchId()).isEqualTo(first.getId());
                 });
@@ -181,7 +181,7 @@ class DiscogsCatalogJobFilterRepositoryTest {
                 .filteredOn(source -> source.key().equals("manual:customer:SV3"))
                 .singleElement()
                 .extracting(DiscogsCatalogSourceDTO::label)
-                .isEqualTo("SV3 · 1 discos · Finalizada");
+                .isEqualTo("SV3 · 1 copias físicas · Finalizada");
         assertThat(discoService.listarFuentesImportacionDiscogs())
                 .filteredOn(source -> source.key().equals("manual:customer:SV3"))
                 .singleElement()

@@ -222,6 +222,8 @@ function SalePanel({ venta, selectedDisk, onDiskClick, onClose, onEdit, onEditCa
           cantidad: Number(d.cantidad || 1),
           manualItem: Boolean(d.manualItem) || !d.idDisco,
           clasificacionItem: d.clasificacionItem || null,
+          copyId: d.copyId || undefined,
+          codigoQr: d.codigoQr || undefined,
           precioUnitario: Number(d.precioUnitario || 0),
         })),
       }

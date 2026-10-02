@@ -4,8 +4,11 @@ import com.sonograma.dto.AudioPreviewDTO;
 import com.sonograma.dto.AudioPreviewRequestDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
+import com.sonograma.dto.DiscoQrCopyDetailDTO;
+import com.sonograma.dto.DiscoSaleSearchResultDTO;
 import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
+import com.sonograma.dto.RetiroCopiaRequestDTO;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.service.AudioPreviewService;
@@ -55,9 +58,21 @@ public class DiscoController {
         return ResponseEntity.ok(discoService.obtenerPorId(id));
     }
 
+    @GetMapping("/{id}/copias")
+    public ResponseEntity<List<DiscoQrCopyDetailDTO>> obtenerCopias(@PathVariable Long id) {
+        return ResponseEntity.ok(discoService.obtenerCopias(id));
+    }
+
     @GetMapping("/buscar")
     public ResponseEntity<List<DiscoResponseDTO>> buscar(@RequestParam String q) {
         return ResponseEntity.ok(discoService.buscar(q));
+    }
+
+    @GetMapping("/buscar-venta")
+    public ResponseEntity<List<DiscoSaleSearchResultDTO>> buscarParaVenta(
+            @RequestParam String q,
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(discoService.buscarParaVenta(q, limit));
     }
 
     @GetMapping("/estado/{estado}")
@@ -103,6 +118,21 @@ public class DiscoController {
             @PathVariable Long idDisco,
             @PathVariable Long idCopia) {
         return ResponseEntity.ok(discoService.eliminarCopia(idDisco, idCopia));
+    }
+
+    @PostMapping("/{idDisco}/copias/{idCopia}/retiro")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<DiscoResponseDTO> retirarCopia(
+            @PathVariable Long idDisco,
+            @PathVariable Long idCopia,
+            @Valid @RequestBody RetiroCopiaRequestDTO request,
+            Principal principal) {
+        return ResponseEntity.ok(discoService.retirarCopia(
+                idDisco,
+                idCopia,
+                request.reason(),
+                request.note(),
+                principal != null ? principal.getName() : null));
     }
 
     @DeleteMapping("/{id}")

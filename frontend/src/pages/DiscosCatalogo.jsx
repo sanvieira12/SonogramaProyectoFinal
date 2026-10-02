@@ -97,6 +97,265 @@ function sellingPriceLabel(value) {
   return value != null ? `UYU $${Number(value).toLocaleString('es-UY')}` : 'Sin precio'
 }
 
+function physicalCopyPriceLabel(value) {
+  return value != null ? `UYU $${Number(value).toLocaleString('es-UY')}` : 'Sin precio específico'
+}
+
+function physicalCopyCount(disco) {
+  const explicit = disco?.totalCopias == null ? Number.NaN : Number(disco.totalCopias)
+  if (Number.isFinite(explicit)) return explicit
+  if (Array.isArray(disco?.qrCopies) && disco.qrCopies.length > 0) return disco.qrCopies.length
+  const available = disco?.cantidadCopias == null ? Number.NaN : Number(disco.cantidadCopias)
+  return Number.isFinite(available) ? available : 0
+}
+
+function operationalCopies(copyState) {
+  return (copyState?.copies || []).filter(copy => copy.estado !== 'REMOVED')
+}
+
+function copyPriceSummary(disco, copyState) {
+  const count = physicalCopyCount(disco)
+  if (count <= 1) return sellingPriceLabel(catalogPrice(disco))
+  const copies = operationalCopies(copyState)
+  if (!copyState?.loaded || copies.length < 2) return `${count} copias · ver detalle`
+  const values = [...new Set(copies
+    .filter(copy => copy.precioVenta != null)
+    .map(copy => Number(copy.precioVenta))
+    .filter(Number.isFinite))]
+    .sort((a, b) => a - b)
+  if (values.length === 0) return 'Precios por copia'
+  if (values.length === 1 && copies.every(copy => copy.precioVenta != null)) {
+    return sellingPriceLabel(values[0])
+  }
+  if (copies.some(copy => copy.precioVenta == null)) return 'Precios por copia'
+  return `UYU $${values[0].toLocaleString('es-UY')}–$${values.at(-1).toLocaleString('es-UY')}`
+}
+
+function copyConditionSummary(disco, copyState) {
+  const count = physicalCopyCount(disco)
+  if (count <= 1) return catalogCondition(disco) || '—'
+  const copies = operationalCopies(copyState)
+  if (!copyState?.loaded || copies.length < 2) return `${count} copias · ver detalle`
+  const values = [...new Set(copies.map(copy => copy.condicionFisica).filter(Boolean))]
+  if (values.length === 1 && copies.every(copy => copy.condicionFisica)) return values[0]
+  return values.length > 1 ? `${values.length} condiciones` : 'Condición por copia'
+}
+
+const COPY_STATE = {
+  DISPONIBLE: {
+    label: 'Disponible',
+    className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400',
+  },
+  VENDIDO: {
+    label: 'Vendida',
+    className: 'bg-slate-100 text-slate-600 dark:bg-stone-800 dark:text-stone-400',
+  },
+  REMOVED: {
+    label: 'Retirada',
+    className: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
+  },
+}
+
+const DISPOSITION_LABELS = {
+  DATA_ENTRY_CORRECTION: 'Corrección de datos',
+  RETURNED_TO_PROVIDER: 'Devuelta al proveedor',
+  DAMAGED: 'Dañada',
+  REMOVED_FROM_INVENTORY: 'Retirada del inventario',
+  OTHER: 'Otro',
+}
+
+function normalizedCode(value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function physicalCopySource(copy) {
+  const source = String(copy?.sourceCustomerCode || '').trim()
+  const normalizedSource = String(copy?.normalizedSourceCustomerCode || '').trim()
+  return source || normalizedSource || 'Sin procedencia'
+}
+
+function copyMatchesSource(copy, sourceCode) {
+  const expected = normalizedCode(sourceCode)
+  if (!expected) return false
+  return normalizedCode(copy?.normalizedSourceCustomerCode || copy?.sourceCustomerCode) === expected
+}
+
+function formatCopyDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('es-UY', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function chooseDefaultCopy(copies, activeSourceCode) {
+  const matching = activeSourceCode
+    ? copies.filter(copy => copyMatchesSource(copy, activeSourceCode))
+    : []
+  return matching.find(copy => copy.estado === 'DISPONIBLE')
+    || matching[0]
+    || copies.find(copy => copy.estado === 'DISPONIBLE')
+    || copies[0]
+    || null
+}
+
+function PhysicalCopiesSection({ copyState, activeSourceCode, onRetry, onViewQr }) {
+  const copies = [...(copyState?.copies || [])].sort((a, b) =>
+    (Number(a.copyNumber) - Number(b.copyNumber)) || (Number(a.id) - Number(b.id)))
+  const [selectedCopyId, setSelectedCopyId] = useState(null)
+
+  const selectedCopy = copies.find(copy => String(copy.id) === String(selectedCopyId))
+    || chooseDefaultCopy(copies, activeSourceCode)
+  const availableCount = copies.filter(copy => copy.estado === 'DISPONIBLE').length
+
+  return (
+    <section data-testid="physical-copy-section" className="border-t border-slate-100 pt-4 dark:border-stone-800">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-stone-500">Copias físicas</p>
+          {!copyState?.loading && !copyState?.error && copies.length > 0 && (
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-stone-400">
+              {availableCount} {availableCount === 1 ? 'disponible' : 'disponibles'} · {copies.length} {copies.length === 1 ? 'copia física' : 'copias físicas'}
+            </p>
+          )}
+          {activeSourceCode && !copyState?.loading && !copyState?.error && copies.length > 0 && (
+            <p className="mt-1 text-[11px] text-slate-400 dark:text-stone-500">
+              Se muestran todas las copias; ✓ indica {normalizedCode(activeSourceCode)}.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {copyState?.loading && (
+        <div role="status" className="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-500 dark:bg-stone-950 dark:text-stone-400">
+          Cargando copias físicas…
+        </div>
+      )}
+
+      {copyState?.error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+          <p>{copyState.error}</p>
+          <button type="button" onClick={onRetry} className="mt-2 font-semibold underline">Reintentar</button>
+        </div>
+      )}
+
+      {!copyState?.loading && !copyState?.error && copies.length === 0 && (
+        <p className="rounded-lg bg-slate-50 px-3 py-4 text-xs text-slate-500 dark:bg-stone-950 dark:text-stone-400">
+          No hay copias físicas registradas.
+        </p>
+      )}
+
+      {!copyState?.loading && !copyState?.error && selectedCopy && (
+        <div className="space-y-3">
+          {copies.length >= 2 && copies.length <= 4 && (
+            <div className="flex flex-wrap gap-2" aria-label="Seleccionar copia física">
+              {copies.map(copy => {
+                const active = String(copy.id) === String(selectedCopy.id)
+                const matches = copyMatchesSource(copy, activeSourceCode)
+                return (
+                  <button
+                    key={copy.id}
+                    type="button"
+                    aria-label={`Copia ${copy.copyNumber ?? '—'}`}
+                    aria-pressed={active}
+                    onClick={() => setSelectedCopyId(copy.id)}
+                    className={`min-w-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${active
+                      ? 'border-[#7E9FA8] bg-[#7E9FA8] text-white'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-400 dark:hover:bg-stone-800'}`}
+                  >
+                    Copia {copy.copyNumber ?? '—'} · {physicalCopySource(copy)}{matches ? ' ✓' : ''}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {copies.length >= 5 && (
+            <label className="block text-xs font-medium text-slate-600 dark:text-stone-400">
+              Copia
+              <select
+                aria-label="Copia física"
+                value={String(selectedCopy.id)}
+                onChange={event => setSelectedCopyId(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300"
+              >
+                {copies.map(copy => (
+                  <option key={copy.id} value={String(copy.id)}>
+                    Copia {copy.copyNumber ?? '—'} — {physicalCopySource(copy)} — {(COPY_STATE[copy.estado] || {}).label || copy.estado}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 dark:border-stone-700 dark:bg-stone-950/60">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-stone-200">Copia {selectedCopy.copyNumber ?? '—'}</h3>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(COPY_STATE[selectedCopy.estado] || COPY_STATE.VENDIDO).className}`}>
+                {(COPY_STATE[selectedCopy.estado] || {}).label || selectedCopy.estado}
+              </span>
+            </div>
+
+            {copyMatchesSource(selectedCopy, activeSourceCode) && (
+              <p className="mb-3 inline-flex max-w-full rounded-full bg-[#7E9FA8]/15 px-2.5 py-1 text-[11px] font-semibold text-[#5C7D87] break-all dark:text-[#9BC0C9]">
+                Coincide con filtro {normalizedCode(activeSourceCode)}
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ['Procedencia', physicalCopySource(selectedCopy)],
+                ['Condición', selectedCopy.condicionFisica || 'Sin condición registrada'],
+                ['Precio', physicalCopyPriceLabel(selectedCopy.precioVenta)],
+                ['Estado', (COPY_STATE[selectedCopy.estado] || {}).label || selectedCopy.estado],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
+                  <p className="break-words text-xs font-semibold text-slate-700 dark:text-stone-300">{value}</p>
+                </div>
+              ))}
+              <div className="col-span-2 min-w-0">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">QR</p>
+                <p className="break-all text-xs font-semibold text-slate-700 dark:text-stone-300">{selectedCopy.codigoQr || '—'}</p>
+              </div>
+            </div>
+
+            {selectedCopy.codigoQr && onViewQr && (
+              <button
+                type="button"
+                onClick={() => onViewQr(selectedCopy)}
+                className="btn-secondary mt-3 w-full"
+              >
+                Ver QR de Copia {selectedCopy.copyNumber ?? '—'}
+              </button>
+            )}
+
+            {selectedCopy.estado === 'REMOVED' && (selectedCopy.dispositionReason || selectedCopy.dispositionNote || selectedCopy.disposedAt) && (
+              <div className="mt-3 rounded-lg border border-red-100 bg-red-50/70 px-3 py-2 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
+                {selectedCopy.dispositionReason && <p><span className="font-semibold">Motivo:</span> {DISPOSITION_LABELS[selectedCopy.dispositionReason] || selectedCopy.dispositionReason}</p>}
+                {selectedCopy.disposedAt && <p><span className="font-semibold">Fecha de retiro:</span> {formatCopyDate(selectedCopy.disposedAt)}</p>}
+                {selectedCopy.dispositionNote && <p className="break-words"><span className="font-semibold">Nota:</span> {selectedCopy.dispositionNote}</p>}
+              </div>
+            )}
+
+            <details className="mt-3 text-xs text-slate-500 dark:text-stone-400">
+              <summary className="cursor-pointer font-medium">Trazabilidad</summary>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+                <div><dt className="text-[10px] uppercase">ID de copia</dt><dd className="break-all">{selectedCopy.id ?? '—'}</dd></div>
+                <div><dt className="text-[10px] uppercase">Nº de copia</dt><dd>{selectedCopy.copyNumber ?? '—'}</dd></div>
+                <div><dt className="text-[10px] uppercase">Lote técnico</dt><dd className="break-all">{selectedCopy.manualBatchId ?? '—'}</dd></div>
+                <div><dt className="text-[10px] uppercase">Fecha de ingreso</dt><dd>{formatCopyDate(selectedCopy.createdAt)}</dd></div>
+                <div className="col-span-2"><dt className="text-[10px] uppercase">QR</dt><dd className="break-all">{selectedCopy.codigoQr || '—'}</dd></div>
+              </dl>
+            </details>
+          </article>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function catalogPrice(disco) {
   return disco?.manualBatchPrecioVenta ?? disco?.precioVenta
 }
@@ -106,7 +365,7 @@ function catalogCondition(disco) {
 }
 
 function catalogCode(disco) {
-  return disco?.manualBatchCustomerCode ?? disco?.codigoInterno
+  return disco?.codigoInterno
 }
 
 function isManualSource(source) {
@@ -118,7 +377,17 @@ function manualSourceLabel(source) {
   if (source.label) return source.label
   const status = source.status === 'FINALIZED' ? 'Finalizada' : 'En curso'
   const count = source.copyCount ?? source.productos ?? 0
-  return `${source.customerCode || ''} · ${count} discos · ${status}`
+  const sourceCode = normalizedManualCustomerCode(source) || source.customerCode || ''
+  return `${sourceCode} · ${count} copias físicas · ${status}`
+}
+
+function reconciliationDifferenceText(summary) {
+  if (!summary || summary.expectedCopyCount == null) return 'Cantidad esperada: No definida'
+  const difference = Number(summary.difference || 0)
+  if (difference === 0) return 'Diferencia: 0 · Las cantidades coinciden'
+  return difference < 0
+    ? `Diferencia: ${difference} · Faltan demostrar ${Math.abs(difference)} copias`
+    : `Diferencia: +${difference} · Hay ${difference} copias más que el total esperado`
 }
 
 function normalizedManualCustomerCode(source) {
@@ -266,6 +535,10 @@ function qrCopiesForDisco(disco) {
   }]
 }
 
+function copySelectionKey(copy) {
+  return String(copy?.id || copy?.copyNumber || copy?.codigoQr || '')
+}
+
 function sanitizeFilenamePart(value, fallback) {
   const clean = String(value || '')
     .normalize('NFD')
@@ -283,8 +556,8 @@ function qrFilename(disco, copy) {
   return `QR_${code}_${album}${copyLabel}.png`
 }
 
-function QrModal({ disco, loading, error, onClose, onUpdated }) {
-  const [selectedCopyKey, setSelectedCopyKey] = useState('')
+function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
+  const [selectedCopyKey, setSelectedCopyKey] = useState(() => copySelectionKey(initialCopy))
   const [imageError, setImageError] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
@@ -294,7 +567,10 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
 
   if (!disco) return null
   const copies = qrCopiesForDisco(disco)
-  const selectedCopy = copies.find(copy => String(copy.id || copy.copyNumber || copy.codigoQr) === selectedCopyKey) || copies[0]
+  const selectedCopy = copies.find(copy => copySelectionKey(copy) === selectedCopyKey)
+    || copies.find(copy => initialCopy?.codigoQr && copy.codigoQr === initialCopy.codigoQr)
+    || copies.find(copy => initialCopy?.copyNumber && copy.copyNumber === initialCopy.copyNumber)
+    || copies[0]
   const saleUrl = selectedCopy ? (selectedCopy.content || buildSaleUrl(disco, selectedCopy.codigoQr)) : ''
   const imageUrl = selectedCopy?.imageUrl
     ? resolveApiUrl(selectedCopy.imageUrl)
@@ -342,7 +618,7 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
           <div>
             <h2 className="font-bold text-slate-900 dark:text-white">{disco.album}</h2>
             <p className="text-sm text-slate-500 dark:text-stone-400">{disco.artista}</p>
-            <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">Código: {catalogCode(disco) || '—'} · Origen: {sourceLabel}</p>
+            <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">SKU del producto: {catalogCode(disco) || '—'} · Origen del producto: {sourceLabel}</p>
           </div>
           <button type="button" onClick={onClose} className="btn-secondary px-3 py-1.5">Cerrar</button>
         </div>
@@ -365,8 +641,8 @@ function QrModal({ disco, loading, error, onClose, onUpdated }) {
               <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-2">Copias físicas</p>
               <div className="flex flex-wrap gap-2">
                 {copies.map(copy => {
-                  const key = String(copy.id || copy.copyNumber || copy.codigoQr)
-                  const active = key === String(selectedCopy?.id || selectedCopy?.copyNumber || selectedCopy?.codigoQr)
+                  const key = copySelectionKey(copy)
+                  const active = key === copySelectionKey(selectedCopy)
                   return (
                     <button
                       key={key}
@@ -541,7 +817,7 @@ function CustomerAffinityModal({ disco, onClose }) {
   )
 }
 
-function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
+function SlideOver({ disco, copyState, activeSourceCode, onRetryCopies, onCerrar, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
   if (!disco) return null
 
   return (
@@ -602,11 +878,11 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               ['Género',        disco.genero],
               ['Sello',         disco.selloDiscografico],
               ['Categoría',     disco.condicion],
-              ['Condición',     catalogCondition(disco)],
+              ['Condiciones físicas', copyConditionSummary(disco, copyState)],
               ['Precio compra', disco.costo ? `UYU $${Number(disco.costo).toLocaleString('es-UY')}` : null],
-              ['Precio venta',  sellingPriceLabel(catalogPrice(disco))],
-              ['Stock actual',  disco.cantidadCopias ?? 0],
-              ['Código', catalogCode(disco)],
+              ['Precios de copia', copyPriceSummary(disco, copyState)],
+              ['Copias disponibles',  disco.cantidadCopias ?? 0],
+              ['SKU del producto', catalogCode(disco)],
             ].map(([label, value]) => (
               <div key={label} className="bg-slate-50 dark:bg-stone-950 border border-slate-100 dark:border-stone-800 rounded-lg px-3 py-2">
                 <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500 mb-0.5">{label}</p>
@@ -614,6 +890,14 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
               </div>
             ))}
           </div>
+
+          <PhysicalCopiesSection
+            key={`${disco.idDisco}:${activeSourceCode}`}
+            copyState={copyState}
+            activeSourceCode={activeSourceCode}
+            onRetry={onRetryCopies}
+            onViewQr={copy => onViewQr(disco, copy)}
+          />
 
           {disco.observaciones && (
             <div>
@@ -629,7 +913,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
             Clientes afines
           </button>
           <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary w-full">
-            Ver QR ({disco.totalCopias ?? disco.qrCopies?.length ?? disco.cantidadCopias ?? 0})
+            {physicalCopyCount(disco) > 1 ? `Ver todos los QR (${physicalCopyCount(disco)})` : 'Ver QR'}
           </button>
           <button
             onClick={() => { onEditar(disco); onCerrar() }}
@@ -649,7 +933,7 @@ function SlideOver({ disco, onCerrar, onEditar, onDarBaja, onViewQr, onViewCusto
   )
 }
 
-function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
+function CatalogPreview({ disco, pinned, copyState, activeSourceCode, onRetryCopies, onUnpin, onEditar, onDarBaja, onViewQr, onViewCustomers }) {
   const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
   const previews = loaded.discoId === disco?.idDisco
     ? loaded.previews
@@ -683,12 +967,12 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
   }
 
   const fields = [
-    ['Código', catalogCode(disco)],
+    ['SKU del producto', catalogCode(disco)],
     ['Compra', disco.costo != null ? `EUR €${Number(disco.costo).toLocaleString('es-UY')}` : null],
-    ['Venta', sellingPriceLabel(catalogPrice(disco))],
-    ['Stock', disco.cantidadCopias ?? 0],
+    ['Precios de copia', copyPriceSummary(disco, copyState)],
+    ['Disponibles', `${disco.cantidadCopias ?? 0} ${(disco.cantidadCopias ?? 0) === 1 ? 'copia' : 'copias'}`],
     ['Categoría', disco.condicion],
-    ['Condición', catalogCondition(disco)],
+    ['Condiciones físicas', copyConditionSummary(disco, copyState)],
     ['Formato', disco.tipoDisco],
     ['Año', disco.anio],
     ['Sello', disco.selloDiscografico],
@@ -731,6 +1015,14 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
           <p className="text-xs text-slate-500 dark:text-stone-400 line-clamp-3">{disco.notas || disco.descripcion}</p>
         )}
 
+        <PhysicalCopiesSection
+          key={`${disco.idDisco}:${activeSourceCode}`}
+          copyState={copyState}
+          activeSourceCode={activeSourceCode}
+          onRetry={onRetryCopies}
+          onViewQr={copy => onViewQr(disco, copy)}
+        />
+
         {/* Audio previews */}
         {previews.length > 0 && (
           <div>
@@ -751,7 +1043,9 @@ function CatalogPreview({ disco, pinned, onUnpin, onEditar, onDarBaja, onViewQr,
 
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button onClick={() => onEditar(disco)} className="btn-primary">Editar</button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary">Ver QR</button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onViewQr(disco) }} className="btn-secondary">
+            {physicalCopyCount(disco) > 1 ? 'Ver todos los QR' : 'Ver QR'}
+          </button>
           <button type="button" onClick={() => onViewCustomers(disco)} className="btn-secondary col-span-2 text-[#5C7D87] dark:text-[#7E9FA8]">Clientes afines</button>
           <button onClick={() => onDarBaja(disco)} className="btn-secondary text-red-600 dark:text-red-400 col-span-2">Eliminar definitivamente</button>
         </div>
@@ -776,7 +1070,8 @@ export default function DiscosCatalogo() {
   const [slideOverDisco, setSlideOverDisco] = useState(null)
   const [hoveredDisco, setHoveredDisco] = useState(null)
   const [selectedDisco, setSelectedDisco] = useState(null)
-  const [qrState, setQrState] = useState({ disco: null, loading: false, error: '' })
+  const [copyDetailsByProduct, setCopyDetailsByProduct] = useState({})
+  const [qrState, setQrState] = useState({ disco: null, initialCopy: null, loading: false, error: '' })
   const [affinityDisco, setAffinityDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(20)
@@ -790,6 +1085,8 @@ export default function DiscosCatalogo() {
   const [batchPorFinalizar, setBatchPorFinalizar] = useState(null)
   const [finalizandoBatch, setFinalizandoBatch] = useState(false)
   const [errorFinalizacionBatch, setErrorFinalizacionBatch] = useState('')
+  const [finalizationReconciliation, setFinalizationReconciliation] = useState(null)
+  const [finalizationReconciliationLoading, setFinalizationReconciliationLoading] = useState(false)
   const [porcentajeSonogramaBatch, setPorcentajeSonogramaBatch] = useState('')
   const debounceRef = useRef(null)
 
@@ -799,6 +1096,33 @@ export default function DiscosCatalogo() {
     window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
     return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, cargarTodos)
   }, [])
+
+  async function loadCopyDetails(productId, force = false) {
+    if (!productId) return
+    const cached = copyDetailsByProduct[productId]
+    if (!force && (cached?.loading || cached?.loaded)) return
+    setCopyDetailsByProduct(prev => ({
+      ...prev,
+      [productId]: { ...prev[productId], loading: true, error: '', copies: prev[productId]?.copies || [] },
+    }))
+    try {
+      const copies = await api.discos.copias(productId)
+      setCopyDetailsByProduct(prev => ({
+        ...prev,
+        [productId]: { loading: false, loaded: true, error: '', copies: Array.isArray(copies) ? copies : [] },
+      }))
+    } catch (err) {
+      setCopyDetailsByProduct(prev => ({
+        ...prev,
+        [productId]: {
+          loading: false,
+          loaded: false,
+          error: err.message || 'No se pudieron cargar las copias físicas.',
+          copies: prev[productId]?.copies || [],
+        },
+      }))
+    }
+  }
 
   async function cargarTodos() {
     setLoading(true)
@@ -847,18 +1171,18 @@ export default function DiscosCatalogo() {
     }
   }
 
-  async function exportarBatchExcel() {
+  async function exportarSourceExcel() {
     if (exportandoExcel || !batchManualSeleccionado) return
-    const batchId = batchManualSeleccionado.batchId
-      || String(batchManualSeleccionado.key || '').replace(/^manual:/i, '')
+    const source = normalizedManualCustomerCode(batchManualSeleccionado)
+    if (!source) return
     setExportandoExcel(true)
     setErrorExportacionExcel('')
     try {
-      const result = await api.importaciones.discogsManualBatchExcel(batchId)
-      downloadBlob(result.blob, result.filename || `discogs-manual-${batchId}.xlsx`, result.contentDisposition)
+      const result = await api.importaciones.discogsManualSourceExcel(source)
+      downloadBlob(result.blob, result.filename || `discogs-manual-${source}.xlsx`, result.contentDisposition)
       setExcelExportado(true)
     } catch (err) {
-      setErrorExportacionExcel(err.message || 'No se pudo generar el Excel del batch Discogs.')
+      setErrorExportacionExcel(err.message || 'No se pudo generar el Excel de la fuente Discogs.')
     } finally {
       setExportandoExcel(false)
     }
@@ -891,7 +1215,12 @@ export default function DiscosCatalogo() {
     setFinalizandoBatch(true)
     setErrorFinalizacionBatch('')
     try {
-      const finalized = await api.importaciones.discogsManualBatchFinalize(batchId, Number(porcentajeSonogramaBatch))
+      const finalized = await api.importaciones.discogsManualBatchFinalize(
+        batchId,
+        Number(porcentajeSonogramaBatch),
+        Boolean(finalizationReconciliation
+          && finalizationReconciliation.reconciliationStatus !== 'MATCHED'),
+      )
       setFuentesImportacionDiscogs(prev => prev.map(source => (
         source.batchId === batchPorFinalizar.batchId
           ? { ...source, status: finalized.status || 'FINALIZED', label: null, porcentajeSonograma: finalized.porcentajeSonograma }
@@ -899,11 +1228,31 @@ export default function DiscosCatalogo() {
       )))
       setBatchPorFinalizar(null)
       setPorcentajeSonogramaBatch('')
+      setFinalizationReconciliation(null)
       await cargarFuentesImportacionDiscogs()
     } catch (err) {
+      if (err.code === 'MANUAL_DISCOGS_RECONCILIATION_CONFIRMATION_REQUIRED') {
+        const summary = err.data?.reconciliation || null
+        setFinalizationReconciliation(summary)
+      }
       setErrorFinalizacionBatch(err.message || 'No se pudo finalizar el batch Discogs.')
     } finally {
       setFinalizandoBatch(false)
+    }
+  }
+
+  async function openBatchFinalization(batch) {
+    setErrorFinalizacionBatch('')
+    setPorcentajeSonogramaBatch('')
+    setFinalizationReconciliationLoading(true)
+    try {
+      const summary = await api.importaciones.discogsManualSourceReconciliation(batch.customerCode)
+      setFinalizationReconciliation(summary)
+      setBatchPorFinalizar(batch)
+    } catch (err) {
+      setErrorFinalizacionBatch(err.message || 'No se pudo cargar la conciliación de la fuente.')
+    } finally {
+      setFinalizationReconciliationLoading(false)
     }
   }
 
@@ -954,6 +1303,7 @@ export default function DiscosCatalogo() {
       const actualizado = await discoService.actualizar(discoForm.idDisco, payload)
       setDiscos(prev => prev.map(d => d.idDisco === discoForm.idDisco ? actualizado : d))
       setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
+      if (copyDetailsByProduct[actualizado.idDisco]) loadCopyDetails(actualizado.idDisco, true)
     } else {
       const nuevo = await discoService.crear(payload)
       setDiscos(prev => [nuevo, ...prev])
@@ -994,16 +1344,17 @@ export default function DiscosCatalogo() {
     setDiscoEliminar(disco)
   }
 
-  async function abrirQr(disco) {
-    setQrState({ disco, loading: true, error: '' })
+  async function abrirQr(disco, initialCopy = null) {
+    setQrState({ disco, initialCopy, loading: true, error: '' })
     try {
       const actualizado = await api.discos.porId(disco.idDisco)
       setDiscos(prev => prev.map(d => d.idDisco === actualizado.idDisco ? actualizado : d))
       setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
-      setQrState({ disco: actualizado, loading: false, error: '' })
+      setQrState({ disco: actualizado, initialCopy, loading: false, error: '' })
     } catch (err) {
       setQrState({
         disco,
+        initialCopy,
         loading: false,
         error: err.message || 'No se pudo cargar la información actualizada del QR.',
       })
@@ -1039,6 +1390,11 @@ export default function DiscosCatalogo() {
   const discosPagina = discosOrdenados.slice((pagina - 1) * porPagina, pagina * porPagina)
   const fuenteSeleccionada = fuentesImportacionDiscogs.find(source => source.key === filtroImportacionDiscogs)
   const batchManualSeleccionado = isManualSource(fuenteSeleccionada) ? fuenteSeleccionada : null
+  const activeSourceCode = batchManualSeleccionado ? normalizedManualCustomerCode(batchManualSeleccionado) : ''
+  const previewDisco = selectedDisco || hoveredDisco
+  const previewCopyState = previewDisco
+    ? (copyDetailsByProduct[previewDisco.idDisco] || { loading: true, loaded: false, error: '', copies: [] })
+    : null
   const hayFiltro = filtroEstado !== 'TODOS' || filtroCondicion !== 'TODOS'
     || filtroImportacionDiscogs !== '' || busqueda.trim() !== ''
 
@@ -1172,7 +1528,7 @@ export default function DiscosCatalogo() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={exportarBatchExcel}
+              onClick={exportarSourceExcel}
               disabled={exportandoExcel}
               className="btn-secondary whitespace-nowrap"
             >
@@ -1189,15 +1545,11 @@ export default function DiscosCatalogo() {
             {batchManualSeleccionado.status === 'OPEN' && (
               <button
                 type="button"
-                onClick={() => {
-                  setErrorFinalizacionBatch('')
-                  setPorcentajeSonogramaBatch('')
-                  setBatchPorFinalizar(batchManualSeleccionado)
-                }}
-                disabled={finalizandoBatch}
+                onClick={() => openBatchFinalization(batchManualSeleccionado)}
+                disabled={finalizandoBatch || finalizationReconciliationLoading}
                 className="btn-secondary whitespace-nowrap border-[#B8975E] text-[#8a6c32] dark:text-[#D6B86A]"
               >
-                Finalizar importación
+                {finalizationReconciliationLoading ? 'Cargando conciliación…' : 'Finalizar importación'}
               </button>
             )}
           </div>
@@ -1257,9 +1609,16 @@ export default function DiscosCatalogo() {
                     <tr
                       key={d.idDisco}
                       tabIndex={0}
-                      onMouseEnter={() => setHoveredDisco(d)}
-                      onFocus={() => { if (!selectedDisco) setHoveredDisco(d) }}
+                      onMouseEnter={() => {
+                        setHoveredDisco(d)
+                        loadCopyDetails(d.idDisco)
+                      }}
+                      onFocus={() => {
+                        if (!selectedDisco) setHoveredDisco(d)
+                        loadCopyDetails(d.idDisco)
+                      }}
                       onClick={() => {
+                        loadCopyDetails(d.idDisco)
                         if (window.matchMedia('(max-width: 1023px)').matches) {
                           setSlideOverDisco(d)
                         } else {
@@ -1290,12 +1649,10 @@ export default function DiscosCatalogo() {
                         </div>
                       </td>
                       <td className="px-3 py-3.5 align-middle text-slate-600 dark:text-stone-400 hidden sm:table-cell">
-                        {catalogCondition(d) || <span className="text-slate-300 dark:text-stone-600">—</span>}
+                        {copyConditionSummary(d, copyDetailsByProduct[d.idDisco])}
                       </td>
                       <td className="px-3 py-3.5 align-middle font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {catalogPrice(d) != null
-                          ? `UYU $${Number(catalogPrice(d)).toLocaleString('es-UY')}`
-                          : <span className="text-slate-400 dark:text-stone-600 font-normal">Sin precio</span>}
+                        {copyPriceSummary(d, copyDetailsByProduct[d.idDisco])}
                       </td>
                       <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatImportDate(d.fechaActualizacion || d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
@@ -1309,6 +1666,7 @@ export default function DiscosCatalogo() {
                               const actualizado = await discoService.cambiarEstado(d.idDisco, nuevoEstado)
                               setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
                               setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
+                              if (copyDetailsByProduct[d.idDisco]) loadCopyDetails(d.idDisco, true)
                             } catch (err) {
                               alert('Error al cambiar estado: ' + err.message)
                             }
@@ -1332,6 +1690,7 @@ export default function DiscosCatalogo() {
                                   const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
                                   setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
                                   setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
+                                  if (copyDetailsByProduct[d.idDisco]) loadCopyDetails(d.idDisco, true)
                                 } catch (err) { alert(err.message) }
                               }}
                               className="w-7 h-7 bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
@@ -1346,6 +1705,7 @@ export default function DiscosCatalogo() {
                                   const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
                                   setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
                                   setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
+                                  if (copyDetailsByProduct[d.idDisco]) loadCopyDetails(d.idDisco, true)
                                 } catch (err) { alert(err.message) }
                               }}
                               className="w-7 h-7 bg-slate-100 dark:bg-stone-800 hover:bg-slate-200 dark:hover:bg-stone-700 text-slate-600 dark:text-stone-400 flex items-center justify-center font-bold transition-colors"
@@ -1385,8 +1745,11 @@ export default function DiscosCatalogo() {
         )}
       </div>
       <CatalogPreview
-        disco={selectedDisco || hoveredDisco}
+        disco={previewDisco}
         pinned={Boolean(selectedDisco)}
+        copyState={previewCopyState}
+        activeSourceCode={activeSourceCode}
+        onRetryCopies={() => previewDisco && loadCopyDetails(previewDisco.idDisco, true)}
         onUnpin={() => setSelectedDisco(null)}
         onEditar={setDiscoForm}
         onDarBaja={solicitarEliminacion}
@@ -1398,25 +1761,30 @@ export default function DiscosCatalogo() {
       {/* Slide-over de detalle al hacer clic en una fila */}
       <SlideOver
         disco={slideOverDisco}
+        copyState={slideOverDisco ? (copyDetailsByProduct[slideOverDisco.idDisco] || { loading: true, error: '', copies: [] }) : null}
+        activeSourceCode={activeSourceCode}
+        onRetryCopies={() => slideOverDisco && loadCopyDetails(slideOverDisco.idDisco, true)}
         onCerrar={() => setSlideOverDisco(null)}
         onEditar={d => { setDiscoForm(d); setSlideOverDisco(null) }}
         onDarBaja={solicitarEliminacion}
-        onViewQr={d => { abrirQr(d); setSlideOverDisco(null) }}
+        onViewQr={(d, copy) => { abrirQr(d, copy); setSlideOverDisco(null) }}
         onViewCustomers={setAffinityDisco}
       />
 
       <CustomerAffinityModal key={affinityDisco?.idDisco || 'sin-disco'} disco={affinityDisco} onClose={() => setAffinityDisco(null)} />
 
       <QrModal
-        key={qrState.disco?.idDisco || 'qr-modal'}
+        key={`${qrState.disco?.idDisco || 'qr-modal'}:${copySelectionKey(qrState.initialCopy)}`}
         disco={qrState.disco}
+        initialCopy={qrState.initialCopy}
         loading={qrState.loading}
         error={qrState.error}
-        onClose={() => setQrState({ disco: null, loading: false, error: '' })}
+        onClose={() => setQrState({ disco: null, initialCopy: null, loading: false, error: '' })}
         onUpdated={(actualizado) => {
           setDiscos(prev => prev.map(item => item.idDisco === actualizado.idDisco ? actualizado : item))
           setSelectedDisco(prev => prev?.idDisco === actualizado.idDisco ? actualizado : prev)
-          setQrState({ disco: actualizado, loading: false, error: '' })
+          setQrState(prev => ({ disco: actualizado, initialCopy: prev.initialCopy, loading: false, error: '' }))
+          loadCopyDetails(actualizado.idDisco, true)
         }}
       />
 
@@ -1447,13 +1815,24 @@ export default function DiscosCatalogo() {
           titulo="Finalizar importación Discogs"
           mensaje="¿Finalizar esta importación? Ya no se podrán agregar nuevas copias a este lote. El Excel y el ZIP seguirán disponibles, y una nueva importación con este código creará un lote nuevo."
           onConfirmar={finalizarBatch}
-          onCancelar={() => { if (!finalizandoBatch) { setBatchPorFinalizar(null); setErrorFinalizacionBatch('') } }}
+          onCancelar={() => { if (!finalizandoBatch) { setBatchPorFinalizar(null); setErrorFinalizacionBatch(''); setFinalizationReconciliation(null) } }}
           cargando={finalizandoBatch}
           cargandoTexto="Finalizando…"
-          confirmarTexto="Finalizar importación"
+          confirmarTexto={finalizationReconciliation?.reconciliationStatus !== 'MATCHED' ? 'Finalizar de todos modos' : 'Finalizar importación'}
           confirmarClassName="bg-[#B8975E] hover:bg-[#9f814c]"
           confirmarDeshabilitado={!porcentajeSonogramaBatch}
-          contenido={(
+          contenido={(<>
+            {finalizationReconciliation && (
+              <div aria-label="Resumen de conciliación" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                <p className="font-semibold">Fuente {finalizationReconciliation.normalizedSourceCustomerCode}</p>
+                <p>Esperadas: {finalizationReconciliation.expectedCopyCount ?? 'No definida'}</p>
+                <p>Registradas: {finalizationReconciliation.provablePhysicalCopyCount} copias físicas</p>
+                <p>Disponibles: {finalizationReconciliation.availableCopyCount} · Vendidas: {finalizationReconciliation.soldCopyCount} · Retiradas: {finalizationReconciliation.removedCopyCount}</p>
+                <p>Releases distintos: {finalizationReconciliation.distinctReleaseCount}</p>
+                <p>Pendientes: {finalizationReconciliation.pendingOperationCount}</p>
+                <p className="mt-1 font-medium">{reconciliationDifferenceText(finalizationReconciliation)}</p>
+              </div>
+            )}
             <label className="block text-sm text-slate-600 dark:text-white/80 mb-6">
               Porcentaje Sonograma
               <select
@@ -1471,7 +1850,7 @@ export default function DiscosCatalogo() {
                 ))}
               </select>
             </label>
-          )}
+          </>)}
           error={errorFinalizacionBatch}
         />
       )}

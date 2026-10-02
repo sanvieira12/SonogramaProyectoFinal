@@ -119,7 +119,6 @@ public class VentaService {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
             discoLegacy = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
-            discoQrCopyService.synchronize(discoLegacy);
             validarStockDisponible(discoLegacy);
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
@@ -212,6 +211,7 @@ public class VentaService {
         // in the edited sale. The new entered price is always used below.
         Map<Long, LinkedList<HistoricalCost>> previousCosts = historicalCostsByDisco(venta);
         Map<Long, ClasificacionItemVenta> previousClassifications = historicalClassificationsByDetail(venta);
+        Map<Long, Long> previousExactCopies = exactCopyByDetail(venta);
         restaurarStockVenta(venta);
         detalleVentaRepository.deleteAll(new ArrayList<>(venta.getDetalles()));
         venta.getDetalles().clear();
@@ -239,6 +239,10 @@ public class VentaService {
             for (DetalleVentaDTO d : dto.getDetalles()) {
                 boolean existingDetail = d.getIdDetalle() != null && previousClassifications.containsKey(d.getIdDetalle());
                 PreparedDetalle preparado = prepararDetalle(d, !existingDetail);
+                if (preparado.copyId() == null && d.getIdDetalle() != null
+                        && previousExactCopies.containsKey(d.getIdDetalle())) {
+                    preparado = preparado.withCopyIdentity(previousExactCopies.get(d.getIdDetalle()), null);
+                }
                 if (d.getIdDetalle() != null && previousClassifications.containsKey(d.getIdDetalle())) {
                     preparado = preparado.withClassification(previousClassifications.get(d.getIdDetalle()));
                 }
@@ -261,7 +265,6 @@ public class VentaService {
             if (dto.getIdDisco() == null) throw new NegocioException("Especificá un disco o al menos un detalle de venta");
             discoLegacy = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
-            discoQrCopyService.synchronize(discoLegacy);
             validarStockDisponible(discoLegacy);
             costos = costosVentaService.calcular(discoLegacy, dto);
         }
@@ -562,6 +565,8 @@ public class VentaService {
                         .costoCompleto(itemProfit != null ? itemProfit.costComplete() : false)
                         .manualItem(Boolean.TRUE.equals(d.getManualItem()) || d.getDisco() == null)
                         .clasificacionItem(d.getClasificacionItem())
+                        .copyIds(parseCopyIds(d.getCopyIdsSnapshot()))
+                        .copyId(singleCopyId(d.getCopyIdsSnapshot()))
                         .build());
             }
         }
@@ -640,7 +645,6 @@ public class VentaService {
         if (dto.getIdDisco() != null) {
             Disco disco = discoRepository.findById(dto.getIdDisco())
                     .orElseThrow(() -> new RecursoNoEncontradoException("Disco", dto.getIdDisco()));
-            discoQrCopyService.synchronize(disco);
             validarStockDisponible(disco, cantidad);
             return new PreparedDetalle(
                     disco,
@@ -938,6 +942,43 @@ public class VentaService {
         PreparedDetalle withClassification(ClasificacionItemVenta classification) {
             return new PreparedDetalle(disco, precioUnitario, cantidad, manualItem, artistaSnap,
                     albumSnap, descripcionSnap, codigoSnap, costoAdquisicion, copyId, codigoQr, classification);
+        }
+
+        PreparedDetalle withCopyIdentity(Long selectedCopyId, String selectedQr) {
+            return new PreparedDetalle(disco, precioUnitario, cantidad, manualItem, artistaSnap,
+                    albumSnap, descripcionSnap, codigoSnap, costoAdquisicion,
+                    selectedCopyId, selectedQr, clasificacionItem);
+        }
+    }
+
+    private Map<Long, Long> exactCopyByDetail(Venta venta) {
+        Map<Long, Long> result = new HashMap<>();
+        if (venta.getDetalles() == null) return result;
+        for (DetalleVenta detail : venta.getDetalles()) {
+            Long copyId = singleCopyId(detail.getCopyIdsSnapshot());
+            if (detail.getIdDetalle() != null && cantidadDetalle(detail) == 1 && copyId != null) {
+                result.put(detail.getIdDetalle(), copyId);
+            }
+        }
+        return result;
+    }
+
+    private Long singleCopyId(String snapshot) {
+        List<Long> ids = parseCopyIds(snapshot);
+        return ids.size() == 1 ? ids.get(0) : null;
+    }
+
+    private List<Long> parseCopyIds(String snapshot) {
+        if (snapshot == null || snapshot.isBlank()) return List.of();
+        try {
+            return java.util.Arrays.stream(snapshot.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .map(Long::valueOf)
+                    .distinct()
+                    .toList();
+        } catch (NumberFormatException ex) {
+            return List.of();
         }
     }
 

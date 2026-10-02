@@ -7,6 +7,10 @@ import com.sonograma.enums.DiscogsManualBatchStatus;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscogsManualBatchRepository;
+import com.sonograma.exception.ManualDiscogsFinalizationConfirmationException;
+import com.sonograma.dto.ManualDiscogsSourceReconciliationDTO;
+import com.sonograma.dto.ManualDiscogsFinalizationSnapshotDTO;
+import com.sonograma.service.importacion.ManualDiscogsReceiptLockService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +41,8 @@ public class DiscogsManualBatchService {
 
     private final DiscogsManualBatchRepository batchRepository;
     private final DiscoQrCopyRepository copyRepository;
+    private final ManualDiscogsSourceReconciliationService reconciliationService;
+    private final ManualDiscogsReceiptLockService sourceLockService;
 
     public static String normalizeCustomerCode(String customerCode) {
         if (customerCode == null) {
@@ -87,6 +93,27 @@ public class DiscogsManualBatchService {
         return batch;
     }
 
+    public void assignCopiesToBatch(
+            DiscogsManualBatch batch,
+            List<DiscoQrCopy> copies,
+            BigDecimal salePrice,
+            String physicalCondition
+    ) {
+        if (batch == null || batch.getId() == null || batch.getStatus() != DiscogsManualBatchStatus.OPEN) {
+            throw new ConflictoNegocioException("El batch Discogs de destino no está disponible.");
+        }
+        if (copies == null || copies.isEmpty() || copies.stream().anyMatch(copy -> copy == null || copy.getId() == null)) {
+            throw new IllegalArgumentException("Las copias físicas recibidas son obligatorias.");
+        }
+        String condition = trimCondition(physicalCondition);
+        copies.forEach(copy -> {
+            copy.setManualDiscogsBatch(batch);
+            copy.setPrecioVenta(salePrice);
+            copy.setCondicionFisica(condition);
+        });
+        copyRepository.saveAll(copies);
+    }
+
     private DiscogsManualBatch saveOpenBatch(String customerCode, String normalized) {
         LocalDateTime now = LocalDateTime.now();
         return batchRepository.save(DiscogsManualBatch.builder()
@@ -123,6 +150,10 @@ public class DiscogsManualBatchService {
         if (batchId == null || batchId <= 0) {
             throw new com.sonograma.exception.NegocioException("El batch Discogs no es válido.");
         }
+        DiscogsManualBatch sourceHint = batchRepository.findById(batchId)
+                .orElseThrow(() -> new com.sonograma.exception.RecursoNoEncontradoException(
+                        "Batch Discogs", batchId));
+        sourceLockService.acquire(sourceHint.getNormalizedCustomerCode());
         DiscogsManualBatch batch = batchRepository.findByIdForUpdate(batchId)
                 .orElseThrow(() -> new com.sonograma.exception.RecursoNoEncontradoException(
                         "Batch Discogs", batchId));
@@ -134,13 +165,23 @@ public class DiscogsManualBatchService {
             throw new com.sonograma.exception.NegocioException(
                     "El porcentaje Sonograma es obligatorio y debe ser uno de: 10, 15, 20, 25, 30, 35, 40 o 45.");
         }
+        copyRepository.lockRetainedByManualSource(batch.getNormalizedCustomerCode());
+        ManualDiscogsSourceReconciliationDTO reconciliation =
+                reconciliationService.current(batch.getNormalizedCustomerCode());
+        List<String> warnings = reconciliationService.warnings(reconciliation);
+        if (!warnings.isEmpty() && !Boolean.TRUE.equals(request.confirmReconciliationWarnings())) {
+            throw new ManualDiscogsFinalizationConfirmationException(warnings, reconciliation);
+        }
 
         LocalDateTime finalizedAt = LocalDateTime.now();
         batch.setStatus(DiscogsManualBatchStatus.FINALIZED);
         batch.setFinalizedAt(finalizedAt);
         batch.setPorcentajeSonograma(porcentaje);
         batchRepository.save(batch);
-        return new FinalizedBatch(batch.getId(), batch.getStatus(), batch.getFinalizedAt(), batch.getPorcentajeSonograma());
+        ManualDiscogsFinalizationSnapshotDTO snapshot = reconciliationService
+                .createFinalizationSnapshot(batch, reconciliation, finalizedAt);
+        return new FinalizedBatch(batch.getId(), batch.getStatus(), batch.getFinalizedAt(),
+                batch.getPorcentajeSonograma(), snapshot.snapshotId());
     }
 
     @Transactional(readOnly = true)
@@ -160,6 +201,7 @@ public class DiscogsManualBatchService {
             Long batchId,
             DiscogsManualBatchStatus status,
             LocalDateTime finalizedAt,
-            Integer porcentajeSonograma
+            Integer porcentajeSonograma,
+            Long reconciliationSnapshotId
     ) {}
 }

@@ -63,7 +63,7 @@ public class DiscogsCatalogStockService {
         List<DiscoQrCopy> createdCopies;
         if (command.incomingCopyState() == EstadoCopiaDisco.DISPONIBLE) {
             DiscoQrCopyService.CopySynchronizationResult synchronization =
-                    qrCopyService.synchronizeAvailableCopiesWithResult(disco, resultingAvailable);
+                    qrCopyService.synchronizeManualReceiptAvailableCopiesWithResult(disco, resultingAvailable);
             createdCopies = copiesCreatedForReceipt(
                     synchronization.addedCopies(), command.incomingCopies());
         } else {

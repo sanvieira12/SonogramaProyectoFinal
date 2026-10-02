@@ -6,6 +6,7 @@ import com.sonograma.entity.Cliente;
 import com.sonograma.entity.DetalleVenta;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.entity.PreVenta;
 import com.sonograma.entity.Reserva;
 import com.sonograma.entity.Venta;
@@ -19,6 +20,8 @@ import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.EstadoPago;
 import com.sonograma.enums.EstadoReserva;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.enums.DiscogsManualBatchStatus;
+import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.enums.PricingMode;
 import com.sonograma.enums.TipoEntrega;
 import com.sonograma.enums.TipoDisco;
@@ -47,6 +50,8 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -56,6 +61,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class DiscoPermanentDeletionIntegrationTest {
 
     @Autowired private DiscoService discoService;
+    @Autowired private DiscoQrCopyService discoQrCopyService;
+    @Autowired private QRService qrService;
     @Autowired private DiscoRepository discoRepository;
     @Autowired private DiscoQrCopyRepository discoQrCopyRepository;
     @Autowired private ClienteRepository clienteRepository;
@@ -109,6 +116,79 @@ class DiscoPermanentDeletionIntegrationTest {
         assertThat(physicalDiscoCount(disco.getIdDisco())).isZero();
         assertThat(count("SELECT COUNT(*) FROM catalog_audio_preview WHERE id_disco = " + disco.getIdDisco())).isZero();
         assertThat(count("SELECT COUNT(*) FROM disco_qr_copy WHERE id_disco = " + disco.getIdDisco())).isZero();
+    }
+
+    @Test
+    void repeatedReadMappingNeverCreatesCopyWhenAggregateSaysStockExists() {
+        Disco disco = saveDisco("READ-SYNC");
+        String legacyQr = disco.getCodigoQr();
+        assertThat(discoQrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).isEmpty();
+
+        discoService.obtenerPorId(disco.getIdDisco());
+        discoService.obtenerPorId(disco.getIdDisco());
+        entityManager.flush();
+
+        assertThat(discoQrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco()))
+                .isEmpty();
+        assertThat(discoRepository.findById(disco.getIdDisco())).get()
+                .extracting(Disco::getCodigoQr).isEqualTo(legacyQr);
+    }
+
+    @Test
+    void unreferencedProductDeletionTombstonesAndRetainsManualBatchCopyHistory() {
+        DiscogsManualBatch batch = saveManualBatch("PHASE0-DELETE");
+        Disco disco = saveDisco("MANUAL-HARD-DELETE");
+        DiscoQrCopy copy = discoQrCopyRepository.saveAndFlush(DiscoQrCopy.builder()
+                .idDisco(disco.getIdDisco())
+                .copyNumber(1)
+                .codigoQr("phase0-manual-hard-delete")
+                .estado(EstadoCopiaDisco.DISPONIBLE)
+                .manualDiscogsBatch(batch)
+                .precioVenta(new BigDecimal("1100"))
+                .condicionFisica("VG+")
+                .build());
+
+        discoService.eliminarDisco(disco.getIdDisco(), "phase0-test");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoRepository.findById(disco.getIdDisco())).isEmpty();
+        assertThat(physicalDiscoCount(disco.getIdDisco())).isEqualTo(1);
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get().satisfies(retained -> {
+            assertThat(retained.getCodigoQr()).isEqualTo("phase0-manual-hard-delete");
+            assertThat(retained.getManualDiscogsBatch().getId()).isEqualTo(batch.getId());
+            assertThat(retained.getPrecioVenta()).isEqualByComparingTo("1100");
+            assertThat(retained.getCondicionFisica()).isEqualTo("VG+");
+        });
+        assertThat(count("SELECT COUNT(*) FROM discogs_manual_batch WHERE id_discogs_manual_batch = " + batch.getId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void historicalSaleReferenceSoftDeletesProductAndRetainsManualBatchCopy() {
+        DiscogsManualBatch batch = saveManualBatch("PHASE0-SOFT");
+        Disco disco = saveDisco("MANUAL-SOFT-DELETE");
+        DiscoQrCopy copy = discoQrCopyRepository.saveAndFlush(DiscoQrCopy.builder()
+                .idDisco(disco.getIdDisco())
+                .copyNumber(1)
+                .codigoQr("phase0-manual-soft-delete")
+                .estado(EstadoCopiaDisco.VENDIDO)
+                .manualDiscogsBatch(batch)
+                .precioVenta(new BigDecimal("1200"))
+                .condicionFisica("NM")
+                .build());
+        saveSale(disco);
+
+        discoService.eliminarDisco(disco.getIdDisco(), "phase0-test");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoRepository.findById(disco.getIdDisco())).isEmpty();
+        assertThat(physicalDiscoCount(disco.getIdDisco())).isEqualTo(1);
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get().satisfies(retained -> {
+            assertThat(retained.getCodigoQr()).isEqualTo("phase0-manual-soft-delete");
+            assertThat(retained.getManualDiscogsBatch().getId()).isEqualTo(batch.getId());
+        });
     }
 
     @Test
@@ -337,6 +417,95 @@ class DiscoPermanentDeletionIntegrationTest {
     }
 
     @Test
+    void exactSaleSnapshotBlocksOnlyReferencedCopyDeletion() {
+        Disco disco = saveDisco("COPY-EXACT-HISTORY");
+        DiscoQrCopy referenced = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy sibling = saveCopy(disco, 2, EstadoCopiaDisco.DISPONIBLE);
+        disco.setCantidadCopias(2);
+        discoRepository.saveAndFlush(disco);
+        saveSale(disco, String.valueOf(referenced.getId()));
+
+        assertThatThrownBy(() -> discoService.eliminarCopia(disco.getIdDisco(), referenced.getId()))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("historial de ventas");
+
+        discoService.eliminarCopia(disco.getIdDisco(), sibling.getId());
+        assertThat(discoQrCopyRepository.findById(referenced.getId())).isPresent();
+        assertThat(discoQrCopyRepository.findById(sibling.getId())).isEmpty();
+    }
+
+    @Test
+    void activeReservationBlocksExactCopyDeletionAndRetainedRemoval() {
+        DiscogsManualBatch batch = saveManualBatch("COPY-RESERVATION-GUARD");
+        Disco disco = saveDisco("COPY-RESERVATION-GUARD");
+        DiscoQrCopy deletable = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy retained = saveManualCopyWithNumber(disco, batch, EstadoCopiaDisco.DISPONIBLE, 2);
+        Reserva reserva = new Reserva();
+        reserva.setCliente(saveClient());
+        reserva.setDisco(disco);
+        reserva.setEstado(EstadoReserva.ACTIVA);
+        reserva.setFechaReserva(LocalDateTime.now());
+        entityManager.persist(reserva);
+        entityManager.flush();
+
+        assertThatThrownBy(() -> discoService.eliminarCopia(disco.getIdDisco(), deletable.getId()))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("reserva activa");
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                disco.getIdDisco(), retained.getId(), DisposicionCopiaReason.OTHER, null, "admin"))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("reserva activa");
+        assertThat(discoQrCopyRepository.findById(deletable.getId())).isPresent();
+        assertThat(discoQrCopyRepository.findById(retained.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
+    void pendingPresaleBlocksExactCopyDeletionAndRetainedRemoval() {
+        DiscogsManualBatch batch = saveManualBatch("COPY-PRESALE-GUARD");
+        Disco disco = saveDisco("COPY-PRESALE-GUARD");
+        DiscoQrCopy deletable = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy retained = saveManualCopyWithNumber(disco, batch, EstadoCopiaDisco.DISPONIBLE, 2);
+        entityManager.persist(PreVenta.builder()
+                .cliente(saveClient())
+                .disco(disco)
+                .fecha(LocalDate.now())
+                .cantidad(1)
+                .precio(new BigDecimal("1000"))
+                .estado("PENDIENTE")
+                .artistaSnap(disco.getArtista())
+                .albumSnap(disco.getAlbum())
+                .build());
+        entityManager.flush();
+
+        assertThatThrownBy(() -> discoService.eliminarCopia(disco.getIdDisco(), deletable.getId()))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("preventa pendiente");
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                disco.getIdDisco(), retained.getId(), DisposicionCopiaReason.OTHER, null, "admin"))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("preventa pendiente");
+        assertThat(discoQrCopyRepository.findById(deletable.getId())).isPresent();
+        assertThat(discoQrCopyRepository.findById(retained.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
+    void exactSaleSnapshotBlocksRetainedRemoval() {
+        DiscogsManualBatch batch = saveManualBatch("COPY-RETAINED-HISTORY");
+        Disco disco = saveDisco("COPY-RETAINED-HISTORY");
+        DiscoQrCopy copy = saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
+        saveSale(disco, String.valueOf(copy.getId()));
+
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                disco.getIdDisco(), copy.getId(), DisposicionCopiaReason.OTHER, null, "admin"))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("historial de ventas");
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
     void importedSoldCopyWithoutCommerceCanBeRemovedSafely() {
         Disco disco = saveDisco("COPY-IMPORTED-SOLD");
         DiscoQrCopy sold = saveCopy(disco, 1, EstadoCopiaDisco.VENDIDO);
@@ -424,6 +593,118 @@ class DiscoPermanentDeletionIntegrationTest {
         assertThat(discoQrCopyRepository.findById(copy.getId())).isPresent();
     }
 
+    @Test
+    void exactRetainedRemovalPreservesManualIdentityAndProvenance() {
+        DiscogsManualBatch batch = saveManualBatch("PHASE1-REMOVE");
+        Disco disco = saveDisco("PHASE1-REMOVE");
+        DiscoQrCopy copy = saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
+        LocalDateTime receivedAt = copy.getCreatedAt();
+
+        DiscoResponseDTO result = discoService.retirarCopia(
+                disco.getIdDisco(), copy.getId(), DisposicionCopiaReason.DAMAGED, " sleeve split ", "admin-user");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get().satisfies(retained -> {
+            assertThat(retained.getId()).isEqualTo(copy.getId());
+            assertThat(retained.getCopyNumber()).isEqualTo(copy.getCopyNumber());
+            assertThat(retained.getCodigoQr()).isEqualTo(copy.getCodigoQr());
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getManualDiscogsBatch().getId()).isEqualTo(batch.getId());
+            assertThat(retained.getPrecioVenta()).isEqualByComparingTo("1250");
+            assertThat(retained.getCondicionFisica()).isEqualTo("VG+");
+            assertThat(retained.getCreatedAt()).isEqualTo(receivedAt);
+            assertThat(retained.getDispositionReason()).isEqualTo(DisposicionCopiaReason.DAMAGED);
+            assertThat(retained.getDispositionNote()).isEqualTo("sleeve split");
+            assertThat(retained.getDisposedAt()).isNotNull();
+            assertThat(retained.getDisposedBy()).isEqualTo("admin-user");
+        });
+        assertThat(result.getCantidadCopias()).isZero();
+        assertThat(result.getTotalCopias()).isEqualTo(1);
+        assertThat(discoQrCopyRepository.countByIdDiscoAndEstado(
+                disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE)).isZero();
+        assertThat(discoQrCopyService.findByCode(copy.getCodigoQr())).extracting(DiscoQrCopy::getId)
+                .isEqualTo(copy.getId());
+        assertThat(qrService.obtenerPorQRScaneado(copy.getCodigoQr()).getIdDisco()).isEqualTo(disco.getIdDisco());
+        Disco persistedProduct = discoRepository.findById(disco.getIdDisco()).orElseThrow();
+        assertThatThrownBy(() -> discoQrCopyService.reserveCopies(
+                persistedProduct, 1, copy.getId(), copy.getCodigoQr()))
+                .isInstanceOf(com.sonograma.exception.ConflictoNegocioException.class)
+                .hasMessageContaining("ya no está disponible");
+    }
+
+    @Test
+    void soldAlreadyRemovedAndWrongProductRetainedRemovalAreRejected() {
+        DiscogsManualBatch batch = saveManualBatch("PHASE1-REJECT");
+        Disco disco = saveDisco("PHASE1-REJECT-A");
+        Disco other = saveDisco("PHASE1-REJECT-B");
+        DiscoQrCopy sold = saveManualCopy(disco, batch, EstadoCopiaDisco.VENDIDO);
+        DiscoQrCopy removed = saveManualCopyWithNumber(disco, batch, EstadoCopiaDisco.REMOVED, 2);
+
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                disco.getIdDisco(), sold.getId(), DisposicionCopiaReason.OTHER, null, null))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("vendida");
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                disco.getIdDisco(), removed.getId(), DisposicionCopiaReason.OTHER, null, null))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("ya fue retirada");
+        assertThatThrownBy(() -> discoService.retirarCopia(
+                other.getIdDisco(), sold.getId(), DisposicionCopiaReason.OTHER, null, null))
+                .isInstanceOf(RecursoNoEncontradoException.class);
+        assertThat(discoQrCopyRepository.findById(sold.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.VENDIDO);
+    }
+
+    @Test
+    void manualCopyDeleteStateAndProductStatusBypassesAreRejected() {
+        DiscogsManualBatch batch = saveManualBatch("PHASE1-BYPASS");
+        Disco disco = saveDisco("PHASE1-BYPASS");
+        DiscoQrCopy copy = saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
+
+        assertThatThrownBy(() -> discoService.actualizarCopias(disco.getIdDisco(), 0))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("copia física exacta");
+        assertThatThrownBy(() -> discoService.actualizarCopias(disco.getIdDisco(), 2))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("recepción exacta");
+        assertThatThrownBy(() -> discoService.eliminarCopia(disco.getIdDisco(), copy.getId()))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("motivo explícito");
+        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
+                disco.getIdDisco(), copy.getId(), EstadoCopiaDisco.VENDIDO))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("flujo de venta");
+        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
+                disco.getIdDisco(), copy.getId(), EstadoCopiaDisco.REMOVED))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("motivo explícito");
+        assertThatThrownBy(() -> discoService.cambiarEstado(disco.getIdDisco(), EstadoDisco.VENDIDO))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("copias físicas");
+        assertThatThrownBy(() -> discoService.cambiarEstado(disco.getIdDisco(), EstadoDisco.SIN_STOCK))
+                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("copias físicas");
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
+    @WithMockUser(username = "retirement-admin", roles = "ADMIN")
+    void retainedRemovalEndpointRequiresReasonAndPersistsAuthenticatedActor() throws Exception {
+        DiscogsManualBatch batch = saveManualBatch("PHASE1-HTTP");
+        Disco disco = saveDisco("PHASE1-HTTP");
+        DiscoQrCopy copy = saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
+
+        mockMvc.perform(post("/discos/{idDisco}/copias/{idCopia}/retiro", disco.getIdDisco(), copy.getId())
+                        .contentType(APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/discos/{idDisco}/copias/{idCopia}/retiro", disco.getIdDisco(), copy.getId())
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"reason\":\"REMOVED_FROM_INVENTORY\",\"note\":\"customer request\"}"))
+                .andExpect(status().isOk());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get().satisfies(retained -> {
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getDispositionReason()).isEqualTo(DisposicionCopiaReason.REMOVED_FROM_INVENTORY);
+            assertThat(retained.getDisposedBy()).isEqualTo("retirement-admin");
+        });
+    }
+
     private Disco saveDisco(String code) {
         return discoRepository.saveAndFlush(Disco.builder()
                 .codigoInterno(code)
@@ -445,6 +726,17 @@ class DiscoPermanentDeletionIntegrationTest {
         return clienteRepository.save(client);
     }
 
+    private DiscogsManualBatch saveManualBatch(String source) {
+        DiscogsManualBatch batch = DiscogsManualBatch.builder()
+                .customerCode(source)
+                .normalizedCustomerCode(source)
+                .status(DiscogsManualBatchStatus.OPEN)
+                .build();
+        entityManager.persist(batch);
+        entityManager.flush();
+        return batch;
+    }
+
     private DiscoQrCopy saveCopy(Disco disco, int number, EstadoCopiaDisco state) {
         return discoQrCopyRepository.saveAndFlush(DiscoQrCopy.builder()
                 .idDisco(disco.getIdDisco())
@@ -454,7 +746,28 @@ class DiscoPermanentDeletionIntegrationTest {
                 .build());
     }
 
+    private DiscoQrCopy saveManualCopy(Disco disco, DiscogsManualBatch batch, EstadoCopiaDisco state) {
+        return saveManualCopyWithNumber(disco, batch, state, 1);
+    }
+
+    private DiscoQrCopy saveManualCopyWithNumber(
+            Disco disco, DiscogsManualBatch batch, EstadoCopiaDisco state, int number) {
+        return discoQrCopyRepository.saveAndFlush(DiscoQrCopy.builder()
+                .idDisco(disco.getIdDisco())
+                .copyNumber(number)
+                .codigoQr("manual-" + disco.getIdDisco() + "-" + number + "-" + System.nanoTime())
+                .estado(state)
+                .manualDiscogsBatch(batch)
+                .precioVenta(new BigDecimal("1250"))
+                .condicionFisica("VG+")
+                .build());
+    }
+
     private Venta saveSale(Disco disco) {
+        return saveSale(disco, null);
+    }
+
+    private Venta saveSale(Disco disco, String copyIdsSnapshot) {
         Venta venta = ventaRepository.save(Venta.builder()
                 .cliente(saveClient())
                 .disco(disco)
@@ -474,6 +787,7 @@ class DiscoPermanentDeletionIntegrationTest {
                 .albumSnap(disco.getAlbum())
                 .codigoSnap(disco.getCodigoInterno())
                 .costoAdquisicionUnitarioUyu(new BigDecimal("500"))
+                .copyIdsSnapshot(copyIdsSnapshot)
                 .build());
         entityManager.flush();
         return venta;

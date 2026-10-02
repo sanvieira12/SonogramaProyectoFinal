@@ -1,6 +1,7 @@
 package com.sonograma.repository;
 
 import com.sonograma.entity.Disco;
+import com.sonograma.dto.DiscoSaleSearchProductRow;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoDisco;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,6 +12,7 @@ import jakarta.persistence.LockModeType;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 
 public interface DiscoRepository extends JpaRepository<Disco, Long> {
 
@@ -104,6 +106,58 @@ public interface DiscoRepository extends JpaRepository<Disco, Long> {
            "LOWER(d.album) LIKE LOWER(CONCAT('%', :q, '%'))) " +
            "ORDER BY d.artista")
     List<Disco> buscarPorArtistaOAlbum(@Param("q") String q);
+
+    /**
+     * Bounded Nueva Venta search. The available-copy EXISTS predicate makes
+     * physical inventory authoritative without loading or repairing it.
+     */
+    @Query("""
+        SELECT new com.sonograma.dto.DiscoSaleSearchProductRow(
+          d.idDisco, d.artista, d.album, d.anio, d.codigoInterno, d.imagenUrl,
+          d.condicion, d.condicionFisica, d.tipoDisco, d.formato,
+          d.selloDiscografico, d.precioVenta, d.estado
+        )
+        FROM Disco d
+        WHERE d.catalogDeletedAt IS NULL
+          AND EXISTS (
+              SELECT available.id
+              FROM DiscoQrCopy available
+              WHERE available.idDisco = d.idDisco
+                AND available.estado = com.sonograma.enums.EstadoCopiaDisco.DISPONIBLE
+          )
+          AND (
+              LOWER(COALESCE(d.artista, '')) LIKE :contains
+              OR LOWER(COALESCE(d.album, '')) LIKE :contains
+              OR LOWER(COALESCE(d.genero, '')) LIKE :contains
+              OR LOWER(COALESCE(d.selloDiscografico, '')) LIKE :contains
+              OR LOWER(COALESCE(d.descripcion, '')) LIKE :contains
+              OR LOWER(COALESCE(d.codigoInterno, '')) LIKE :contains
+              OR LOWER(CAST(d.estado AS string)) LIKE :contains
+              OR LOWER(CAST(d.condicion AS string)) LIKE :contains
+              OR LOWER(COALESCE(d.condicionFisica, '')) LIKE :contains
+              OR LOWER(CAST(d.tipoDisco AS string)) LIKE :contains
+              OR CAST(d.anio AS string) LIKE :contains
+              OR EXISTS (
+                  SELECT sourceCopy.id
+                  FROM DiscoQrCopy sourceCopy
+                  JOIN sourceCopy.manualDiscogsBatch sourceBatch
+                  WHERE sourceCopy.idDisco = d.idDisco
+                    AND sourceCopy.estado = com.sonograma.enums.EstadoCopiaDisco.DISPONIBLE
+                    AND sourceBatch.normalizedCustomerCode = :sourceCode
+              )
+          )
+        ORDER BY
+          CASE WHEN LOWER(COALESCE(d.codigoInterno, '')) = :query THEN 0 ELSE 1 END,
+          CASE WHEN LOWER(COALESCE(d.artista, '')) LIKE :prefix
+                 OR LOWER(COALESCE(d.album, '')) LIKE :prefix THEN 0 ELSE 1 END,
+          LOWER(d.artista), LOWER(d.album), d.idDisco
+        """)
+    List<DiscoSaleSearchProductRow> searchForSale(
+            @Param("query") String query,
+            @Param("contains") String contains,
+            @Param("prefix") String prefix,
+            @Param("sourceCode") String sourceCode,
+            Pageable pageable);
 
     @Query("""
         SELECT d, COUNT(c)

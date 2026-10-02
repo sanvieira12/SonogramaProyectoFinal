@@ -59,26 +59,25 @@ public class DiscogsImportService {
         return preview;
     }
 
-    @Transactional
     public ManualDiscogsImportResultDTO guardar(DiscoImportPreviewDTO preview) {
         validateManualBatchFields(preview);
-        return guardarInterno(preview, true);
+        // Separate transaction: a later duplicate conflict must not erase the
+        // source/price/condition already supplied for this pending operation.
+        receiptOperationService.capturePendingContext(preview);
+        return guardarInterno(preview);
     }
 
-    private ManualDiscogsImportResultDTO guardarInterno(
-            DiscoImportPreviewDTO preview,
-            boolean assignToManualBatch
-    ) {
+    private ManualDiscogsImportResultDTO guardarInterno(DiscoImportPreviewDTO preview) {
         if (preview == null || preview.getDiscogsReleaseId() == null) {
             throw new com.sonograma.exception.NegocioException("No se pudo identificar el release concreto de Discogs. Volvé a consultarlo.");
         }
-        return receiptOperationService.confirm(preview, () -> {
+        return receiptOperationService.confirm(preview, batch -> {
             DiscogsCatalogStockService.ReceiptResult receipt = catalogStockService.receive(
                     new DiscogsCatalogStockService.ReceiptCommand(
                             preview.getDiscogsReleaseId(), preview.getCantidadCopias(), toMetadata(preview)
                     ));
             audioPreviewService.guardarDesdeTracks(receipt.disco().getIdDisco(), preview.getTracks());
-            if (assignToManualBatch) assignExactCopyToBatch(preview, receipt);
+            assignExactCopiesToBatch(preview, receipt, batch);
             return receipt;
         });
     }
@@ -89,7 +88,7 @@ public class DiscogsImportService {
         for (DiscoImportPreviewDTO preview : previews) {
             if (preview.getErrores() != null && !preview.getErrores().isEmpty()) continue;
             try {
-                ManualDiscogsImportResultDTO result = guardarInterno(preview, false);
+                ManualDiscogsImportResultDTO result = guardar(preview);
                 if (result.getProductId() != null) {
                     discoRepository.findById(result.getProductId()).ifPresent(disco -> {
                         DiscoResponseDTO dto = com.sonograma.mapper.DiscoMapper.toDTO(disco);
@@ -176,18 +175,18 @@ public class DiscogsImportService {
         }
     }
 
-    private void assignExactCopyToBatch(
+    private void assignExactCopiesToBatch(
             DiscoImportPreviewDTO preview,
-            DiscogsCatalogStockService.ReceiptResult receipt
+            DiscogsCatalogStockService.ReceiptResult receipt,
+            com.sonograma.entity.DiscogsManualBatch batch
     ) {
-        if (receipt.createdCopies().size() != 1) {
+        if (receipt.createdCopies().size() != preview.getCantidadCopias()) {
             throw new com.sonograma.exception.NegocioException(
-                    "La recepción no informó exactamente una copia física nueva para asignar al batch.");
+                    "La recepción no informó todas las copias físicas nuevas para asignar al batch.");
         }
-        DiscoQrCopy exactCopy = receipt.createdCopies().getFirst();
-        manualBatchService.assignCopyToOpenBatch(
-                preview.getCustomerCode(),
-                exactCopy,
+        manualBatchService.assignCopiesToBatch(
+                batch,
+                receipt.createdCopies(),
                 effectiveCopySalePrice(preview),
                 preview.getPhysicalCondition());
     }

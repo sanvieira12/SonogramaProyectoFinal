@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,4 +19,7 @@ public class ManualDiscogsImportResultDTO {
     private Integer availableCopies;
     private boolean alreadyProcessed;
     private String warning;
+    private Long batchId;
+    private List<Long> copyIds;
+    private String sourceCustomerCode;
 }

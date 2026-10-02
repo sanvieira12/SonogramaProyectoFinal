@@ -28,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -113,7 +114,6 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "3000", 1);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
-        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
         when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
@@ -160,8 +160,6 @@ class VentaServiceTest {
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(discoA));
         when(discoRepository.findById(11L)).thenReturn(Optional.of(discoB));
-        when(discoQrCopyService.synchronize(discoA)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
-        when(discoQrCopyService.synchronize(discoB)).thenReturn(java.util.List.of(copy(11L, 2L, 1), copy(11L, 3L, 2)));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
         when(discoQrCopyService.countAvailableCopies(11L)).thenReturn(2L, 1L);
         when(discoQrCopyService.reserveCopies(discoA, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
@@ -199,13 +197,83 @@ class VentaServiceTest {
     }
 
     @Test
+    void exactCopyAndQrAreForwardedAndPersistedInSaleSnapshot() {
+        Cliente cliente = cliente(1L);
+        Disco disco = disco(10L, "Exact", "Copy", "400", "1250", 2);
+        disco.setCondicion(CondicionDisco.USADO);
+        DiscoQrCopy copyA = copy(10L, 1L, 1);
+        DiscoQrCopy copyB = copy(10L, 2L, 2);
+        when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
+        when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
+        when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(2L, 1L);
+        when(discoQrCopyService.reserveCopies(disco, 1, 2L, "qr-2"))
+                .thenReturn(java.util.List.of(copyB));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
+            Venta venta = invocation.getArgument(0);
+            venta.setIdVenta(108L);
+            return venta;
+        });
+        when(detalleVentaRepository.save(any(DetalleVenta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        VentaResponseDTO response = ventaService.registrarVenta(VentaRequestDTO.builder()
+                .idCliente(1L)
+                .detalles(java.util.List.of(DetalleVentaDTO.builder()
+                        .idDisco(10L)
+                        .cantidad(1)
+                        .precioUnitario(new BigDecimal("1250"))
+                        .copyId(2L)
+                        .codigoQr("qr-2")
+                        .build()))
+                .canalVenta("LOCAL")
+                .tipoEntrega("RETIRO")
+                .total(new BigDecimal("1250"))
+                .build());
+
+        verify(discoQrCopyService).reserveCopies(disco, 1, 2L, "qr-2");
+        ArgumentCaptor<DetalleVenta> detail = ArgumentCaptor.forClass(DetalleVenta.class);
+        verify(detalleVentaRepository).save(detail.capture());
+        assertThat(detail.getValue().getCopyIdsSnapshot()).isEqualTo("2");
+        assertThat(detail.getValue().getCopyIdsSnapshot()).doesNotContain("1");
+        assertThat(copyB.getCodigoQr()).isEqualTo("qr-2");
+        assertThat(response.getDetalles()).singleElement().satisfies(saved -> {
+            assertThat(saved.getCopyId()).isEqualTo(2L);
+            assertThat(saved.getCopyIds()).containsExactly(2L);
+        });
+    }
+
+    @Test
+    void cancellationRestoresOnlyIdsRecordedInThePhysicalCopySnapshot() {
+        Disco disco = disco(10L, "Exact", "Restore", "400", "1250", 0);
+        DetalleVenta detail = DetalleVenta.builder()
+                .idDetalle(90L)
+                .disco(disco)
+                .cantidad(1)
+                .precioUnitario(new BigDecimal("1250"))
+                .copyIdsSnapshot("2")
+                .build();
+        Venta sale = Venta.builder()
+                .idVenta(109L)
+                .estado(EstadoVenta.COMPLETADA)
+                .detalles(new java.util.ArrayList<>(java.util.List.of(detail)))
+                .build();
+        detail.setVenta(sale);
+        when(ventaRepository.findById(109L)).thenReturn(Optional.of(sale));
+        when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ventaService.cancelarVenta(109L);
+
+        verify(discoQrCopyService).restoreCopies("2");
+        assertThat(sale.getEstado()).isEqualTo(EstadoVenta.CANCELADA);
+        assertThat(detail.getCopyIdsSnapshot()).isEqualTo("2");
+    }
+
+    @Test
     void registrarVentaCapturaClasificacionCatalogoEnElDetalle() {
         Cliente cliente = cliente(1L);
         Disco disco = disco(10L, "A", "Uno", "400", "1000", 1);
         disco.setCondicion(CondicionDisco.NUEVO);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
-        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);
         when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
@@ -232,7 +300,6 @@ class VentaServiceTest {
         disco.setCondicion(CondicionDisco.CONSIGNACION);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(12L)).thenReturn(Optional.of(disco));
-        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(12L, 12L, 1)));
         when(discoQrCopyService.countAvailableCopies(12L)).thenReturn(1L, 0L);
         when(discoQrCopyService.reserveCopies(disco, 1, null, null)).thenReturn(java.util.List.of(copy(12L, 12L, 1)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {
@@ -292,7 +359,6 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "3000", 1);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
-        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1)));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L);
 
         VentaRequestDTO request = VentaRequestDTO.builder()
@@ -383,7 +449,6 @@ class VentaServiceTest {
         Disco disco = disco(10L, "A", "Uno", "500", "1000", 3);
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
-        when(discoQrCopyService.synchronize(disco)).thenReturn(java.util.List.of(copy(10L, 1L, 1), copy(10L, 2L, 2), copy(10L, 3L, 3)));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(3L, 1L);
         when(discoQrCopyService.reserveCopies(disco, 2, null, null)).thenReturn(java.util.List.of(copy(10L, 1L, 1), copy(10L, 2L, 2)));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> {

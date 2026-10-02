@@ -30,6 +30,30 @@ describe('normalizeApiBase', () => {
     }))
   })
 
+  it('uses the bounded Nueva Venta endpoint and forwards its abort signal', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('[]'),
+    })
+    const controller = new AbortController()
+
+    await api.discos.buscarVenta('LO / rare', 20, controller.signal)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/discos/buscar-venta?q=LO%20%2F%20rare&limit=20',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    )
+  })
+
+  it('preserves AbortError so Nueva Venta can silently discard cancellation', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError')
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(abortError)
+
+    await expect(api.discos.buscarVenta('radio', 20, new AbortController().signal))
+      .rejects.toBe(abortError)
+  })
+
   it('exchanges the Google handoff code through a POST body', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -317,6 +341,32 @@ describe('normalizeApiBase', () => {
     )
   })
 
+  it('descarga el Excel lógico usando la fuente normalizada y el nombre del servidor', async () => {
+    vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
+    const blob = new Blob(['xlsx'], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="SV3_2026-09-30.xlsx"',
+      }),
+      blob: () => Promise.resolve(blob),
+    })
+
+    await expect(api.importaciones.discogsManualSourceExcel(' sv3 ')).resolves.toEqual({
+      blob,
+      filename: 'SV3_2026-09-30.xlsx',
+      contentDisposition: 'attachment; filename="SV3_2026-09-30.xlsx"',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/importaciones/discogs/manual-sources/SV3/excel',
+      { headers: { Authorization: 'Bearer token-1' } },
+    )
+  })
+
   it('descarga el ZIP de un batch manual Discogs con su nombre y MIME', async () => {
     vi.spyOn(window.localStorage.__proto__, 'getItem').mockReturnValue('token-1')
     const blob = new Blob(['zip'], { type: 'application/zip' })
@@ -365,9 +415,42 @@ describe('normalizeApiBase', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-1' },
-        body: JSON.stringify({ porcentajeSonograma: 30 }),
+        body: JSON.stringify({
+          porcentajeSonograma: 30,
+          confirmPendingOperations: false,
+          confirmReconciliationWarnings: false,
+        }),
       }),
     )
+  })
+
+  it('reads source reconciliation and updates only user-supplied expected-count fields', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{}'),
+    })
+    const payload = {
+      expectedCopyCount: 99,
+      version: 2,
+      note: 'Conteo confirmado',
+      changeReason: 'Proveedor confirmó dos unidades adicionales',
+    }
+
+    await api.importaciones.discogsManualSourceReconciliation(' LO ')
+    await api.importaciones.discogsManualExpectedCountUpdate(' LO ', payload)
+    await api.importaciones.discogsManualReconciliationSnapshots(' LO ')
+
+    const source = '%20LO%20'
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      `/api/importaciones/discogs/manual-sources/${source}/reconciliation`,
+      expect.objectContaining({ method: 'GET' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      `/api/importaciones/discogs/manual-sources/${source}/reconciliation/expected-count`,
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(payload) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3,
+      `/api/importaciones/discogs/manual-sources/${source}/reconciliation/snapshots`,
+      expect.objectContaining({ method: 'GET' }))
   })
 
   it('starts and reads persisted Discogs ZIP preparation progress', async () => {

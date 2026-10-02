@@ -1,6 +1,7 @@
 package com.sonograma.service;
 
 import com.sonograma.service.importacion.DiscogsCoverService;
+import com.sonograma.exception.ConflictoNegocioException;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,11 @@ public class CatalogCleanupService {
             log.info("Catalog cleanup ejecutado sin discos objetivo para scope={}", scope.name());
             cleanupTransientArtifacts(scope, result.counts());
             return result;
+        }
+        if (count("SELECT COUNT(*) FROM disco_qr_copy WHERE id_disco IN (:ids) AND id_discogs_manual_batch IS NOT NULL",
+                result.targetIds()) > 0) {
+            throw new ConflictoNegocioException(
+                    "La limpieza fue bloqueada porque incluye copias manual USED con procedencia histórica.");
         }
 
         update("UPDATE detalle_venta SET id_disco = NULL WHERE id_disco IN (:ids)", result.targetIds());

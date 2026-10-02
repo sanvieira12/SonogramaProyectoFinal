@@ -6,6 +6,7 @@ import com.sonograma.repository.*;
 import com.sonograma.service.CatalogCleanupService.CatalogCleanupResult;
 import com.sonograma.service.CatalogCleanupService.CleanupScope;
 import com.sonograma.service.importacion.DiscogsCoverService;
+import com.sonograma.exception.ConflictoNegocioException;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("dev")
@@ -209,6 +211,42 @@ class CatalogCleanupServiceTest {
         assertThat(clienteRepository.count()).isEqualTo(1);
         assertThat(deudaRepository.count()).isEqualTo(1);
         assertThat(ventaRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void cleanupCannotDestroyManualUsedCopyHistory() {
+        Disco disco = discoRepository.saveAndFlush(Disco.builder()
+                .codigoInterno("MANUAL-HISTORY")
+                .codigoQr("manual-history-legacy")
+                .artista("Manual Artist")
+                .album("Manual Album")
+                .procedencia("DISCOGS")
+                .estado(EstadoDisco.DISPONIBLE)
+                .cantidadCopias(1)
+                .pricingMode(PricingMode.AUTO)
+                .build());
+        DiscogsManualBatch batch = DiscogsManualBatch.builder()
+                .customerCode("CLEANUP-SOURCE")
+                .normalizedCustomerCode("CLEANUP-SOURCE")
+                .status(DiscogsManualBatchStatus.OPEN)
+                .build();
+        entityManager.persist(batch);
+        entityManager.persist(DiscoQrCopy.builder()
+                .idDisco(disco.getIdDisco())
+                .copyNumber(1)
+                .codigoQr("manual-history-copy")
+                .estado(EstadoCopiaDisco.DISPONIBLE)
+                .manualDiscogsBatch(batch)
+                .precioVenta(new BigDecimal("900"))
+                .condicionFisica("VG+")
+                .build());
+        entityManager.flush();
+
+        assertThatThrownBy(() -> cleanupService.execute(CleanupScope.ALL_CATALOG))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("procedencia histórica");
+        assertThat(discoRepository.findById(disco.getIdDisco())).isPresent();
+        assertThat(count("SELECT COUNT(*) FROM disco_qr_copy WHERE id_disco = " + disco.getIdDisco())).isEqualTo(1);
     }
 
     private Reserva reserva(Cliente cliente, Disco disco) {

@@ -14,6 +14,43 @@ function Spinner({ text }) {
   )
 }
 
+const MANUAL_SOURCE_KEY = 'sonograma:discogs-manual-source:v1'
+
+function rememberedManualSource() {
+  try { return window.localStorage.getItem(MANUAL_SOURCE_KEY) || '' } catch { return '' }
+}
+
+function rememberManualSource(value) {
+  try {
+    if (value.trim()) window.localStorage.setItem(MANUAL_SOURCE_KEY, value.trim())
+    else window.localStorage.removeItem(MANUAL_SOURCE_KEY)
+  } catch {
+    // Pending operations remain durable in the backend when browser storage is unavailable.
+  }
+}
+
+function copyStateLabel(value) {
+  return { DISPONIBLE: 'Disponible', VENDIDO: 'Vendida', REMOVED: 'Retirada' }[value] || value
+}
+
+function reconciliationDifferenceLabel(reconciliation) {
+  if (!reconciliation || reconciliation.expectedCopyCount == null) return 'Cantidad esperada no definida'
+  const difference = Number(reconciliation.difference || 0)
+  if (difference === 0) return 'Las cantidades coinciden'
+  return difference < 0
+    ? `Faltan demostrar ${Math.abs(difference)} copias`
+    : `Hay ${difference} copias más que el total esperado`
+}
+
+function reconciliationStatusLabel(status) {
+  return {
+    EXPECTED_COUNT_UNKNOWN: 'Cantidad esperada no definida',
+    IN_PROGRESS: 'En curso',
+    MATCHED: 'Conciliada',
+    DIFFERENCE: 'Con diferencia',
+  }[status] || status || '—'
+}
+
 function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, mediaBusy }) {
   if (!preview) return null
   const tieneErrores = preview.errores?.length > 0
@@ -178,14 +215,120 @@ function LinkSingle() {
   const [errorMsg, setErrorMsg] = useState('')
   const [result, setResult] = useState(null)
   const [mediaBusy, setMediaBusy] = useState('')
+  const [sourceCode, setSourceCode] = useState(rememberedManualSource)
+  const [pendingOperations, setPendingOperations] = useState([])
+  const [pendingLoading, setPendingLoading] = useState(false)
+  const [duplicateConflict, setDuplicateConflict] = useState(null)
+  const [overrideReason, setOverrideReason] = useState('Proveedor entregó otra copia física')
+  const [reconciliation, setReconciliation] = useState(null)
+  const [reconciliationLoading, setReconciliationLoading] = useState(false)
+  const [reconciliationError, setReconciliationError] = useState('')
+  const [editingExpected, setEditingExpected] = useState(false)
+  const [expectedInput, setExpectedInput] = useState('')
+  const [reconciliationNote, setReconciliationNote] = useState('')
+  const [expectedChangeReason, setExpectedChangeReason] = useState('')
+
+  useEffect(() => {
+    const source = sourceCode.trim()
+    rememberManualSource(source)
+    if (!source || !api.importaciones.discogsManualPending) {
+      return undefined
+    }
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      setPendingLoading(true)
+      try {
+        const operations = await api.importaciones.discogsManualPending(source)
+        if (!cancelled) setPendingOperations(Array.isArray(operations) ? operations : [])
+      } catch {
+        if (!cancelled) setPendingOperations([])
+      } finally {
+        if (!cancelled) setPendingLoading(false)
+      }
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [sourceCode])
+
+  useEffect(() => {
+    const source = sourceCode.trim()
+    if (!source || !api.importaciones.discogsManualSourceReconciliation) return undefined
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      setReconciliationLoading(true)
+      setReconciliationError('')
+      try {
+        const summary = await api.importaciones.discogsManualSourceReconciliation(source)
+        if (!cancelled) {
+          setReconciliation(summary)
+          setExpectedInput(summary.expectedCopyCount == null ? '' : String(summary.expectedCopyCount))
+          setReconciliationNote(summary.reconciliationNote || '')
+        }
+      } catch (err) {
+        if (!cancelled) setReconciliationError(err.message || 'No se pudo cargar la conciliación.')
+      } finally {
+        if (!cancelled) setReconciliationLoading(false)
+      }
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [sourceCode])
+
+  useEffect(() => {
+    if (!preview?.operationId || !preview.customerCode?.trim()
+        || !api.importaciones.discogsManualOperationContext) return undefined
+    const timer = window.setTimeout(() => {
+      api.importaciones.discogsManualOperationContext(preview.operationId, {
+        sourceCustomerCode: preview.customerCode,
+        submittedPrice: preview.copySalePrice ?? preview.precioVenta ?? null,
+        submittedCondition: preview.physicalCondition || null,
+      }).catch(() => {})
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [preview?.operationId, preview?.customerCode, preview?.copySalePrice, preview?.precioVenta, preview?.physicalCondition])
+
+  async function refreshPending(source = sourceCode) {
+    if (!source.trim() || !api.importaciones.discogsManualPending) return
+    const operations = await api.importaciones.discogsManualPending(source.trim())
+    setPendingOperations(Array.isArray(operations) ? operations : [])
+  }
+
+  async function refreshReconciliation(source = sourceCode) {
+    if (!source.trim() || !api.importaciones.discogsManualSourceReconciliation) return
+    const summary = await api.importaciones.discogsManualSourceReconciliation(source.trim())
+    setReconciliation(summary)
+    setExpectedInput(summary.expectedCopyCount == null ? '' : String(summary.expectedCopyCount))
+    setReconciliationNote(summary.reconciliationNote || '')
+  }
+
+  async function saveExpectedCount(event) {
+    event.preventDefault()
+    if (!api.importaciones.discogsManualExpectedCountUpdate) return
+    setReconciliationError('')
+    try {
+      const updated = await api.importaciones.discogsManualExpectedCountUpdate(sourceCode.trim(), {
+        expectedCopyCount: Number(expectedInput),
+        version: reconciliation?.version ?? null,
+        note: reconciliationNote.trim() || null,
+        changeReason: expectedChangeReason.trim() || null,
+      })
+      setReconciliation(updated)
+      setExpectedInput(String(updated.expectedCopyCount))
+      setReconciliationNote(updated.reconciliationNote || '')
+      setExpectedChangeReason('')
+      setEditingExpected(false)
+    } catch (err) {
+      setReconciliationError(err.message || 'No se pudo guardar la cantidad esperada.')
+    }
+  }
 
   async function fetchLink() {
     if (!url.trim()) return
     setEstado('loading')
     setErrorMsg('')
     try {
-      const data = await api.importaciones.discogsDesdeLink(url.trim())
-      setPreview({ ...data, customerCode: preview?.customerCode || data.customerCode || '' })
+      const data = await api.importaciones.discogsDesdeLink(url.trim(), sourceCode.trim())
+      const resolvedSource = sourceCode.trim() || preview?.customerCode?.trim() || data.customerCode?.trim() || ''
+      setSourceCode(resolvedSource)
+      setPreview({ ...data, customerCode: resolvedSource })
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'Error al consultar Discogs')
@@ -193,16 +336,58 @@ function LinkSingle() {
     }
   }
 
-  async function guardar(p) {
+  async function guardar(p, override = false) {
     setEstado('saving')
     setErrorMsg('')
     try {
-      const response = await api.importaciones.discogsGuardar(p)
+      if (api.importaciones.discogsManualOperationContext) {
+        await api.importaciones.discogsManualOperationContext(p.operationId, {
+          sourceCustomerCode: p.customerCode,
+          submittedPrice: p.copySalePrice ?? p.precioVenta ?? null,
+          submittedCondition: p.physicalCondition || null,
+        })
+      }
+      const payload = override ? {
+        ...p,
+        duplicateOverride: true,
+        duplicateOverrideReason: overrideReason.trim(),
+      } : { ...p, duplicateOverride: false, duplicateOverrideReason: null }
+      const response = await api.importaciones.discogsGuardar(payload)
       setResult(response)
+      setDuplicateConflict(null)
       setEstado('done')
+      await refreshPending(p.customerCode)
+      await refreshReconciliation(p.customerCode)
     } catch (err) {
+      if (err.code === 'MANUAL_DISCOGS_DUPLICATE') {
+        setDuplicateConflict(err.data)
+        setEstado('preview')
+        return
+      }
       setErrorMsg(err.message || 'No se pudo guardar la importación. Podés volver a intentarlo sin duplicar el stock.')
       setEstado('error')
+    }
+  }
+
+  function changePreview(next) {
+    setPreview(next)
+    if (next.customerCode !== undefined && next.customerCode !== sourceCode) {
+      setSourceCode(next.customerCode)
+    }
+  }
+
+  async function abandon(operationId) {
+    if (!api.importaciones.discogsManualOperationAbandon) return
+    try {
+      await api.importaciones.discogsManualOperationAbandon(operationId)
+      setPendingOperations(current => current.filter(operation => operation.operationId !== operationId))
+      if (preview?.operationId === operationId) {
+        setPreview(null)
+        setEstado('idle')
+      }
+      await refreshReconciliation(sourceCode)
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo descartar la operación pendiente.')
     }
   }
 
@@ -240,6 +425,7 @@ function LinkSingle() {
     setResult(null)
     setEstado('idle')
     setErrorMsg('')
+    setDuplicateConflict(null)
   }
 
   return (
@@ -250,6 +436,85 @@ function LinkSingle() {
           Ingresá la URL de un release en discogs.com para obtener todos los datos.
         </p>
       </div>
+
+      {!preview && estado !== 'done' && (
+        <label className="block text-xs text-slate-500 dark:text-stone-400">
+          Código de cliente
+          <input
+            className="input mt-1 w-full text-sm"
+            value={sourceCode}
+            onChange={event => setSourceCode(event.target.value)}
+            placeholder="Ej. TESTSOURCE"
+          />
+        </label>
+      )}
+
+      {sourceCode.trim() && (
+        <section className="rounded-xl border border-[#7E9FA8]/40 bg-[#7E9FA8]/5 p-3 space-y-3" aria-label={`Conciliación de ${sourceCode.trim().toUpperCase()}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-700 dark:text-stone-200">Conciliación de {sourceCode.trim().toUpperCase()}</h4>
+              {reconciliation && <p className="text-xs text-slate-500 dark:text-stone-400">{reconciliationStatusLabel(reconciliation.reconciliationStatus)}</p>}
+            </div>
+            {!editingExpected && (
+              <button type="button" className="text-xs underline text-[#5C7D87]" onClick={() => setEditingExpected(true)}>
+                {reconciliation?.expectedCopyCount == null ? 'Definir cantidad esperada' : 'Editar cantidad esperada'}
+              </button>
+            )}
+          </div>
+          {reconciliationLoading && <p className="text-xs text-slate-400">Cargando conciliación…</p>}
+          {reconciliation && !reconciliationLoading && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div><p className="text-slate-400">Esperadas</p><p className="font-semibold">{reconciliation.expectedCopyCount ?? 'No definida'}</p></div>
+              <div><p className="text-slate-400">Copias físicas</p><p className="font-semibold">{reconciliation.provablePhysicalCopyCount}</p></div>
+              <div><p className="text-slate-400">Releases distintos</p><p className="font-semibold">{reconciliation.distinctReleaseCount}</p></div>
+              <div><p className="text-slate-400">Pendientes</p><p className="font-semibold">{reconciliation.pendingOperationCount}</p></div>
+              <div className="col-span-2 sm:col-span-4"><p className="font-medium text-slate-600 dark:text-stone-300">{reconciliationDifferenceLabel(reconciliation)}</p></div>
+              <div className="col-span-2 sm:col-span-4 text-slate-500">Disponibles {reconciliation.availableCopyCount} · Vendidas {reconciliation.soldCopyCount} · Retiradas {reconciliation.removedCopyCount} · Releases con más de una copia {reconciliation.duplicateReleaseGroupCount}</div>
+            </div>
+          )}
+          {editingExpected && (
+            <form className="space-y-2" onSubmit={saveExpectedCount}>
+              <label className="block text-xs">Cantidad esperada
+                <input aria-label="Cantidad esperada" className="input mt-1 w-full text-sm" type="number" min="0" max="1000000" required value={expectedInput} onChange={event => setExpectedInput(event.target.value)} />
+              </label>
+              <label className="block text-xs">Nota
+                <input aria-label="Nota de conciliación" className="input mt-1 w-full text-sm" value={reconciliationNote} onChange={event => setReconciliationNote(event.target.value)} />
+              </label>
+              {reconciliation?.expectedCopyCount != null && Number(expectedInput) !== Number(reconciliation.expectedCopyCount) && (
+                <label className="block text-xs">Motivo del cambio
+                  <input aria-label="Motivo del cambio" className="input mt-1 w-full text-sm" required value={expectedChangeReason} onChange={event => setExpectedChangeReason(event.target.value)} />
+                </label>
+              )}
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary flex-1" onClick={() => setEditingExpected(false)}>Cancelar</button>
+                <button type="submit" className="btn-primary flex-1" disabled={expectedInput === ''}>Guardar</button>
+              </div>
+            </form>
+          )}
+          {reconciliationError && <p role="alert" className="text-xs text-red-600 dark:text-red-300">{reconciliationError}</p>}
+        </section>
+      )}
+
+      {sourceCode.trim() && (
+        <section className="rounded-xl border border-slate-200 dark:border-stone-800 p-3 space-y-2" aria-label="Importaciones pendientes">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-stone-200">Importaciones pendientes</h4>
+            <span className="text-xs text-slate-400">{sourceCode.trim().toUpperCase()}</span>
+          </div>
+          {pendingLoading && <p className="text-xs text-slate-400">Cargando…</p>}
+          {!pendingLoading && pendingOperations.length === 0 && <p className="text-xs text-slate-400">No hay operaciones pendientes para esta fuente.</p>}
+          {pendingOperations.map(operation => (
+            <div key={operation.operationId} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 dark:bg-stone-950 px-3 py-2">
+              <div className="min-w-0 text-xs text-slate-600 dark:text-stone-300">
+                <p className="font-medium">Release {operation.discogsReleaseId}</p>
+                <p>{operation.submittedCondition || 'Sin condición'} · {operation.submittedPrice != null ? `$${operation.submittedPrice}` : 'Sin precio'}</p>
+              </div>
+              <button type="button" onClick={() => abandon(operation.operationId)} className="text-xs text-red-600 dark:text-red-300">Descartar</button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="flex gap-2">
         <input
@@ -275,13 +540,41 @@ function LinkSingle() {
       {(estado === 'preview' || estado === 'saving' || estado === 'error') && preview && (
         <PreviewCard
           preview={preview}
-          onChange={setPreview}
+          onChange={changePreview}
           onGuardar={guardar}
           onCover={downloadCover}
           onZip={downloadZip}
           saving={estado === 'saving'}
           mediaBusy={mediaBusy}
         />
+      )}
+
+      {duplicateConflict && preview && (
+        <div role="dialog" aria-modal="true" aria-label="Confirmar copia física duplicada" className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Este release ya tiene una copia registrada para {duplicateConflict.sourceCustomerCode}.</p>
+            <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">Confirmá solamente si recibiste otra copia física.</p>
+          </div>
+          <div className="space-y-2">
+            {(duplicateConflict.existingCopies || []).map(copy => (
+              <div key={copy.copyId} className="rounded-lg border border-amber-200 dark:border-amber-900 px-3 py-2 text-xs">
+                <p className="font-medium">Copia {copy.copyNumber} · {copyStateLabel(copy.estado)}</p>
+                <p>{copy.condicionFisica || 'Sin condición registrada'} · {copy.precioVenta != null ? `$${copy.precioVenta}` : 'Sin precio registrado'}</p>
+              </div>
+            ))}
+          </div>
+          <label className="block text-xs text-amber-900 dark:text-amber-200">
+            Motivo
+            <input className="input mt-1 w-full text-sm" value={overrideReason} onChange={event => setOverrideReason(event.target.value)} />
+          </label>
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary flex-1" onClick={() => setDuplicateConflict(null)}>Cancelar</button>
+            <button type="button" className="flex-1 rounded-lg bg-amber-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+              disabled={!overrideReason.trim() || estado === 'saving'} onClick={() => guardar(preview, true)}>
+              Confirmar otra copia
+            </button>
+          </div>
+        </div>
       )}
 
       {estado === 'done' && (

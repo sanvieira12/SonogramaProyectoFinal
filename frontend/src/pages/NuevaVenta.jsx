@@ -36,6 +36,22 @@ function cantidadItem(item) {
   return Number.isFinite(n) && n > 0 ? n : 1
 }
 
+function copyIdOf(copy) {
+  return copy?.copyId ?? copy?.id ?? null
+}
+
+function copySource(copy) {
+  return copy?.sourceCustomerCode || copy?.normalizedSourceCustomerCode || 'Sin origen registrado'
+}
+
+function copyCondition(copy) {
+  return copy?.condicionFisica || 'Sin condición registrada'
+}
+
+function copyPrice(copy, disco) {
+  return copy?.precioVenta ?? disco?.precioVenta ?? null
+}
+
 function ResumenLinea({ label, value, strong, muted }) {
   return (
     <div className="flex items-center justify-between gap-3 text-sm">
@@ -69,7 +85,7 @@ const DiscoDetallePanel = memo(function DiscoDetallePanel({ disco, onClose, onAg
           {[
             ['Código', disco.codigoInterno],
             ['Condición', disco.condicion],
-            ['Stock', disco.cantidadCopias ?? 0],
+            ['Stock', disco.availableCopyCount ?? disco.cantidadCopias ?? 0],
             ['Precio venta', disco.precioVenta ? money(disco.precioVenta) : null],
             ['Formato', disco.tipoDisco],
             ['Sello', disco.selloDiscografico],
@@ -98,7 +114,10 @@ const DiscoDetallePanel = memo(function DiscoDetallePanel({ disco, onClose, onAg
 export default function NuevaVenta() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const debounceRef = useRef(null)
+  const clienteDebounceRef = useRef(null)
+  const discoDebounceRef = useRef(null)
+  const discoAbortRef = useRef(null)
+  const discoSearchSequenceRef = useRef(0)
   const scannerSessionRef = useRef(0)
   const carritoRef = useRef([])
   const discoCacheRef = useRef(new Map())
@@ -110,6 +129,9 @@ export default function NuevaVenta() {
   const [departamentos, setDepartamentos] = useState(DEPARTAMENTOS_FALLBACK)
   const [discosDisponibles, setDiscosDisponibles] = useState([])
   const [busquedaDisco, setBusquedaDisco] = useState('')
+  const [buscandoDiscos, setBuscandoDiscos] = useState(false)
+  const [errorBusquedaDisco, setErrorBusquedaDisco] = useState('')
+  const [selectedCopyIds, setSelectedCopyIds] = useState({})
   const [carrito, setCarrito] = useState([]) // [{disco, precioUnitario}]
   const [mostrarManual, setMostrarManual] = useState(false)
   const [manualForm, setManualForm] = useState({
@@ -188,26 +210,29 @@ export default function NuevaVenta() {
     if (idDiscoParam) {
       obtenerDiscoPorId(idDiscoParam)
         .then(d => {
-          const qrMatchesCatalogRecord = qrParam && (
-            d.qrCopies?.some(copy => copy.codigoQr === qrParam)
-            || d.codigoQr === qrParam
-          )
+          const qrCopy = d.qrCopies?.find(copy => copy.codigoQr === qrParam)
+          const qrMatchesCatalogRecord = qrParam && (qrCopy || d.codigoQr === qrParam)
           setCarrito([{
-            uid: `disco-${d.idDisco}`,
+            uid: qrCopy ? `copy-${qrCopy.id}` : `disco-${d.idDisco}`,
             disco: d,
             precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
             cantidad: '1',
             codigoQr: qrMatchesCatalogRecord ? qrParam : null,
+            copyId: qrCopy?.id ?? null,
+            copyNumber: qrCopy?.copyNumber ?? null,
+            exactCopy: Boolean(qrCopy),
             manualItem: false,
           }])
         })
         .catch(() => setErrores({ disco: 'No se pudo cargar el disco del link' }))
-    } else {
-      api.discos.disponibles()
-        .then(ds => setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0)))
-        .catch(() => setDiscosDisponibles([]))
     }
   }, [idDiscoParam, obtenerDiscoPorId, qrParam])
+
+  useEffect(() => () => {
+    clearTimeout(clienteDebounceRef.current)
+    clearTimeout(discoDebounceRef.current)
+    discoAbortRef.current?.abort()
+  }, [])
 
   useEffect(() => {
     if (tipoEntrega !== 'ENVIO' || !departamento) return
@@ -228,22 +253,27 @@ export default function NuevaVenta() {
     return { subtotal, descuento, base, envio, totalFinal }
   }, [carrito, descuentoPct, costoEnvio, tipoEntrega])
 
-  async function cargarDiscosVendibles() {
-    const ds = await api.discos.disponibles()
-    setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0))
-  }
-
-  const agregarAlCarrito = useCallback((d, codigoQr = null) => {
-    const yaAgregado = codigoQr
-      ? carritoRef.current.some(item => item.codigoQr === codigoQr)
-      : carritoRef.current.some(item => item.disco?.idDisco === d.idDisco)
+  const agregarAlCarrito = useCallback((d, codigoQr = null, physicalCopy = null) => {
+    const copyId = copyIdOf(physicalCopy)
+    const exactCopy = copyId != null
+    const yaAgregado = exactCopy
+      ? carritoRef.current.some(item => item.copyId === copyId)
+      : codigoQr
+        ? carritoRef.current.some(item => item.codigoQr === codigoQr)
+        : carritoRef.current.some(item => item.disco?.idDisco === d.idDisco && !item.copyId)
     if (yaAgregado) return false
+    const defaultPrice = copyPrice(physicalCopy, d)
     const nuevoItem = {
-      uid: codigoQr ? `qr-${codigoQr}` : `disco-${d.idDisco}`,
+      uid: exactCopy ? `copy-${copyId}` : codigoQr ? `qr-${codigoQr}` : `disco-${d.idDisco}`,
       disco: d,
-      precioUnitario: d.precioVenta ? String(Math.round(Number(d.precioVenta))) : '',
+      precioUnitario: defaultPrice != null ? String(Math.round(Number(defaultPrice))) : '',
       cantidad: '1',
-      codigoQr,
+      copyId,
+      codigoQr: physicalCopy?.codigoQr || codigoQr,
+      copyNumber: physicalCopy?.copyNumber ?? null,
+      sourceCustomerCode: exactCopy ? copySource(physicalCopy) : null,
+      condicionFisica: exactCopy ? copyCondition(physicalCopy) : null,
+      exactCopy,
       manualItem: false,
     }
     carritoRef.current = [...carritoRef.current, nuevoItem]
@@ -251,6 +281,33 @@ export default function NuevaVenta() {
     setDiscoDetalle(null)
     return true
   }, [])
+
+  function selectedCopyFor(disco) {
+    const selectedId = selectedCopyIds[disco.idDisco]
+    return disco.availableCopies?.find(copy => copy.copyId === selectedId) || null
+  }
+
+  function selectCopy(disco, copyId) {
+    setSelectedCopyIds(prev => ({ ...prev, [disco.idDisco]: Number(copyId) }))
+    setErrores(prev => ({ ...prev, disco: undefined }))
+  }
+
+  function agregarResultado(disco) {
+    const copy = disco.requiresExactCopySelection ? selectedCopyFor(disco) : null
+    if (disco.requiresExactCopySelection && !copy) {
+      setErrores(prev => ({ ...prev, disco: 'Seleccioná una copia física antes de agregar el disco.' }))
+      return false
+    }
+    if (!agregarAlCarrito(disco, copy?.codigoQr || null, copy)) {
+      setErrores(prev => ({ ...prev, disco: 'Esta copia ya está en la venta.' }))
+      return false
+    }
+    if (copy) {
+      setSelectedCopyIds(prev => ({ ...prev, [disco.idDisco]: undefined }))
+    }
+    setErrores(prev => ({ ...prev, disco: undefined }))
+    return true
+  }
 
   const abrirScanner = useCallback(() => {
     scannerSessionRef.current += 1
@@ -279,7 +336,7 @@ export default function NuevaVenta() {
     if (!['DISPONIBLE', 'RESERVADO'].includes(disco.estado)) {
       throw new Error(`"${disco.artista}" está ${ESTADO_LABELS[disco.estado]?.toLowerCase() || disco.estado}.`)
     }
-    if (!agregarAlCarrito(disco, payload.codigoQr)) throw new Error('Esta copia ya está en la venta.')
+    if (!agregarAlCarrito(disco, payload.codigoQr, copy)) throw new Error('Esta copia ya está en la venta.')
     setErrores(prev => ({ ...prev, disco: undefined }))
 
     setUltimoRegistroEscaneado({
@@ -339,11 +396,49 @@ export default function NuevaVenta() {
 
   function onBusquedaDiscoChange(e) {
     const q = e.target.value
+    const trimmed = q.trim()
     setBusquedaDisco(q)
-    if (!q.trim()) { cargarDiscosVendibles(); return }
-    api.discos.buscar(q).then(ds =>
-      setDiscosDisponibles(ds.filter(d => d.cantidadCopias > 0))
-    )
+    clearTimeout(discoDebounceRef.current)
+    discoAbortRef.current?.abort()
+    discoAbortRef.current = null
+    const sequence = ++discoSearchSequenceRef.current
+    setErrorBusquedaDisco('')
+
+    if (trimmed.length < 2) {
+      setBuscandoDiscos(false)
+      setDiscosDisponibles([])
+      return
+    }
+
+    discoDebounceRef.current = setTimeout(async () => {
+      const controller = new AbortController()
+      discoAbortRef.current = controller
+      if (sequence === discoSearchSequenceRef.current) setBuscandoDiscos(true)
+      try {
+        const results = await api.discos.buscarVenta(trimmed, 20, controller.signal)
+        if (sequence === discoSearchSequenceRef.current) {
+          const normalizedResults = Array.isArray(results) ? results : []
+          const normalizedSource = trimmed.toUpperCase()
+          const initialSelections = {}
+          normalizedResults.forEach(result => {
+            if (!result.requiresExactCopySelection) return
+            const copies = Array.isArray(result.availableCopies) ? result.availableCopies : []
+            const sourceMatches = copies.filter(copy => copy.normalizedSourceCustomerCode === normalizedSource)
+            const preferred = copies.length === 1 ? copies[0] : sourceMatches.length === 1 ? sourceMatches[0] : null
+            if (preferred) initialSelections[result.idDisco] = preferred.copyId
+          })
+          setSelectedCopyIds(initialSelections)
+          setDiscosDisponibles(normalizedResults)
+        }
+      } catch (error) {
+        if (error?.name !== 'AbortError' && sequence === discoSearchSequenceRef.current) {
+          setErrorBusquedaDisco(error?.message || 'No se pudo buscar en el catálogo.')
+          setDiscosDisponibles([])
+        }
+      } finally {
+        if (sequence === discoSearchSequenceRef.current) setBuscandoDiscos(false)
+      }
+    }, 300)
   }
 
   function cambiarTipoEntrega(valor) {
@@ -364,9 +459,9 @@ export default function NuevaVenta() {
     const q = e.target.value
     setBusquedaCliente(q)
     setMostrarSugerencias(true)
-    clearTimeout(debounceRef.current)
+    clearTimeout(clienteDebounceRef.current)
     if (!q.trim()) { setSugerenciasCliente([]); return }
-    debounceRef.current = setTimeout(async () => {
+    clienteDebounceRef.current = setTimeout(async () => {
       try { setSugerenciasCliente(await api.clientes.buscar(q.trim())) }
       catch { setSugerenciasCliente([]) }
     }, 300)
@@ -459,7 +554,8 @@ export default function NuevaVenta() {
           artista: item.manualItem ? item.artista : undefined,
           album: item.manualItem ? item.album : undefined,
           codigo: item.manualItem ? item.codigo : undefined,
-          codigoQr: item.codigoQr || undefined,
+          ...(item.codigoQr && { codigoQr: item.codigoQr }),
+          ...(item.copyId && { copyId: item.copyId }),
           manualItem: Boolean(item.manualItem),
           clasificacionItem: item.manualItem ? item.clasificacionItem : undefined,
           cantidad: cantidadItem(item),
@@ -493,8 +589,11 @@ export default function NuevaVenta() {
     }
   }
 
-  const carritoIds = new Set(carrito.filter(i => i.disco).map(i => i.disco.idDisco))
-  const discosParaMostrar = discosDisponibles.filter(d => !carritoIds.has(d.idDisco))
+  const carritoIds = new Set(carrito.filter(i => i.disco && !i.copyId).map(i => i.disco.idDisco))
+  const carritoCopyIds = new Set(carrito.map(i => i.copyId).filter(Boolean))
+  const discosParaMostrar = discosDisponibles.filter(d => d.requiresExactCopySelection
+    ? d.availableCopies?.some(copy => !carritoCopyIds.has(copy.copyId))
+    : !carritoIds.has(d.idDisco))
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-5">
@@ -553,7 +652,9 @@ export default function NuevaVenta() {
                     <div className="text-xs text-slate-400 dark:text-stone-500 truncate">
                       {item.manualItem
                         ? [item.clasificacionItem && (item.clasificacionItem === 'NUEVO' ? 'Nuevo' : 'Usado'), item.codigo && `Código ${item.codigo}`, item.artista, item.album].filter(Boolean).join(' · ')
-                        : item.disco.codigoInterno || ''}
+                        : item.exactCopy
+                          ? [`Copia ${item.copyNumber}`, item.sourceCustomerCode, item.condicionFisica].filter(Boolean).join(' · ')
+                          : item.disco.codigoInterno || ''}
                     </div>
                   </div>
                   <input
@@ -562,10 +663,10 @@ export default function NuevaVenta() {
                     step="1"
                     value={item.cantidad}
                     onChange={e => setCantidadCarrito(item.uid, e.target.value)}
-                    disabled={Boolean(item.codigoQr)}
+                    disabled={Boolean(item.exactCopy || item.codigoQr)}
                     className="input w-20 text-right tabular-nums"
                     placeholder="Cant."
-                    aria-label={item.codigoQr ? 'Cantidad fija para copia escaneada' : 'Cantidad'}
+                    aria-label={item.exactCopy || item.codigoQr ? 'Cantidad fija para copia exacta' : 'Cantidad'}
                   />
                   <input
                     type="number"
@@ -677,20 +778,79 @@ export default function NuevaVenta() {
                 />
               </div>
               <div className="space-y-1 max-h-52 overflow-y-auto">
-                  {discosParaMostrar.map(d => (
-                    <div key={d.idDisco}
-                      className="w-full px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-stone-950 hover:bg-[#7E9FA8]/10 border border-transparent hover:border-[#7E9FA8]/30 transition-all flex items-center gap-3">
-                      {d.imagenUrl && <img src={resolveApiUrl(d.imagenUrl)} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-800 dark:text-stone-200 text-sm truncate">{d.artista} — {d.album}</div>
-                        <div className="text-xs text-slate-400 dark:text-stone-500">{d.codigoInterno && `${d.codigoInterno} · `}{ESTADO_LABELS[d.estado] || d.estado} · {d.precioVenta ? money(d.precioVenta) : '—'}</div>
+                  {!busquedaDisco.trim() && (
+                    <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Buscá por artista, título, código u origen</p>
+                  )}
+                  {busquedaDisco.trim().length === 1 && (
+                    <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Ingresá al menos 2 caracteres.</p>
+                  )}
+                  {buscandoDiscos && (
+                    <p role="status" className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Buscando discos…</p>
+                  )}
+                  {errorBusquedaDisco && (
+                    <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">{errorBusquedaDisco}</p>
+                  )}
+                  {discosParaMostrar.map(d => {
+                    const copies = Array.isArray(d.availableCopies) ? d.availableCopies : []
+                    const selectedCopy = selectedCopyFor(d)
+                    return (
+                      <div key={d.idDisco}
+                        className="w-full px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-stone-950 border border-transparent hover:border-[#7E9FA8]/30 transition-all space-y-2">
+                        <div className="flex items-center gap-3">
+                          {d.imagenUrl && <img src={resolveApiUrl(d.imagenUrl)} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-slate-800 dark:text-stone-200 text-sm truncate">{d.artista} — {d.album}</div>
+                            <div className="text-xs text-slate-400 dark:text-stone-500">
+                              {d.codigoInterno && `${d.codigoInterno} · `}{d.anio && `${d.anio} · `}{d.precioVenta ? money(d.precioVenta) : '—'}
+                              {d.availableCopyCount != null && ` · ${d.availableCopyCount} ${d.availableCopyCount === 1 ? 'copia disponible' : 'copias disponibles'}`}
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => setDiscoDetalle(d)} className="text-xs text-slate-500 dark:text-stone-400 hover:text-slate-900 dark:hover:text-white font-medium flex-shrink-0">Ver</button>
+                          <button type="button" onClick={() => agregarResultado(d)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">+ Agregar</button>
+                        </div>
+                        {d.requiresExactCopySelection && copies.length > 0 && (
+                          <div className="border-t border-slate-200/70 dark:border-stone-800 pt-2 space-y-2">
+                            {copies.length < 5 ? (
+                              <div role="group" aria-label={`Copias disponibles de ${d.artista} — ${d.album}`} className="grid gap-1.5 sm:grid-cols-2">
+                                {copies.map(copy => {
+                                  const selected = selectedCopy?.copyId === copy.copyId
+                                  const alreadyAdded = carritoCopyIds.has(copy.copyId)
+                                  return (
+                                    <button key={copy.copyId} type="button" disabled={alreadyAdded}
+                                      aria-pressed={selected}
+                                      onClick={() => selectCopy(d, copy.copyId)}
+                                      className={`rounded-lg border px-2.5 py-2 text-left text-xs transition-colors ${selected ? 'border-[#5C7D87] bg-[#7E9FA8]/15 text-slate-900 dark:text-white' : 'border-slate-200 dark:border-stone-700 text-slate-600 dark:text-stone-300'} disabled:opacity-40`}>
+                                      <span className="block font-semibold">Copia {copy.copyNumber}{alreadyAdded ? ' · En la venta' : ''}</span>
+                                      <span className="block truncate">{copySource(copy)} · {copyCondition(copy)} · {copyPrice(copy, d) != null ? money(copyPrice(copy, d)) : 'Sin precio registrado'}</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <select aria-label={`Seleccionar copia de ${d.artista} — ${d.album}`}
+                                className="input w-full text-sm"
+                                value={selectedCopy?.copyId || ''}
+                                onChange={event => selectCopy(d, event.target.value)}>
+                                <option value="">Seleccionar copia física</option>
+                                {copies.map(copy => (
+                                  <option key={copy.copyId} value={copy.copyId} disabled={carritoCopyIds.has(copy.copyId)}>
+                                    Copia {copy.copyNumber} · {copySource(copy)} · {copyCondition(copy)} · {copyPrice(copy, d) != null ? money(copyPrice(copy, d)) : 'Sin precio registrado'}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {selectedCopy && (
+                              <p className="text-xs font-medium text-[#5C7D87] dark:text-[#7E9FA8]">
+                                Seleccionada: Copia {selectedCopy.copyNumber} · {copySource(selectedCopy)} · {copyCondition(selectedCopy)} · {copyPrice(selectedCopy, d) != null ? money(copyPrice(selectedCopy, d)) : 'Sin precio registrado'}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <button type="button" onClick={() => setDiscoDetalle(d)} className="text-xs text-slate-500 dark:text-stone-400 hover:text-slate-900 dark:hover:text-white font-medium flex-shrink-0">Ver</button>
-                      <button type="button" onClick={() => agregarAlCarrito(d)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">+ Agregar</button>
-                    </div>
-                  ))}
-                  {discosParaMostrar.length === 0 && (
-                    <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Sin discos disponibles</p>
+                    )
+                  })}
+                  {!buscandoDiscos && !errorBusquedaDisco && busquedaDisco.trim().length >= 2 && discosParaMostrar.length === 0 && (
+                    <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">Sin resultados disponibles</p>
                   )}
               </div>
             </div>
@@ -894,7 +1054,7 @@ export default function NuevaVenta() {
       <DiscoDetallePanel
         disco={discoDetalle}
         onClose={cerrarDetalle}
-        onAgregar={agregarAlCarrito}
+        onAgregar={agregarResultado}
       />
       {scannerOpen && (
         <QRScanner

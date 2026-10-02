@@ -1,5 +1,8 @@
 package com.sonograma.exception;
 
+import com.sonograma.dto.ManualDiscogsDuplicateConflictDTO;
+import com.sonograma.dto.ManualDiscogsPendingFinalizationConflictDTO;
+import com.sonograma.dto.ManualDiscogsFinalizationConflictDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -55,6 +58,34 @@ public class GlobalExceptionHandler {
             ConflictoNegocioException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse(LocalDateTime.now(), 409, ex.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(ManualDiscogsDuplicateException.class)
+    public ResponseEntity<ManualDiscogsDuplicateConflictDTO> handleManualDiscogsDuplicate(
+            ManualDiscogsDuplicateException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ManualDiscogsDuplicateConflictDTO(
+                "MANUAL_DISCOGS_DUPLICATE",
+                ex.getMessage(),
+                ex.getSourceCustomerCode(),
+                ex.getDiscogsReleaseId(),
+                ex.getExistingCopies()));
+    }
+
+    @ExceptionHandler(ManualDiscogsPendingFinalizationException.class)
+    public ResponseEntity<ManualDiscogsPendingFinalizationConflictDTO> handleManualDiscogsPendingFinalization(
+            ManualDiscogsPendingFinalizationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ManualDiscogsPendingFinalizationConflictDTO(
+                "MANUAL_DISCOGS_PENDING_OPERATIONS",
+                ex.getMessage(),
+                ex.getPendingCount()));
+    }
+
+    @ExceptionHandler(ManualDiscogsFinalizationConfirmationException.class)
+    public ResponseEntity<ManualDiscogsFinalizationConflictDTO> handleManualDiscogsFinalizationConfirmation(
+            ManualDiscogsFinalizationConfirmationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ManualDiscogsFinalizationConflictDTO(
+                "MANUAL_DISCOGS_RECONCILIATION_CONFIRMATION_REQUIRED",
+                ex.getMessage(), ex.getWarnings(), ex.getReconciliation()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

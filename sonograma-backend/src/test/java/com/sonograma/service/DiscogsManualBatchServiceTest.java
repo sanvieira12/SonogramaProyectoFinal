@@ -7,6 +7,7 @@ import com.sonograma.dto.DiscogsManualBatchFinalizeRequestDTO;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscogsManualBatchRepository;
+import com.sonograma.service.importacion.ManualDiscogsReceiptLockService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,11 +33,29 @@ class DiscogsManualBatchServiceTest {
     @Mock
     private DiscoQrCopyRepository copyRepository;
 
+    @Mock private ManualDiscogsSourceReconciliationService reconciliationService;
+    @Mock private ManualDiscogsReceiptLockService sourceLockService;
+
     private DiscogsManualBatchService service;
 
     @BeforeEach
     void setUp() {
-        service = new DiscogsManualBatchService(batchRepository, copyRepository);
+        service = new DiscogsManualBatchService(
+                batchRepository, copyRepository, reconciliationService, sourceLockService);
+        lenient().when(batchRepository.findById(anyLong()))
+                .thenAnswer(invocation -> batchRepository.findByIdForUpdate(invocation.getArgument(0)));
+        lenient().when(reconciliationService.current(nullable(String.class)))
+                .thenReturn(new com.sonograma.dto.ManualDiscogsSourceReconciliationDTO(
+                        "TEST", "TEST", 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0L,
+                        com.sonograma.enums.ManualDiscogsReconciliationStatus.MATCHED,
+                        null, null, null, null, 0L));
+        lenient().when(reconciliationService.warnings(any())).thenReturn(List.of());
+        lenient().when(reconciliationService.createFinalizationSnapshot(any(), any(), any()))
+                .thenReturn(new com.sonograma.dto.ManualDiscogsFinalizationSnapshotDTO(
+                        900L, 1L, "TEST", "TEST", 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0L, com.sonograma.enums.ManualDiscogsReconciliationStatus.MATCHED,
+                        LocalDateTime.now(), "test"));
     }
 
     @Test
@@ -131,6 +150,7 @@ class DiscogsManualBatchServiceTest {
         assertEquals(DiscogsManualBatchStatus.FINALIZED, result.status());
         assertNotNull(result.finalizedAt());
         assertEquals(30, result.porcentajeSonograma());
+        assertEquals(900L, result.reconciliationSnapshotId());
         assertEquals(30, batch.getPorcentajeSonograma());
         assertEquals(startedAt, batch.getStartedAt());
         assertEquals(createdAt, batch.getCreatedAt());
@@ -206,7 +226,7 @@ class DiscogsManualBatchServiceTest {
         assertEquals(DiscogsManualBatchStatus.FINALIZED, open.getStatus());
         assertEquals(20, historical.getPorcentajeSonograma());
         assertEquals(DiscogsManualBatchStatus.FINALIZED, historical.getStatus());
-        verify(batchRepository).findByIdForUpdate(503L);
+        verify(batchRepository, times(2)).findByIdForUpdate(503L);
         verify(batchRepository, never()).findByIdForUpdate(501L);
     }
 

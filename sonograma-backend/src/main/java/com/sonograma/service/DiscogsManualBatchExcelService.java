@@ -3,6 +3,7 @@ package com.sonograma.service;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
+import com.sonograma.dto.ManualDiscogsExcelRowDTO;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -47,7 +48,7 @@ public class DiscogsManualBatchExcelService {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     private static final String SHEET_NAME = "Hoja 1";
-    private static final String[] HEADERS = {"LINK", "PRECIO", "CONDICION", "ESTADO", "GENERO", "CODIGO "};
+    private static final String[] HEADERS = {"LINK", "PRECIO", "CONDICION", "ESTADO", "GENERO", "CODIGO"};
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final float DEFAULT_ROW_HEIGHT = 15.75f;
 
@@ -75,6 +76,37 @@ public class DiscogsManualBatchExcelService {
             }
         }
 
+        List<WorkbookRow> rows = copies.stream().map(copy -> {
+            Disco product = products.get(copy.getIdDisco());
+            return new WorkbookRow(
+                    copy.getPrecioVenta(), copy.getCondicionFisica(), copy.getEstado(),
+                    batch.getNormalizedCustomerCode(), product.getDiscogsReleaseId(),
+                    product.getDiscogsUrl(), product.getArtista(), product.getAlbum(), product.getGenero());
+        }).toList();
+        return writeWorkbook(rows, filename(batch), false);
+    }
+
+    public GeneratedWorkbook generateForSource(String sourceCustomerCode) {
+        final String normalized;
+        try {
+            normalized = DiscogsManualBatchService.normalizeCustomerCode(sourceCustomerCode);
+        } catch (IllegalArgumentException ex) {
+            throw new NegocioException(ex.getMessage());
+        }
+        List<ManualDiscogsExcelRowDTO> sourceRows = copyRepository.findExcelRowsByManualSource(normalized);
+        if (sourceRows.isEmpty()) {
+            throw new RecursoNoEncontradoException(
+                    "No hay copias físicas retenidas para la fuente Discogs " + normalized + ".");
+        }
+        List<WorkbookRow> rows = sourceRows.stream().map(row -> new WorkbookRow(
+                row.copyPrice(), row.copyCondition(), row.copyState(),
+                row.normalizedSourceCustomerCode(), row.discogsReleaseId(),
+                row.storedDiscogsUrl(), row.artist(), row.title(), row.genre())).toList();
+        String source = sanitize(normalized, "SOURCE");
+        return writeWorkbook(rows, source + "_" + LocalDate.now().format(FILE_DATE) + ".xlsx", true);
+    }
+
+    private GeneratedWorkbook writeWorkbook(List<WorkbookRow> rows, String filename, boolean exposeAllStates) {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet(SHEET_NAME);
             sheet.setDefaultColumnWidth(13);
@@ -92,27 +124,27 @@ public class DiscogsManualBatchExcelService {
             }
 
             int rowNumber = 1;
-            for (DiscoQrCopy copy : copies) {
+            for (WorkbookRow exportRow : rows) {
                 Row row = sheet.createRow(rowNumber++);
                 row.setHeightInPoints(DEFAULT_ROW_HEIGHT);
-                Disco product = products.get(copy.getIdDisco());
-                writeLink(row, product, styles, workbook);
-                writeText(row, 1, formatPrice(copy.getPrecioVenta()), styles.body());
-                writeText(row, 2, copy.getCondicionFisica(), styles.condition(copy.getCondicionFisica()));
-                writeText(row, 3, exportStatus(copy.getEstado()), styles.status(copy.getEstado()));
-                writeText(row, 4, product.getGenero(), styles.body());
-                writeText(row, 5, batch.getNormalizedCustomerCode(), styles.body());
+                writeLink(row, exportRow, styles, workbook);
+                writeText(row, 1, formatPrice(exportRow.price()), styles.body());
+                writeText(row, 2, exportRow.condition(), styles.condition(exportRow.condition()));
+                writeText(row, 3, exportStatus(exportRow.state(), exposeAllStates), styles.status(exportRow.state()));
+                writeText(row, 4, exportRow.genre(), styles.body());
+                writeText(row, 5, exportRow.normalizedSource(), styles.body());
             }
 
             workbook.write(output);
-            return new GeneratedWorkbook(output.toByteArray(), filename(batch));
+            return new GeneratedWorkbook(output.toByteArray(), filename);
         } catch (IOException ex) {
-            throw new IllegalStateException("No se pudo generar el Excel del batch Discogs.", ex);
+            throw new IllegalStateException("No se pudo generar el Excel manual Discogs.", ex);
         }
     }
 
-    private void writeLink(Row row, Disco product, Styles styles, Workbook workbook) {
-        String url = canonicalUrl(product);
+    private void writeLink(Row row, WorkbookRow exportRow, Styles styles, Workbook workbook) {
+        String url = DiscogsReleaseUrlBuilder.build(
+                exportRow.releaseId(), exportRow.storedUrl(), exportRow.artist(), exportRow.title());
         Cell cell = row.createCell(0);
         cell.setCellValue(url == null ? "" : url);
         cell.setCellStyle(url != null && isHttpUrl(url) ? styles.hyperlink() : styles.body());
@@ -130,14 +162,6 @@ public class DiscogsManualBatchExcelService {
         cell.setCellStyle(style);
     }
 
-    private String canonicalUrl(Disco product) {
-        if (product.getDiscogsUrl() != null && !product.getDiscogsUrl().isBlank()) {
-            return product.getDiscogsUrl().trim();
-        }
-        return product.getDiscogsReleaseId() == null
-                ? null : "https://www.discogs.com/release/" + product.getDiscogsReleaseId();
-    }
-
     private boolean isHttpUrl(String value) {
         return value.regionMatches(true, 0, "https://", 0, 8)
                 || value.regionMatches(true, 0, "http://", 0, 7);
@@ -152,7 +176,9 @@ public class DiscogsManualBatchExcelService {
         return formatter.format(value);
     }
 
-    private String exportStatus(EstadoCopiaDisco status) {
+    private String exportStatus(EstadoCopiaDisco status, boolean exposeAllStates) {
+        if (status == null) return "";
+        if (exposeAllStates) return status.name();
         return status == EstadoCopiaDisco.VENDIDO ? EstadoCopiaDisco.VENDIDO.name() : "";
     }
 
@@ -177,6 +203,18 @@ public class DiscogsManualBatchExcelService {
     }
 
     public record GeneratedWorkbook(byte[] content, String filename) {}
+
+    private record WorkbookRow(
+            BigDecimal price,
+            String condition,
+            EstadoCopiaDisco state,
+            String normalizedSource,
+            Long releaseId,
+            String storedUrl,
+            String artist,
+            String title,
+            String genre
+    ) {}
 
     private static final class Styles {
         private final CellStyle header;

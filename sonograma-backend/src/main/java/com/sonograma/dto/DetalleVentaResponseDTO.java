@@ -4,6 +4,7 @@ import com.sonograma.enums.ClasificacionItemVenta;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -32,4 +33,8 @@ public class DetalleVentaResponseDTO {
     private Boolean costoCompleto;
     private Boolean manualItem;
     private ClasificacionItemVenta clasificacionItem;
+    /** Exact physical identities captured at sale time; empty for legacy/manual lines. */
+    private List<Long> copyIds;
+    /** Convenience identity for the Phase 4 quantity-one exact-copy contract. */
+    private Long copyId;
 }

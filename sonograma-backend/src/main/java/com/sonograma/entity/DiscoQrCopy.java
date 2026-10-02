@@ -1,6 +1,7 @@
 package com.sonograma.entity;
 
 import com.sonograma.enums.EstadoCopiaDisco;
+import com.sonograma.enums.DisposicionCopiaReason;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -54,4 +55,30 @@ public class DiscoQrCopy {
 
     @Column(name = "condicion_fisica", columnDefinition = "TEXT")
     private String condicionFisica;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "disposition_reason", length = 40)
+    private DisposicionCopiaReason dispositionReason;
+
+    @Column(name = "disposition_note", columnDefinition = "TEXT")
+    private String dispositionNote;
+
+    @Column(name = "disposed_at")
+    private LocalDateTime disposedAt;
+
+    @Column(name = "disposed_by")
+    private String disposedBy;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    void initializeUpdatedAt() {
+        if (updatedAt == null) updatedAt = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    void touchUpdatedAt() {
+        updatedAt = LocalDateTime.now();
+    }
 }

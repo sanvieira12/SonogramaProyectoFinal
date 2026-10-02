@@ -40,16 +40,18 @@ function headers(extra = {}) {
   }
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, options = {}) {
   let res
   try {
     res = await fetch(`${BASE}${path}`, {
       method,
       headers: headers(),
       body: body ? JSON.stringify(body) : undefined,
+      signal: options.signal,
     })
-  } catch {
-    throw new Error('No se pudo conectar con Sonograma. Revisá la conexión e intentá nuevamente.')
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    throw new Error('No se pudo conectar con Sonograma. Revisá la conexión e intentá nuevamente.', { cause: error })
   }
   if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
   if (res.status === 204) return null
@@ -61,7 +63,11 @@ async function request(method, path, body) {
     data = { message: text || 'Respuesta inesperada del servidor' }
   }
   if (!res.ok) {
-    throw new Error(data?.message || data?.error || 'Error en la solicitud')
+    const error = new Error(data?.message || data?.error || 'Error en la solicitud')
+    error.status = res.status
+    error.code = data?.code
+    error.data = data
+    throw error
   }
   return data
 }
@@ -114,6 +120,7 @@ export const api = {
     todos: () => request('GET', '/discos'),
     disponibles: () => request('GET', '/discos/disponibles'),
     porId: (id) => request('GET', `/discos/${id}`),
+    copias: (id) => request('GET', `/discos/${id}/copias`),
     crear: (disco) => request('POST', '/discos', disco),
     actualizar: (id, disco) => request('PUT', `/discos/${id}`, disco),
     cambiarEstado: (id, estado) =>
@@ -124,6 +131,12 @@ export const api = {
       request('DELETE', `/discos/${idDisco}/copias/${idCopia}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
     buscar: (q) => request('GET', `/discos/buscar?q=${encodeURIComponent(q)}`),
+    buscarVenta: (q, limit = 20, signal) => request(
+      'GET',
+      `/discos/buscar-venta?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(limit)}`,
+      undefined,
+      { signal },
+    ),
     previews: {
       listar: (id) => request('GET', `/discos/${id}/previews`),
       agregar: (id, data) => request('POST', `/discos/${id}/previews`, data),
@@ -494,11 +507,29 @@ export const api = {
     vinylfutureConfirmar: (seleccionados) =>
       request('POST', '/importaciones/vinylfuture/confirmar', seleccionados),
 
-    discogsDesdeLink: (url) =>
-      request('POST', '/importaciones/discogs/desde-link', { url }),
+    discogsDesdeLink: (url, sourceCustomerCode = '') =>
+      request('POST', '/importaciones/discogs/desde-link', { url, sourceCustomerCode }),
 
     discogsGuardar: (preview) =>
       request('POST', '/importaciones/discogs/guardar', preview),
+
+    discogsManualPending: (source) =>
+      request('GET', `/importaciones/discogs/manual-operations/pending?source=${encodeURIComponent(source)}`),
+
+    discogsManualOperationContext: (operationId, context) =>
+      request('PATCH', `/importaciones/discogs/manual-operations/${encodeURIComponent(operationId)}/context`, context),
+
+    discogsManualOperationAbandon: (operationId) =>
+      request('POST', `/importaciones/discogs/manual-operations/${encodeURIComponent(operationId)}/abandon`),
+
+    discogsManualSourceReconciliation: (source) =>
+      request('GET', `/importaciones/discogs/manual-sources/${encodeURIComponent(source)}/reconciliation`),
+
+    discogsManualExpectedCountUpdate: (source, payload) =>
+      request('PUT', `/importaciones/discogs/manual-sources/${encodeURIComponent(source)}/reconciliation/expected-count`, payload),
+
+    discogsManualReconciliationSnapshots: (source) =>
+      request('GET', `/importaciones/discogs/manual-sources/${encodeURIComponent(source)}/reconciliation/snapshots`),
 
     discogsManualCover: (preview) =>
       request('POST', '/importaciones/discogs/manual/cover', preview),
@@ -536,6 +567,27 @@ export const api = {
       }
     },
 
+    discogsManualSourceExcel: async (source) => {
+      const normalizedSource = String(source || '').trim().toUpperCase()
+      const res = await fetch(`${BASE}/importaciones/discogs/manual-sources/${encodeURIComponent(normalizedSource)}/excel`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      })
+      if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
+      const disposition = res.headers.get('Content-Disposition') || ''
+      if (!res.ok) throw new Error(await readResponseMessage(res, 'No se pudo generar el Excel de la fuente Discogs'))
+      const contentType = res.headers.get('Content-Type') || ''
+      if (!/spreadsheetml|octet-stream/i.test(contentType)) {
+        throw new Error(await readResponseMessage(res, 'La respuesta del Excel no es válida'))
+      }
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) throw new Error('El Excel se generó vacío.')
+      return {
+        blob,
+        filename: filenameFromContentDisposition(disposition) || `discogs-manual-${normalizedSource}.xlsx`,
+        contentDisposition: disposition,
+      }
+    },
+
     discogsManualBatchZip: async (batchId) => {
       const res = await fetch(`${BASE}/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/zip`, {
         headers: token() ? { Authorization: `Bearer ${token()}` } : {},
@@ -556,9 +608,11 @@ export const api = {
       }
     },
 
-    discogsManualBatchFinalize: (batchId, porcentajeSonograma) =>
+    discogsManualBatchFinalize: (batchId, porcentajeSonograma, confirmReconciliationWarnings = false) =>
       request('POST', `/importaciones/discogs/manual-batches/${encodeURIComponent(batchId)}/finalize`, {
         porcentajeSonograma,
+        confirmPendingOperations: confirmReconciliationWarnings,
+        confirmReconciliationWarnings,
       }),
 
     discogsDesdeExcel: async (file) => {

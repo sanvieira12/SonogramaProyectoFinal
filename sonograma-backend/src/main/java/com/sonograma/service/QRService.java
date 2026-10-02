@@ -20,19 +20,14 @@ public class QRService {
     private final QRCodeGenerator qrCodeGenerator;
     private final DiscoQrCopyService qrCopyService;
 
-    @Transactional
     public byte[] descargarQR(Long idDisco) {
         return descargarQR(idDisco, 1);
     }
 
-    @Transactional
     public byte[] descargarQR(Long idDisco, Integer copyNumber) {
         Disco disco = discoRepository.findById(idDisco)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", idDisco));
-        DiscoQrCopy copy = qrCopyService.synchronize(disco).stream()
-            .filter(candidate -> candidate.getCopyNumber().equals(copyNumber))
-            .findFirst()
-            .orElseThrow(() -> new RecursoNoEncontradoException("Copia QR", copyNumber.longValue()));
+        DiscoQrCopy copy = qrCopyService.findByCopyNumber(idDisco, copyNumber);
         return qrCodeGenerator.generarQRBytes(qrCopyService.content(disco, copy));
     }
 
