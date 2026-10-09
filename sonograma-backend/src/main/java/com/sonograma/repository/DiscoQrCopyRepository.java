@@ -41,6 +41,9 @@ public interface DiscoQrCopyRepository extends JpaRepository<DiscoQrCopy, Long> 
 
     List<DiscoQrCopy> findByIdDiscoAndEstadoOrderByCopyNumber(Long idDisco, EstadoCopiaDisco estado);
 
+    List<DiscoQrCopy> findByIdDiscoInAndEstadoOrderByIdDiscoAscCopyNumberAsc(
+            List<Long> idDisco, EstadoCopiaDisco estado);
+
     Optional<DiscoQrCopy> findByIdDiscoAndCopyNumber(Long idDisco, Integer copyNumber);
 
     boolean existsByIdDiscoAndManualDiscogsBatchIsNotNull(Long idDisco);

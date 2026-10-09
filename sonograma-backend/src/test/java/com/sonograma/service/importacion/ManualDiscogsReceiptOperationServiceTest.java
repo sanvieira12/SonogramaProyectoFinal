@@ -32,6 +32,7 @@ import com.sonograma.service.DiscogsManualBatchService;
 import com.sonograma.service.DiscogsManualBatchZipService;
 import com.sonograma.service.DiscoQrCopyService;
 import com.sonograma.service.DiscoService;
+import com.sonograma.service.StockValuationService;
 import com.sonograma.service.VentaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,6 +72,7 @@ class ManualDiscogsReceiptOperationServiceTest {
     @Autowired private DiscogsManualBatchZipService zipService;
     @Autowired private DiscoQrCopyService qrCopyService;
     @Autowired private DiscoService discoService;
+    @Autowired private StockValuationService stockValuationService;
     @Autowired private VentaService ventaService;
     @Autowired private DetalleVentaRepository detalleVentaRepository;
     @Autowired private VentaRepository ventaRepository;
@@ -138,6 +140,12 @@ class ManualDiscogsReceiptOperationServiceTest {
         assertThat(lineage.resultCopyIds()).containsExactly(received.getId());
         assertThat(operationService.findCreatingOperation(received.getId()).operationId())
                 .isEqualTo(java.util.UUID.fromString(preview.getOperationId()));
+        var valuation = stockValuationService.current();
+        assertThat(valuation.projectedUsedKnownUyu()).isEqualByComparingTo("1500");
+        assertThat(valuation.availableUsedCopies()).isEqualTo(1);
+        assertThat(valuation.usedAvailableCopiesWithoutPrice()).isZero();
+        assertThat(valuation.importedNewEur()).isZero();
+        assertThat(valuation.importedNewUyu()).isZero();
     }
 
     @Test

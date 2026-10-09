@@ -90,7 +90,10 @@ class DiscogsCatalogStockServiceTest {
     @Test
     void addingStockDoesNotAlterSoldQrCopies() {
         Disco disco = service.receive(command(456L, 2)).disco();
-        qrCopyService.reserveCopies(disco, 1, null, null);
+        DiscoQrCopy selectedCopy = copyRepository
+                .findByIdDiscoAndEstadoOrderByCopyNumber(disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE)
+                .getFirst();
+        qrCopyService.reserveCopies(disco, 1, selectedCopy.getId(), selectedCopy.getCodigoQr());
 
         service.receive(command(456L, 1));
 

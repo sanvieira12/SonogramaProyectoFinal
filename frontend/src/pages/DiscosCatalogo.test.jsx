@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import DiscosCatalogo from './DiscosCatalogo'
@@ -29,6 +29,8 @@ vi.mock('../services/discoService', () => ({
     discos: {
       porId: vi.fn(),
       copias: vi.fn(),
+      cambiarEstadoCopia: vi.fn(),
+      retirarCopia: vi.fn(),
       eliminarCopia: vi.fn(),
       previews: { listar: vi.fn().mockResolvedValue([]) },
     },
@@ -202,17 +204,22 @@ describe('Catalog permanent deletion flow', () => {
   })
 
   it('shows physical condition separately from the used category', async () => {
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 42, productId: 42, copyNumber: 1, precioVenta: 1100, condicionFisica: 'NM' }),
+    ])
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
-    await screen.findByText('Deletion Artist')
-    expect(screen.getAllByText('NM').length).toBeGreaterThan(0)
+    const artist = await screen.findByText('Deletion Artist')
+    const row = artist.closest('tr')
+    fireEvent.click(row)
+    await waitFor(() => expect(within(row).getByText('NM')).toBeInTheDocument())
 
-    fireEvent.click(screen.getAllByText('Deletion Artist')[0])
     expect(await screen.findByText('Categoría')).toBeInTheDocument()
     expect(screen.getAllByText('USADO').length).toBeGreaterThan(0)
   })
 
   it('labels an undefined catalogue price as Sin precio', async () => {
+    discoService.getAll.mockResolvedValue([{ ...disco, condicion: 'NUEVO' }])
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
     await screen.findByText('Deletion Artist')
@@ -220,9 +227,369 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.queryByText('UYU $0')).not.toBeInTheDocument()
   })
 
+  it('presents a one-copy NEW product commercially once and keeps its exact QR accessible', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+    const qrCopy = {
+      id: 1001,
+      copyNumber: 1,
+      codigoQr: 'new-one-qr-a',
+      estado: 'DISPONIBLE',
+    }
+    const product = catalogDisco({
+      idDisco: 1001,
+      artista: 'New Single Copy',
+      precioVenta: 1500,
+      condicionFisica: 'M',
+      cantidadCopias: 1,
+      totalCopias: 1,
+      qrCopies: [qrCopy],
+    })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ ...qrCopy, productId: 1001, precioVenta: 900, condicionFisica: 'VG', sourceCustomerCode: 'LO' }),
+    ])
+    api.discos.porId.mockResolvedValue(product)
+    api.qr.urlDescargaCopia.mockReturnValue('/api/qr/1001/1')
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('New Single Copy')).closest('tr')
+    expect(within(row).getByText('UYU $1.500')).toBeInTheDocument()
+    expect(within(row).getByText('NUEVO')).toBeInTheDocument()
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('new-copy-qr-section')
+    expect(await within(section).findByText('1 disponible · 1 QR retenido')).toBeInTheDocument()
+    expect(within(section).getByText('QR: new-one-qr-a')).toBeInTheDocument()
+    expect(within(section).queryByText('Precio')).not.toBeInTheDocument()
+    expect(within(section).queryByText('Condición')).not.toBeInTheDocument()
+    expect(within(section).queryByText('Procedencia')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('physical-copy-section')).not.toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 1' }))
+    expect(await screen.findByText('Mostrando copia 1 de 1')).toBeInTheDocument()
+    expect(screen.getAllByText('new-one-qr-a').length).toBeGreaterThan(0)
+  })
+
+  it('shows one product price and three available units for multi-copy NEW while preserving distinct QR selection', async () => {
+    const qrCopies = [1, 2, 3].map(number => ({
+      id: 1100 + number,
+      copyNumber: number,
+      codigoQr: `new-multi-qr-${number}`,
+      estado: 'DISPONIBLE',
+    }))
+    const product = catalogDisco({
+      idDisco: 1100,
+      artista: 'New Multi Copy',
+      precioVenta: 1500,
+      cantidadCopias: 3,
+      totalCopias: 3,
+      qrCopies,
+    })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue(qrCopies.map((copy, index) => copyDetail({
+      ...copy,
+      productId: 1100,
+      precioVenta: 1200 + (index * 300),
+      condicionFisica: index === 0 ? 'NM' : 'VG+',
+    })))
+    api.discos.porId.mockResolvedValue(product)
+    api.qr.urlDescargaCopia.mockImplementation((id, copyNumber) => `/api/qr/${id}/${copyNumber}`)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('New Multi Copy')).closest('tr')
+    expect(within(row).getByText('UYU $1.500')).toBeInTheDocument()
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('new-copy-qr-section')
+    expect(await screen.findByText('3 copias')).toBeInTheDocument()
+    expect(within(section).getByText('3 disponibles · 3 QR retenidos')).toBeInTheDocument()
+    expect(screen.queryByText('Precios por copia')).not.toBeInTheDocument()
+    expect(within(row).queryByText(/UYU \$1\.200.*\$1\.800/)).not.toBeInTheDocument()
+    expect(within(section).getByText('QR: new-multi-qr-1')).toBeInTheDocument()
+    expect(within(section).getByText('QR: new-multi-qr-2')).toBeInTheDocument()
+    expect(within(section).getByText('QR: new-multi-qr-3')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 2' }))
+    expect(await screen.findByText('Mostrando copia 2 de 3')).toBeInTheDocument()
+    expect(screen.getAllByText('new-multi-qr-2').length).toBeGreaterThan(0)
+    expect(api.qr.urlDescargaCopia).toHaveBeenCalledWith(1100, 2)
+  })
+
+  it('keeps sold and removed NEW QR history visible without treating retained rows as available inventory', async () => {
+    const qrCopies = [
+      { id: 1201, copyNumber: 1, codigoQr: 'new-history-available-1', estado: 'DISPONIBLE' },
+      { id: 1202, copyNumber: 2, codigoQr: 'new-history-available-2', estado: 'DISPONIBLE' },
+      { id: 1203, copyNumber: 3, codigoQr: 'new-history-sold', estado: 'VENDIDO' },
+      { id: 1204, copyNumber: 4, codigoQr: 'new-history-removed', estado: 'REMOVED' },
+    ]
+    const product = catalogDisco({
+      idDisco: 1200,
+      artista: 'New Retained History',
+      precioVenta: 1500,
+      cantidadCopias: 2,
+      totalCopias: 4,
+      qrCopies,
+    })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue(qrCopies.map((copy, index) => copyDetail({
+      ...copy,
+      productId: 1200,
+      precioVenta: index % 2 ? null : 800 + index,
+      condicionFisica: index % 2 ? null : 'VG',
+      dispositionReason: copy.estado === 'REMOVED' ? 'DAMAGED' : null,
+    })))
+    api.discos.porId.mockResolvedValue(product)
+    api.qr.urlDescargaCopia.mockImplementation((id, copyNumber) => `/api/qr/${id}/${copyNumber}`)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('New Retained History')).closest('tr')
+    expect(within(row).getByText('UYU $1.500')).toBeInTheDocument()
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('new-copy-qr-section')
+    expect(await screen.findByText('2 copias')).toBeInTheDocument()
+    expect(within(section).getByText('2 disponibles · 4 QR retenidos')).toBeInTheDocument()
+    expect(within(section).getByText('Vendida')).toBeInTheDocument()
+    expect(within(section).getByText('Retirada')).toBeInTheDocument()
+    expect(screen.queryByText('Precios por copia')).not.toBeInTheDocument()
+    expect(screen.queryByText('Condición por copia')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sin precio específico')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sin condición registrada')).not.toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 3' }))
+    expect(await screen.findByText('Mostrando copia 3 de 4')).toBeInTheDocument()
+    expect(screen.getAllByText('new-history-sold').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }))
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 4' }))
+    expect(await screen.findByText('Mostrando copia 4 de 4')).toBeInTheDocument()
+    expect(screen.getAllByText('new-history-removed').length).toBeGreaterThan(0)
+  })
+
+  it('preserves the existing per-copy commercial presentation for multi-copy USED products', async () => {
+    const product = catalogDisco({
+      idDisco: 1300,
+      artista: 'Used Multi Copy',
+      condicion: 'USADO',
+      precioVenta: 1500,
+      cantidadCopias: 2,
+      totalCopias: 2,
+    })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 1301, productId: 1300, copyNumber: 1, precioVenta: 1100, condicionFisica: 'NM' }),
+      copyDetail({ id: 1302, productId: 1300, copyNumber: 2, precioVenta: 925, condicionFisica: 'VG' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Used Multi Copy')).closest('tr')
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('physical-copy-section')
+    await waitFor(() => {
+      expect(within(row).getByText('UYU $925–$1.100')).toBeInTheDocument()
+      expect(within(row).getByText('2 condiciones')).toBeInTheDocument()
+    })
+    expect(within(section).getByText('Procedencia')).toBeInTheDocument()
+    expect(within(section).getByText('Precio')).toBeInTheDocument()
+    expect(within(section).getByText('Condición')).toBeInTheDocument()
+    expect(within(section).getByText('UYU $1.100')).toBeInTheDocument()
+    expect(within(section).getByText('NM')).toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByText('UYU $925')).toBeInTheDocument()
+    expect(within(section).getByText('VG')).toBeInTheDocument()
+    expect(screen.queryByTestId('new-copy-qr-section')).not.toBeInTheDocument()
+  })
+
+  it('summarizes only AVAILABLE USED copies while retaining sold and removed copy history', async () => {
+    const product = catalogDisco({
+      idDisco: 1350,
+      artista: 'Used Available Summary',
+      condicion: 'USADO',
+      precioVenta: 9999,
+      condicionFisica: 'PARENT',
+      cantidadCopias: 1,
+      totalCopias: 3,
+    })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 1351, productId: 1350, copyNumber: 1, precioVenta: 700, condicionFisica: 'VG' }),
+      copyDetail({ id: 1352, productId: 1350, copyNumber: 2, precioVenta: 1200, condicionFisica: 'NM', estado: 'VENDIDO' }),
+      copyDetail({ id: 1353, productId: 1350, copyNumber: 3, precioVenta: 2000, condicionFisica: 'M', estado: 'REMOVED' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Used Available Summary')).closest('tr')
+    expect(within(row).getAllByText('1 copia disponible · ver detalle')).toHaveLength(2)
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('physical-copy-section')
+    await waitFor(() => {
+      expect(within(row).getByText('UYU $700')).toBeInTheDocument()
+      expect(within(row).getByText('VG')).toBeInTheDocument()
+    })
+    expect(within(row).queryByText(/1\.200|2\.000/)).not.toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Copia 3' })).toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).getByText('UYU $1.200')).toBeInTheDocument()
+    expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0)
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 3' }))
+    expect(within(section).getByText('UYU $2.000')).toBeInTheDocument()
+    expect(within(section).getAllByText('Retirada').length).toBeGreaterThan(0)
+  })
+
+  it('retires one exact AVAILABLE USED copy and refreshes product and retained copy detail from backend authority', async () => {
+    const product = catalogDisco({
+      idDisco: 1360,
+      artista: 'Retained Removal Artist',
+      album: 'Retained Removal Album',
+      condicion: 'USADO',
+      cantidadCopias: 2,
+      totalCopias: 2,
+    })
+    const availableCopies = [
+      copyDetail({ id: 1361, productId: 1360, copyNumber: 1, codigoQr: 'used-qr-1', precioVenta: 700, condicionFisica: 'VG' }),
+      copyDetail({ id: 1362, productId: 1360, copyNumber: 2, codigoQr: 'used-qr-2', precioVenta: 900, condicionFisica: 'NM' }),
+    ]
+    const removedCopies = [
+      availableCopies[0],
+      copyDetail({
+        ...availableCopies[1],
+        estado: 'REMOVED',
+        dispositionReason: 'DAMAGED',
+        dispositionNote: 'Rayón profundo',
+        disposedAt: '2026-10-07T12:00:00',
+        disposedBy: 'admin-user',
+      }),
+    ]
+    const updatedProduct = {
+      ...product,
+      cantidadCopias: 1,
+      estado: 'DISPONIBLE',
+      qrCopies: removedCopies,
+    }
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias
+      .mockResolvedValueOnce(availableCopies)
+      .mockResolvedValueOnce(removedCopies)
+    api.discos.retirarCopia.mockResolvedValue(updatedProduct)
+    api.discos.porId.mockResolvedValue(updatedProduct)
+    api.qr.urlDescargaCopia.mockReturnValue('/api/qr/1360/2')
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Retained Removal Artist')).closest('tr')
+    expect(within(row).getByRole('button', { name: 'Retirá una copia USADO exacta desde el detalle' })).toBeDisabled()
+    fireEvent.click(row)
+
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(await within(row).findByText('UYU $700–$900')).toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    fireEvent.click(within(section).getByRole('button', { name: 'Retirar Copia 2' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: 'Retirar Copia 2' })).toBeInTheDocument()
+    expect(within(dialog).getByText(/Retained Removal Artist — Retained Removal Album/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Estado actual: Disponible/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/su QR y su historial se conservarán/i)).toBeInTheDocument()
+    const confirm = within(dialog).getByRole('button', { name: 'Confirmar retiro' })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('Motivo de retiro'), { target: { value: 'DAMAGED' } })
+    fireEvent.change(within(dialog).getByLabelText('Nota de retiro'), { target: { value: 'Rayón profundo' } })
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(api.discos.retirarCopia).toHaveBeenCalledWith(1360, 1362, {
+      reason: 'DAMAGED',
+      note: 'Rayón profundo',
+    }))
+    await waitFor(() => expect(api.discos.copias).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => {
+      expect(within(row).getByText('UYU $700')).toBeInTheDocument()
+      expect(within(row).getByText('VG')).toBeInTheDocument()
+    })
+    expect(within(section).getByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+    expect(within(section).getAllByText('Retirada').length).toBeGreaterThan(0)
+    expect(within(section).getAllByText('used-qr-2').length).toBeGreaterThan(0)
+    expect(within(section).getByText('Dañada')).toBeInTheDocument()
+    expect(within(section).getByText('Rayón profundo')).toBeInTheDocument()
+    expect(within(section).getByText('admin-user')).toBeInTheDocument()
+    expect(within(section).queryByRole('button', { name: /Retirar Copia 2/ })).not.toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Ver QR de Copia 2' }))
+    expect(await screen.findByText('Mostrando copia 2 de 2')).toBeInTheDocument()
+    expect(screen.getAllByText('used-qr-2').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Las copias USADO se retiran desde su detalle/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Eliminar copia' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Marcar disponible|Marcar vendida/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps authoritative USED state unchanged when retained removal is rejected', async () => {
+    const product = catalogDisco({
+      idDisco: 1370,
+      artista: 'Removal Conflict Artist',
+      condicion: 'USADO',
+      cantidadCopias: 1,
+      totalCopias: 1,
+    })
+    const available = copyDetail({ id: 1371, productId: 1370, copyNumber: 1, codigoQr: 'conflict-qr' })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([available])
+    api.discos.retirarCopia.mockRejectedValue(new Error('No se puede retirar una copia mientras el disco tenga una reserva activa.'))
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Removal Conflict Artist')).closest('tr')
+    fireEvent.click(row)
+    const section = await screen.findByTestId('physical-copy-section')
+    fireEvent.click(await within(section).findByRole('button', { name: 'Retirar Copia 1' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Motivo de retiro'), { target: { value: 'OTHER' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar retiro' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('reserva activa')
+    expect(api.discos.copias).toHaveBeenCalledTimes(1)
+    expect(within(section).getAllByText('Disponible').length).toBeGreaterThan(0)
+    expect(within(section).getByRole('button', { name: 'Retirar Copia 1' })).toBeInTheDocument()
+  })
+
+  it('does not offer retained removal for SOLD or REMOVED copies and shows retained removal metadata', async () => {
+    const product = catalogDisco({ idDisco: 1380, artista: 'Historical Copies', condicion: 'USADO', cantidadCopias: 0, totalCopias: 2 })
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 1381, productId: 1380, copyNumber: 1, estado: 'VENDIDO' }),
+      copyDetail({
+        id: 1382,
+        productId: 1380,
+        copyNumber: 2,
+        estado: 'REMOVED',
+        dispositionReason: 'RETURNED_TO_PROVIDER',
+        dispositionNote: 'Devolución acordada',
+        disposedAt: '2026-10-07T12:00:00',
+        disposedBy: 'admin-user',
+      }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Historical Copies')).closest('tr')
+    fireEvent.click(row)
+    const section = await screen.findByTestId('physical-copy-section')
+    expect(await within(section).findByRole('heading', { name: 'Copia 1' })).toBeInTheDocument()
+    expect(within(section).queryByRole('button', { name: /Retirar Copia/ })).not.toBeInTheDocument()
+    fireEvent.click(within(section).getByRole('button', { name: 'Copia 2' }))
+    expect(within(section).queryByRole('button', { name: /Retirar Copia/ })).not.toBeInTheDocument()
+    expect(within(section).getByText('Devuelta al proveedor')).toBeInTheDocument()
+    expect(within(section).getByText('Devolución acordada')).toBeInTheDocument()
+    expect(within(section).getByText('admin-user')).toBeInTheDocument()
+  })
+
   it('deletes one selected physical copy from the QR management dialog', async () => {
     const withCopy = {
       ...disco,
+      condicion: 'NUEVO',
       qrCopies: [{ id: 77, copyNumber: 1, codigoQr: 'copy-77', estado: 'DISPONIBLE' }],
       totalCopias: 1,
     }
@@ -358,6 +725,7 @@ describe('Catalog permanent deletion flow', () => {
     const firstProduct = catalogDisco({
       idDisco: 501,
       artista: 'Producto del batch 1',
+      condicion: 'USADO',
       manualBatchPrecioVenta: 1750,
       manualBatchCondicionFisica: 'VG+',
     })
@@ -372,6 +740,9 @@ describe('Catalog permanent deletion flow', () => {
       },
     ])
     discoService.getPorFuenteImportacionDiscogs.mockResolvedValue([firstProduct])
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 5011, productId: 501, copyNumber: 1, precioVenta: 1750, condicionFisica: 'VG+' }),
+    ])
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
 
@@ -385,9 +756,11 @@ describe('Catalog permanent deletion flow', () => {
       .toHaveBeenCalledWith('manual:customer:JPH'))
     expect(await screen.findByTestId('manual-batch-summary'))
       .toHaveTextContent('JPH · 3 copias físicas · En curso')
-    expect(screen.getByText('Producto del batch 1')).toBeInTheDocument()
-    expect(screen.getByText('VG+')).toBeInTheDocument()
-    expect(screen.getByText('UYU $1.750')).toBeInTheDocument()
+    const artist = screen.getByText('Producto del batch 1')
+    expect(artist).toBeInTheDocument()
+    fireEvent.mouseEnter(artist.closest('tr'))
+    expect((await screen.findAllByText('VG+')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('UYU $1.750').length).toBeGreaterThan(0)
     expect(screen.queryByText('Producto del batch 2')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Descargar ZIP' })).toBeInTheDocument()
   })
@@ -519,6 +892,7 @@ describe('Catalog permanent deletion flow', () => {
       artista: 'Z@P',
       album: 'Palvince EP',
       genero: 'Tech House',
+      condicion: 'USADO',
     })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([
       { type: 'MANUAL', key: 'manual:51', label: 'SV3 · 1 copias físicas · En curso', customerCode: 'SV3', status: 'OPEN', batchId: 51, copyCount: 1 },
@@ -844,7 +1218,7 @@ describe('Catalog permanent deletion flow', () => {
   })
 
   it('defaults to the active LO copy, labels the match, and shows retained removal details', async () => {
-    const filtered = catalogDisco({ idDisco: 801, artista: 'Shared LO and SV3 release' })
+    const filtered = catalogDisco({ idDisco: 801, artista: 'Shared LO and SV3 release', condicion: 'USADO' })
     discoService.listarFuentesImportacionDiscogs.mockResolvedValue([{
       type: 'MANUAL', key: 'manual:customer:LO', customerCode: 'LO', status: 'OPEN', batchId: 15, copyCount: 1,
     }])
@@ -878,6 +1252,7 @@ describe('Catalog permanent deletion flow', () => {
     discoService.getAll.mockResolvedValue([catalogDisco({
       idDisco: 802,
       artista: 'Fallback release',
+      condicion: 'USADO',
       precioVenta: 9999,
       condicionFisica: 'MINT PRODUCT',
     })])
@@ -891,10 +1266,17 @@ describe('Catalog permanent deletion flow', () => {
 
     render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
     const artist = await screen.findByText('Fallback release')
-    fireEvent.click(artist.closest('tr'))
+    const row = artist.closest('tr')
+    fireEvent.click(row)
 
     const section = await screen.findByTestId('physical-copy-section')
     expect(await within(section).findByRole('heading', { name: 'Copia 2' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(within(row).getByText('Sin precio específico')).toBeInTheDocument()
+      expect(within(row).getByText('Sin condición registrada')).toBeInTheDocument()
+    })
+    expect(within(row).queryByText('UYU $9.999')).not.toBeInTheDocument()
+    expect(within(row).queryByText('MINT PRODUCT')).not.toBeInTheDocument()
     expect(within(section).getByText('Sin procedencia')).toBeInTheDocument()
     expect(within(section).getByText('Sin precio específico')).toBeInTheDocument()
     expect(within(section).getByText('Sin condición registrada')).toBeInTheDocument()
@@ -1001,8 +1383,8 @@ describe('Catalog permanent deletion flow', () => {
   })
 
   it('resets selection when the product changes and reuses cached details when returning', async () => {
-    const first = catalogDisco({ idDisco: 901, artista: 'First product' })
-    const second = catalogDisco({ idDisco: 902, artista: 'Second product' })
+    const first = catalogDisco({ idDisco: 901, artista: 'First product', condicion: 'USADO' })
+    const second = catalogDisco({ idDisco: 902, artista: 'Second product', condicion: 'USADO' })
     discoService.getAll.mockResolvedValue([first, second])
     api.discos.copias.mockImplementation(id => Promise.resolve(id === 901
       ? [copyDetail({ id: 501, productId: 901, copyNumber: 1 }), copyDetail({ id: 502, productId: 901, copyNumber: 2, sourceCustomerCode: 'SV3', normalizedSourceCustomerCode: 'SV3' })]
@@ -1022,6 +1404,41 @@ describe('Catalog permanent deletion flow', () => {
     fireEvent.click(screen.getByText('First product').closest('tr'))
     await waitFor(() => expect(within(screen.getByTestId('physical-copy-section')).getByRole('heading', { name: 'Copia 1' })).toBeInTheDocument())
     expect(api.discos.copias.mock.calls.filter(([id]) => id === 901)).toHaveLength(1)
+  })
+
+  it('ignores an older copy-detail response after a newer authoritative refresh', async () => {
+    let resolveOlderRequest
+    const availableCopy = copyDetail({ id: 1501, productId: 42, copyNumber: 1, estado: 'DISPONIBLE' })
+    const soldCopy = copyDetail({ ...availableCopy, estado: 'VENDIDO' })
+    const productWithCopy = { ...disco, qrCopies: [availableCopy] }
+    const soldProduct = { ...productWithCopy, cantidadCopias: 0, estado: 'VENDIDO', qrCopies: [soldCopy] }
+    api.discos.copias
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOlderRequest = resolve }))
+      .mockResolvedValueOnce([soldCopy])
+    api.discos.porId.mockResolvedValue(productWithCopy)
+    api.discos.cambiarEstadoCopia.mockResolvedValue(soldProduct)
+    api.qr.urlDescargaCopia.mockReturnValue('/api/qr/42/1')
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Deletion Artist')).closest('tr')
+    fireEvent.mouseEnter(row)
+    fireEvent.click(row)
+    fireEvent.click(within(row).getByRole('button', { name: 'Ver QR' }))
+    expect(await screen.findByText('Mostrando copia 1 de 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Marcar vendida' }))
+
+    await waitFor(() => expect(api.discos.copias).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }))
+    const section = await screen.findByTestId('physical-copy-section')
+    await waitFor(() => expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0))
+
+    await act(async () => {
+      resolveOlderRequest([availableCopy])
+      await Promise.resolve()
+    })
+
+    expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0)
+    expect(within(section).queryByRole('button', { name: 'Retirar Copia 1' })).not.toBeInTheDocument()
   })
 
   it('uses the same physical-copy semantics in the mobile slide-over', async () => {

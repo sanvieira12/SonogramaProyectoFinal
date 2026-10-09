@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api/sonograma'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api, FINANCIAL_DATA_CHANGED_EVENT } from '../api/sonograma'
 
 const EMPTY = {
   eurUyuRate: '49.5',
@@ -32,6 +32,19 @@ const CONDITION_FILTERS = [
   { value: 'NUEVO', label: 'Nuevos' },
   { value: 'USADO', label: 'Usados' },
 ]
+
+const EMPTY_VALUATION = {
+  importedNewEur: 0,
+  importedNewUyu: 0,
+  projectedNewUyu: 0,
+  projectedUsedKnownUyu: 0,
+  availableNewCopies: 0,
+  availableUsedCopies: 0,
+  usedAvailableCopiesWithoutPrice: 0,
+  newAvailableCopiesWithoutSalePrice: 0,
+  newAvailableCopiesWithoutAcquisitionCost: 0,
+  newAvailableCopiesWithUnknownAcquisitionCurrency: 0,
+}
 
 function toForm(settings) {
   if (!settings) return EMPTY
@@ -98,6 +111,10 @@ function formatDecimal(value, maximumFractionDigits = 6) {
   return number.toLocaleString('es-UY', {
     maximumFractionDigits,
   })
+}
+
+function copiesLabel(count) {
+  return `${count} ${count === 1 ? 'copia' : 'copias'}`
 }
 
 function dateLabel(value) {
@@ -237,6 +254,11 @@ export default function PricingSettingsPage() {
   const [search, setSearch] = useState('')
   const [conditionFilter, setConditionFilter] = useState('TODOS')
   const [supplierSort, setSupplierSort] = useState('none')
+  const [valuation, setValuation] = useState(EMPTY_VALUATION)
+  const [valuationLoading, setValuationLoading] = useState(true)
+  const [valuationError, setValuationError] = useState('')
+  const valuationRequestRef = useRef(0)
+  const previewRequestRef = useRef(0)
 
   function syncRows(nextRows) {
     setPreview(nextRows)
@@ -244,6 +266,40 @@ export default function PricingSettingsPage() {
     const nextIds = new Set(nextRows.map(row => row.idDisco))
     setSelectedIds(current => new Set([...current].filter(id => nextIds.has(id))))
   }
+
+  const refreshValuation = useCallback(async () => {
+    const requestId = ++valuationRequestRef.current
+    setValuationLoading(true)
+    setValuationError('')
+    try {
+      const data = await api.pricing.stockValuation()
+      if (requestId !== valuationRequestRef.current) return false
+      setValuation({ ...EMPTY_VALUATION, ...data })
+      return true
+    } catch (err) {
+      if (requestId === valuationRequestRef.current) {
+        setValuationError(err.message || 'No se pudo actualizar la valoración de Stock.')
+      }
+      return false
+    } finally {
+      if (requestId === valuationRequestRef.current) setValuationLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const handleValuationRefresh = () => {
+      if (active) void refreshValuation()
+    }
+
+    queueMicrotask(handleValuationRefresh)
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, handleValuationRefresh)
+    return () => {
+      active = false
+      valuationRequestRef.current += 1
+      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, handleValuationRefresh)
+    }
+  }, [refreshValuation])
 
   useEffect(() => {
     let cancelled = false
@@ -272,11 +328,10 @@ export default function PricingSettingsPage() {
 
   const totals = useMemo(() => {
     return preview.reduce((acc, row) => {
-      acc.total += Number(row.finalSalePriceUyu || 0)
       acc.auto += row.pricingMode === 'AUTO' ? 1 : 0
       acc.manual += row.pricingMode === 'MANUAL' ? 1 : 0
       return acc
-    }, { total: 0, auto: 0, manual: 0 })
+    }, { auto: 0, manual: 0 })
   }, [preview])
 
   const normalizedSearch = normalizeSearchValue(search)
@@ -340,18 +395,20 @@ export default function PricingSettingsPage() {
       return false
     }
 
+    const requestId = ++previewRequestRef.current
     setPreviewing(true)
     setError('')
     try {
       const data = await api.pricing.preview(validation.payload)
+      if (requestId !== previewRequestRef.current) return false
       syncRows(data.rows || [])
       if (successMessage) setMessage(successMessage)
       return true
     } catch (err) {
-      setError(err.message)
+      if (requestId === previewRequestRef.current) setError(err.message)
       return false
     } finally {
-      setPreviewing(false)
+      if (requestId === previewRequestRef.current) setPreviewing(false)
     }
   }
 
@@ -393,7 +450,7 @@ export default function PricingSettingsPage() {
     setMessage('')
     try {
       const response = await api.pricing.apply(validation.payload, scope, [])
-      await refreshPreview()
+      await Promise.all([refreshPreview(), refreshValuation()])
       setMessage(`Cambios aplicados correctamente a ${response.updatedCount} discos.`)
     } catch (err) {
       setError(err.message)
@@ -419,7 +476,7 @@ export default function PricingSettingsPage() {
     setMessage('')
     try {
       const response = await api.pricing.apply(validation.payload, 'selected', ids)
-      await refreshPreview()
+      await Promise.all([refreshPreview(), refreshValuation()])
       setMessage(`Cambios aplicados correctamente a ${response.updatedCount} discos.`)
       setSelectedDialogOpen(false)
     } catch (err) {
@@ -438,10 +495,13 @@ export default function PricingSettingsPage() {
       const next = toForm(settings)
       setForm(next)
       setFieldErrors({})
-      await refreshPreview({
-        nextForm: next,
-        successMessage: 'Configuración restablecida a valores predeterminados.',
-      })
+      await Promise.all([
+        refreshPreview({
+          nextForm: next,
+          successMessage: 'Configuración restablecida a valores predeterminados.',
+        }),
+        refreshValuation(),
+      ])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -481,6 +541,7 @@ export default function PricingSettingsPage() {
             }
           : item
       )))
+      await refreshValuation()
       setMarkupFeedback(current => ({
         ...current,
         [row.idDisco]: { type: 'success', message: 'Markup actualizado correctamente.' },
@@ -546,18 +607,71 @@ export default function PricingSettingsPage() {
         ) : null}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-3" aria-label="Valoración actual de Stock">
         <div className="card p-4">
-          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Discos en la vista previa</p>
+          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor total importado — Nuevos</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
+            {valuationLoading ? '…' : `EUR ${formatDecimal(valuation.importedNewEur, 2)}`}
+          </p>
+          <p className="mt-1 text-lg font-semibold text-slate-700 dark:text-stone-300">
+            {valuationLoading ? ' ' : `UYU $${formatDecimal(valuation.importedNewUyu, 2)}`}
+          </p>
+          <p className="mt-2 text-xs text-slate-500 dark:text-stone-500">Costos unitarios persistidos · sin envío ni conversión entre monedas</p>
+          {!valuationLoading && valuation.newAvailableCopiesWithoutAcquisitionCost > 0 ? (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {copiesLabel(valuation.newAvailableCopiesWithoutAcquisitionCost)} NUEVA{valuation.newAvailableCopiesWithoutAcquisitionCost === 1 ? '' : 'S'} disponible{valuation.newAvailableCopiesWithoutAcquisitionCost === 1 ? '' : 's'} sin costo de adquisición
+            </p>
+          ) : null}
+          {!valuationLoading && valuation.newAvailableCopiesWithUnknownAcquisitionCurrency > 0 ? (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {copiesLabel(valuation.newAvailableCopiesWithUnknownAcquisitionCurrency)} NUEVA{valuation.newAvailableCopiesWithUnknownAcquisitionCurrency === 1 ? '' : 'S'} excluida{valuation.newAvailableCopiesWithUnknownAcquisitionCurrency === 1 ? '' : 's'} por moneda no identificada
+            </p>
+          ) : null}
+        </div>
+        <div className="card p-4">
+          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor proyectado — Nuevos</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
+            {valuationLoading ? '…' : `UYU $${formatDecimal(valuation.projectedNewUyu, 2)}`}
+          </p>
+          <p className="mt-2 text-xs text-slate-500 dark:text-stone-500">
+            {copiesLabel(valuation.availableNewCopies)} disponibles · precio actual de Catálogo
+          </p>
+          {!valuationLoading && valuation.newAvailableCopiesWithoutSalePrice > 0 ? (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {copiesLabel(valuation.newAvailableCopiesWithoutSalePrice)} NUEVA{valuation.newAvailableCopiesWithoutSalePrice === 1 ? '' : 'S'} disponible{valuation.newAvailableCopiesWithoutSalePrice === 1 ? '' : 's'} sin precio de venta
+            </p>
+          ) : null}
+        </div>
+        <div className="card p-4">
+          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor proyectado — Usados</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
+            {valuationLoading ? '…' : `UYU $${formatDecimal(valuation.projectedUsedKnownUyu, 2)}`}
+          </p>
+          <p className="mt-2 text-xs text-slate-500 dark:text-stone-500">
+            {copiesLabel(valuation.availableUsedCopies)} disponibles · suma de precios específicos conocidos
+          </p>
+          {!valuationLoading && valuation.usedAvailableCopiesWithoutPrice > 0 ? (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {copiesLabel(valuation.usedAvailableCopiesWithoutPrice)} disponible{valuation.usedAvailableCopiesWithoutPrice === 1 ? '' : 's'} sin precio específico, excluida{valuation.usedAvailableCopiesWithoutPrice === 1 ? '' : 's'} del valor
+            </p>
+          ) : null}
+        </div>
+      </section>
+
+      {valuationError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {valuationError}
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="card p-4">
+          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Discos en la vista previa de precios</p>
           <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{preview.length}</p>
         </div>
         <div className="card p-4">
           <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Precios automáticos y manuales</p>
           <p className="mt-2 text-sm text-slate-700 dark:text-stone-300">{totals.auto} automáticos · {totals.manual} manuales</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor total proyectado</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">UYU ${formatDecimal(totals.total)}</p>
         </div>
       </section>
 

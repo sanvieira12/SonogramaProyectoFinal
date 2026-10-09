@@ -16,6 +16,7 @@ import com.sonograma.repository.DiscogsImportJobRepository;
 import com.sonograma.repository.DiscogsImportRowRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoQrCopyService;
+import com.sonograma.service.DiscoEstadoService;
 import com.sonograma.service.DiscogsCatalogStockService;
 import com.sonograma.service.PreVentaCodeMatcher;
 import com.sonograma.service.ImportMetadataNormalizer;
@@ -59,6 +60,7 @@ public class DiscogsImportJobService {
     private final DiscoQrCopyService qrCopyService;
     private final PreVentaCodeMatcher preVentaCodeMatcher;
     private final DiscogsCatalogStockService catalogStockService;
+    private final DiscoEstadoService discoEstadoService;
     private final ExecutorService jobExecutor = Executors.newSingleThreadExecutor();
 
     public DiscogsImportJobDTO createJob(MultipartFile file) {
@@ -315,7 +317,7 @@ public class DiscogsImportJobService {
                 updateDisco(row.getImportedCatalogProduct(), row);
                 Disco disco = discoRepository.save(row.getImportedCatalogProduct());
                 preVentaCodeMatcher.linkPendingPreSales(disco);
-                qrCopyService.synchronize(disco);
+                synchronizePhysicalInventoryAuthority(disco);
                 storeOptionalTracks(row, disco, parseTracks(row.getTracksJson()));
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
@@ -326,6 +328,11 @@ public class DiscogsImportJobService {
             }
             DiscogsCatalogStockService.ReceiptResult receipt = catalogStockService.receive(toReceiptCommand(row));
             Disco disco = receipt.disco();
+            qrCopyService.initializeCreatedUsedCopyCommercialData(
+                    disco,
+                    receipt.createdCopies(),
+                    row.getManualPriceUyu(),
+                    normalizePhysicalCondition(row.getManualCondition()));
             storeOptionalTracks(row, disco, parseTracks(row.getTracksJson()));
             row.setImportedCatalogProduct(disco);
             row.setStatus(DiscogsImportRowStatus.IMPORTED);
@@ -793,8 +800,7 @@ public class DiscogsImportJobService {
                 updateDisco(row.getImportedCatalogProduct(), row);
                 Disco disco = discoRepository.save(row.getImportedCatalogProduct());
                 preVentaCodeMatcher.linkPendingPreSales(disco);
-                qrCopyService.synchronize(disco);
-                discoRepository.save(disco);
+                synchronizePhysicalInventoryAuthority(disco);
                 storeOptionalTracks(row, disco, result.tracks());
                 row.setStatus(DiscogsImportRowStatus.IMPORTED);
                 row.setCatalogImportStatus(DiscogsCatalogImportStatus.IMPORTED);
@@ -1074,6 +1080,15 @@ public class DiscogsImportJobService {
         }
         disco.setTipoDisco(parseFormat(row.getFormat()));
         disco.setNotas(mergeNotes(disco.getNotas(), catalogNotes(row)));
+    }
+
+    private void synchronizePhysicalInventoryAuthority(Disco disco) {
+        if (qrCopyService.hasCopyInventory(disco.getIdDisco())) {
+            disco.setCantidadCopias(Math.toIntExact(qrCopyService.countAvailableCopies(disco.getIdDisco())));
+        }
+        qrCopyService.synchronize(disco);
+        discoEstadoService.aplicar(disco);
+        discoRepository.save(disco);
     }
 
     private String normalizePhysicalCondition(String value) {

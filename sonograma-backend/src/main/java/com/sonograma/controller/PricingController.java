@@ -2,6 +2,7 @@ package com.sonograma.controller;
 
 import com.sonograma.dto.*;
 import com.sonograma.service.CatalogPricingService;
+import com.sonograma.service.StockValuationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 public class PricingController {
 
     private final CatalogPricingService catalogPricingService;
+    private final StockValuationService stockValuationService;
 
     @GetMapping("/settings")
     public ResponseEntity<PricingSettingsDTO> settings() {
@@ -27,6 +29,11 @@ public class PricingController {
     @PostMapping("/preview")
     public ResponseEntity<PricingPreviewResponseDTO> preview(@Valid @RequestBody PricingPreviewRequestDTO request) {
         return ResponseEntity.ok(catalogPricingService.preview(request.settings()));
+    }
+
+    @GetMapping("/stock-valuation")
+    public ResponseEntity<StockValuationDTO> stockValuation() {
+        return ResponseEntity.ok(stockValuationService.current());
     }
 
     @PostMapping("/apply")

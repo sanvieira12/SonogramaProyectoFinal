@@ -18,6 +18,8 @@ import com.sonograma.repository.PagoDeudaRepository;
 import com.sonograma.repository.VentaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -66,7 +68,7 @@ class ResumenFinancieroMensualServiceTest {
     }
 
     @Test
-    void calculaResumenSeparandoIngresosGananciaYBalance() {
+    void calculaResumenSeparandoIngresosGananciaGastosYBalance() {
         var result = service.obtener("2026-06");
 
         assertThat(result.getPeriodo()).isEqualTo("2026-06");
@@ -79,10 +81,40 @@ class ResumenFinancieroMensualServiceTest {
         assertThat(result.getIngresosRegistrados()).isEqualByComparingTo("750.00");
         assertThat(result.getGananciaItems()).isEqualByComparingTo("600.00");
         assertThat(result.getGastos()).isEqualByComparingTo("3100.00");
-        assertThat(result.getBalanceFinal()).isEqualByComparingTo("750.00");
-        assertThat(result.getBalanceFinal()).isEqualByComparingTo(result.getIngresosRegistrados());
+        assertThat(result.getBalanceFinal()).isEqualByComparingTo("-2350.00");
         assertThat(result.getItemsGananciaNoDisponible()).isEqualTo(1);
         assertThat(result.getAdvertenciaGanancia()).contains("1 ítem");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+            "ingresos mayores que gastos, 100000, 25000, 75000",
+            "gastos mayores que ingresos, 20000, 30000, -10000",
+            "sin gastos, 100000, 0, 100000",
+            "sin ingresos pero con gastos, 0, 25000, -25000",
+            "sin ingresos ni gastos, 0, 0, 0"
+    })
+    void calculaBalanceFinalRestandoGastosAIngresos(
+            String escenario, String ingresos, String gastos, String balanceEsperado) {
+        BigDecimal ingresosValue = new BigDecimal(ingresos);
+        BigDecimal gastosValue = new BigDecimal(gastos);
+        when(ventaRepository.findAllForProfitPeriod(any(), any())).thenReturn(List.of());
+        when(pagoRepository.findEntre(any(), any())).thenReturn(ingresosValue.signum() == 0
+                ? List.of()
+                : List.of(PagoDeuda.builder().monto(ingresosValue).fechaPago(LocalDate.of(2026, 6, 20)).build()));
+        when(gastoRepository.findByFechaBetweenOrderByFechaAscIdGastoAsc(any(), any())).thenReturn(gastosValue.signum() == 0
+                ? List.of()
+                : List.of(GastoTienda.builder().fecha(LocalDate.of(2026, 6, 20)).monto(gastosValue).build()));
+
+        var result = service.obtener("2026-06");
+
+        assertThat(result.getIngresosRegistrados()).as(escenario).isEqualByComparingTo(ingresosValue);
+        assertThat(result.getGastos()).as(escenario).isEqualByComparingTo(gastosValue);
+        assertThat(result.getBalanceFinal()).as(escenario).isEqualByComparingTo(balanceEsperado);
+        assertThat(result.getCantidadVentas()).as(escenario).isZero();
+        assertThat(result.getCantidadItems()).as(escenario).isZero();
+        assertThat(result.getTotalVentas()).as(escenario).isEqualByComparingTo("0.00");
+        assertThat(result.getGananciaItems()).as(escenario).isEqualByComparingTo("0.00");
     }
 
     @Test

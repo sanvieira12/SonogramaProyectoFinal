@@ -727,7 +727,7 @@ public class VentaService {
 
     private void validarStockDisponible(Disco disco, int cantidad) {
         int copias = (int) discoQrCopyService.countAvailableCopies(disco.getIdDisco());
-        if (copias < cantidad || disco.getEstado() == EstadoDisco.SIN_STOCK) {
+        if (copias < cantidad) {
             throw new NegocioException("El disco '" + disco.getArtista() + " – " + disco.getAlbum() + "' está sin stock");
         }
     }
@@ -748,12 +748,33 @@ public class VentaService {
     }
 
     private void restaurarStockVenta(Venta venta) {
+        validarRestauracionFisicaIdentificable(venta);
         if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
             venta.getDetalles().stream()
                     .filter(d -> d.getDisco() != null)
                     .forEach(this::restaurarStock);
         } else if (venta.getDisco() != null) {
             restaurarStock(venta.getDisco(), 1);
+        }
+    }
+
+    private void validarRestauracionFisicaIdentificable(Venta venta) {
+        if (venta.getDetalles() != null && !venta.getDetalles().isEmpty()) {
+            boolean ambiguousPhysicalStock = venta.getDetalles().stream()
+                    .filter(detalle -> detalle.getDisco() != null)
+                    .anyMatch(detalle -> discoQrCopyService.hasCopyInventory(detalle.getDisco().getIdDisco())
+                            && (detalle.getCopyIdsSnapshot() == null
+                            || detalle.getCopyIdsSnapshot().isBlank()));
+            if (ambiguousPhysicalStock) {
+                throw new com.sonograma.exception.ConflictoNegocioException(
+                        "No se puede restaurar el stock con seguridad: la venta no identifica la copia física exacta.");
+            }
+            return;
+        }
+        if (venta.getDisco() != null
+                && discoQrCopyService.hasCopyInventory(venta.getDisco().getIdDisco())) {
+            throw new com.sonograma.exception.ConflictoNegocioException(
+                    "No se puede restaurar el stock con seguridad: la venta no identifica la copia física exacta.");
         }
     }
 
@@ -770,7 +791,7 @@ public class VentaService {
             restaurarStock(detalle.getDisco(), cantidadDetalle(detalle));
             return;
         }
-        discoQrCopyService.restoreCopies(detalle.getCopyIdsSnapshot());
+        discoQrCopyService.restoreCopies(detalle.getDisco(), detalle.getCopyIdsSnapshot());
         discoEstadoService.aplicar(detalle.getDisco());
         discoRepository.save(detalle.getDisco());
     }

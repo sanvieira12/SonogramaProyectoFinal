@@ -383,6 +383,77 @@ class DiscoPermanentDeletionIntegrationTest {
     }
 
     @Test
+    void aggregateNewDecrementRetainsPhysicalRowsForThreeToTwoAndOneToZero() {
+        Disco threeCopies = saveDisco("NEW-AGGREGATE-3");
+        threeCopies.setCondicion(CondicionDisco.NUEVO);
+        threeCopies.setCantidadCopias(3);
+        discoRepository.saveAndFlush(threeCopies);
+        DiscoQrCopy first = saveCopy(threeCopies, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy second = saveCopy(threeCopies, 2, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy third = saveCopy(threeCopies, 3, EstadoCopiaDisco.DISPONIBLE);
+
+        DiscoResponseDTO afterThreeToTwo = discoService.actualizarCopias(threeCopies.getIdDisco(), 2);
+
+        assertThat(afterThreeToTwo.getCantidadCopias()).isEqualTo(2);
+        assertThat(afterThreeToTwo.getTotalCopias()).isEqualTo(3);
+        assertThat(afterThreeToTwo.getEstado()).isEqualTo("DISPONIBLE");
+        assertThat(discoQrCopyRepository.findById(first.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoQrCopyRepository.findById(second.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoQrCopyRepository.findById(third.getId())).get().satisfies(retained -> {
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getDispositionReason()).isEqualTo(DisposicionCopiaReason.REMOVED_FROM_INVENTORY);
+        });
+        assertThat(discoRepository.findById(threeCopies.getIdDisco())).get()
+                .extracting(Disco::getCodigoQr).isEqualTo(first.getCodigoQr());
+
+        Disco oneCopy = saveDisco("NEW-AGGREGATE-1");
+        oneCopy.setCondicion(CondicionDisco.NUEVO);
+        discoRepository.saveAndFlush(oneCopy);
+        DiscoQrCopy only = saveCopy(oneCopy, 1, EstadoCopiaDisco.DISPONIBLE);
+
+        DiscoResponseDTO afterOneToZero = discoService.actualizarCopias(oneCopy.getIdDisco(), 0);
+
+        assertThat(afterOneToZero.getCantidadCopias()).isZero();
+        assertThat(afterOneToZero.getTotalCopias()).isEqualTo(1);
+        assertThat(afterOneToZero.getEstado()).isEqualTo("SIN_STOCK");
+        assertThat(discoQrCopyRepository.findById(only.getId())).get().satisfies(retained -> {
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getCodigoQr()).isEqualTo(only.getCodigoQr());
+        });
+        assertThat(discoRepository.findById(oneCopy.getIdDisco())).get()
+                .extracting(Disco::getCodigoQr).isEqualTo(only.getCodigoQr());
+    }
+
+    @Test
+    void usedAggregateDecrementAndDerivedProductStateBypassesAreRejected() {
+        Disco used = saveDisco("USED-AGGREGATE-BLOCK");
+        used.setCondicion(CondicionDisco.USADO);
+        used.setCantidadCopias(2);
+        discoRepository.saveAndFlush(used);
+        DiscoQrCopy first = saveCopy(used, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy second = saveCopy(used, 2, EstadoCopiaDisco.DISPONIBLE);
+
+        assertThatThrownBy(() -> discoService.actualizarCopias(used.getIdDisco(), 1))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("copia física exacta");
+        assertThatThrownBy(() -> discoService.cambiarEstado(used.getIdDisco(), EstadoDisco.VENDIDO))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("se deriva de sus copias físicas");
+        assertThatThrownBy(() -> discoService.cambiarEstado(used.getIdDisco(), EstadoDisco.SIN_STOCK))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("se deriva de sus copias físicas");
+
+        assertThat(discoQrCopyRepository.findById(first.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoQrCopyRepository.findById(second.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoRepository.findById(used.getIdDisco())).get()
+                .extracting(Disco::getCantidadCopias).isEqualTo(2);
+    }
+
+    @Test
     void copyFromAnotherProductIsRejectedWithoutMutation() {
         Disco firstProduct = saveDisco("COPY-OWNER-A");
         Disco secondProduct = saveDisco("COPY-OWNER-B");
@@ -432,6 +503,24 @@ class DiscoPermanentDeletionIntegrationTest {
         discoService.eliminarCopia(disco.getIdDisco(), sibling.getId());
         assertThat(discoQrCopyRepository.findById(referenced.getId())).isPresent();
         assertThat(discoQrCopyRepository.findById(sibling.getId())).isEmpty();
+    }
+
+    @Test
+    void exactStatusMutationCannotRestoreHistoricallySoldCopyOutsideCancellation() {
+        Disco disco = saveDisco("COPY-STATUS-HISTORY");
+        DiscoQrCopy sold = saveCopy(disco, 1, EstadoCopiaDisco.VENDIDO);
+        disco.setCantidadCopias(0);
+        disco.setEstado(EstadoDisco.VENDIDO);
+        discoRepository.saveAndFlush(disco);
+        saveSale(disco, String.valueOf(sold.getId()));
+
+        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
+                disco.getIdDisco(), sold.getId(), EstadoCopiaDisco.DISPONIBLE))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("cancelación exacta");
+
+        assertThat(discoQrCopyRepository.findById(sold.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.VENDIDO);
     }
 
     @Test
@@ -621,6 +710,7 @@ class DiscoPermanentDeletionIntegrationTest {
         });
         assertThat(result.getCantidadCopias()).isZero();
         assertThat(result.getTotalCopias()).isEqualTo(1);
+        assertThat(result.getEstado()).isEqualTo("SIN_STOCK");
         assertThat(discoQrCopyRepository.countByIdDiscoAndEstado(
                 disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE)).isZero();
         assertThat(discoQrCopyService.findByCode(copy.getCodigoQr())).extracting(DiscoQrCopy::getId)
@@ -631,6 +721,65 @@ class DiscoPermanentDeletionIntegrationTest {
                 persistedProduct, 1, copy.getId(), copy.getCodigoQr()))
                 .isInstanceOf(com.sonograma.exception.ConflictoNegocioException.class)
                 .hasMessageContaining("ya no está disponible");
+    }
+
+    @Test
+    void retainedRemovalRecalculatesTwoToOneAndThreeToTwoFromPhysicalRows() {
+        Disco twoCopyProduct = saveDisco("RETAINED-2-TO-1");
+        twoCopyProduct.setCantidadCopias(2);
+        discoRepository.saveAndFlush(twoCopyProduct);
+        DiscoQrCopy first = saveCopy(twoCopyProduct, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy second = saveCopy(twoCopyProduct, 2, EstadoCopiaDisco.DISPONIBLE);
+        String secondQr = second.getCodigoQr();
+
+        DiscoResponseDTO afterTwoToOne = discoService.retirarCopia(
+                twoCopyProduct.getIdDisco(), second.getId(),
+                DisposicionCopiaReason.REMOVED_FROM_INVENTORY, "duplicate receipt", "admin");
+
+        assertThat(afterTwoToOne.getCantidadCopias()).isEqualTo(1);
+        assertThat(afterTwoToOne.getTotalCopias()).isEqualTo(2);
+        assertThat(afterTwoToOne.getEstado()).isEqualTo("DISPONIBLE");
+        assertThat(discoQrCopyRepository.findById(first.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoQrCopyRepository.findById(second.getId())).get().satisfies(retained -> {
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getCodigoQr()).isEqualTo(secondQr);
+        });
+
+        Disco threeCopyProduct = saveDisco("RETAINED-3-TO-2");
+        threeCopyProduct.setCantidadCopias(3);
+        discoRepository.saveAndFlush(threeCopyProduct);
+        saveCopy(threeCopyProduct, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy removedFromThree = saveCopy(threeCopyProduct, 2, EstadoCopiaDisco.DISPONIBLE);
+        saveCopy(threeCopyProduct, 3, EstadoCopiaDisco.DISPONIBLE);
+
+        DiscoResponseDTO afterThreeToTwo = discoService.retirarCopia(
+                threeCopyProduct.getIdDisco(), removedFromThree.getId(),
+                DisposicionCopiaReason.DATA_ENTRY_CORRECTION, null, "admin");
+
+        assertThat(afterThreeToTwo.getCantidadCopias()).isEqualTo(2);
+        assertThat(afterThreeToTwo.getTotalCopias()).isEqualTo(3);
+        assertThat(afterThreeToTwo.getEstado()).isEqualTo("DISPONIBLE");
+        assertThat(discoQrCopyRepository.countByIdDiscoAndEstado(
+                threeCopyProduct.getIdDisco(), EstadoCopiaDisco.DISPONIBLE)).isEqualTo(2);
+    }
+
+    @Test
+    void removingAvailableSiblingKeepsSoldHistoryAndDerivesSoldParentAtZeroAvailable() {
+        Disco disco = saveDisco("RETAINED-AVAILABLE-SOLD");
+        DiscoQrCopy available = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        DiscoQrCopy sold = saveCopy(disco, 2, EstadoCopiaDisco.VENDIDO);
+
+        DiscoResponseDTO result = discoService.retirarCopia(
+                disco.getIdDisco(), available.getId(), DisposicionCopiaReason.OTHER, null, "admin");
+
+        assertThat(result.getCantidadCopias()).isZero();
+        assertThat(result.getTotalCopias()).isEqualTo(2);
+        assertThat(result.getEstado()).isEqualTo("VENDIDO");
+        assertThat(discoQrCopyRepository.findById(available.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.REMOVED);
+        assertThat(discoQrCopyRepository.findById(sold.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.VENDIDO);
     }
 
     @Test
@@ -703,6 +852,21 @@ class DiscoPermanentDeletionIntegrationTest {
             assertThat(retained.getDispositionReason()).isEqualTo(DisposicionCopiaReason.REMOVED_FROM_INVENTORY);
             assertThat(retained.getDisposedBy()).isEqualTo("retirement-admin");
         });
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERADOR")
+    void retainedRemovalEndpointRemainsAdminOnly() throws Exception {
+        Disco disco = saveDisco("RETAINED-AUTH");
+        DiscoQrCopy copy = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+
+        mockMvc.perform(post("/discos/{idDisco}/copias/{idCopia}/retiro", disco.getIdDisco(), copy.getId())
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"reason\":\"OTHER\"}"))
+                .andExpect(status().isForbidden());
+
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
     }
 
     private Disco saveDisco(String code) {

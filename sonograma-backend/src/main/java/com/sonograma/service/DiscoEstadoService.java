@@ -29,6 +29,7 @@ public class DiscoEstadoService {
         long disponibles = discoQrCopyService.countAvailableCopies(disco.getIdDisco());
         long vendidas = discoQrCopyService.soldCopies(disco.getIdDisco());
         disco.setCantidadCopias((int) disponibles);
+        discoQrCopyService.synchronizeParentQrAlias(disco);
         if (disco.getEstado() == EstadoDisco.RESERVADO && disponibles > 0) {
             return;
         }

@@ -15,6 +15,7 @@ import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.DiscogsManualBatchStatus;
+import com.sonograma.enums.PricingMode;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.exception.RecursoNoEncontradoException;
@@ -30,16 +31,17 @@ import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.springframework.data.domain.PageRequest;
 
 @Service
 @RequiredArgsConstructor
@@ -68,10 +70,10 @@ public class DiscoService {
         disco.setEstado(EstadoDisco.DISPONIBLE);
         disco.setCodigoQr(UUID.randomUUID().toString());
         if (disco.getPricingMode() == null) {
-            disco.setPricingMode(com.sonograma.enums.PricingMode.AUTO);
+            disco.setPricingMode(PricingMode.AUTO);
         }
         catalogPricingService.applyPricingToDisco(disco, request);
-        return saveWithQr(disco);
+        return saveWithQr(disco, request);
     }
 
     public DiscoResponseDTO obtenerPorId(Long id) {
@@ -395,7 +397,8 @@ public class DiscoService {
                 product.selloDiscografico(),
                 product.precioVenta(),
                 product.estado().name(),
-                copies.stream().anyMatch(copy -> copy.getManualDiscogsBatch() != null),
+                product.condicion() == com.sonograma.enums.CondicionDisco.USADO
+                        || copies.stream().anyMatch(copy -> copy.getManualDiscogsBatch() != null),
                 copyChoices.size(),
                 copyChoices);
     }
@@ -403,8 +406,11 @@ public class DiscoService {
     public DiscoResponseDTO actualizarDisco(Long id, DiscoRequestDTO request) {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
-        rejectManualAggregateChange(disco, request.getCantidadCopias());
         DiscoMapper.updateFromRequest(disco, request);
+        rejectUnsafeAggregateChange(disco, request.getCantidadCopias());
+        if (request.getCantidadCopias() == null && qrCopyService.hasCopyInventory(id)) {
+            disco.setCantidadCopias(Math.toIntExact(qrCopyService.countAvailableCopies(id)));
+        }
         catalogPricingService.applyPricingToDisco(disco, request);
         return saveWithQr(disco);
     }
@@ -412,20 +418,15 @@ public class DiscoService {
     public DiscoResponseDTO cambiarEstado(Long id, EstadoDisco nuevoEstado) {
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
-        if (qrCopyService.hasManualReceiptHistory(id)
+        long availableCopies = qrCopyService.countAvailableCopies(id);
+        if (availableCopies > 0
                 && (nuevoEstado == EstadoDisco.VENDIDO || nuevoEstado == EstadoDisco.SIN_STOCK)) {
             throw new ConflictoNegocioException(
-                    "El estado del stock manual USED se deriva de sus copias físicas; use el flujo exacto correspondiente.");
+                    "El estado del producto se deriva de sus copias físicas; use el flujo de venta o retiro correspondiente.");
         }
         disco.setEstado(nuevoEstado);
-        if (nuevoEstado == EstadoDisco.VENDIDO) {
-            qrCopyService.marcarDisponiblesVendidas(disco);
-            disco.setCantidadCopias(0);
-        } else if (nuevoEstado == EstadoDisco.SIN_STOCK) {
-            disco.setCantidadCopias(0);
-            qrCopyService.synchronizeAvailableCopies(disco, 0);
-        }
-        return saveWithQr(disco);
+        discoEstadoService.aplicar(disco);
+        return toDTO(discoRepository.save(disco));
     }
 
     public DiscoResponseDTO actualizarCopias(Long id, Integer cantidad) {
@@ -434,9 +435,8 @@ public class DiscoService {
         }
         Disco disco = discoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", id));
-        rejectManualAggregateChange(disco, cantidad);
+        rejectUnsafeAggregateChange(disco, cantidad);
         qrCopyService.synchronizeAvailableCopies(disco, cantidad);
-        disco.setCantidadCopias(cantidad);
         discoEstadoService.aplicar(disco);
         return saveWithQr(disco);
     }
@@ -444,6 +444,15 @@ public class DiscoService {
     public DiscoResponseDTO cambiarEstadoCopia(Long idDisco, Long idCopia, EstadoCopiaDisco nuevoEstado) {
         Disco disco = discoRepository.findById(idDisco)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Disco", idDisco));
+        DiscoQrCopy current = discoQrCopyRepository.findByIdForUpdate(idCopia)
+                .filter(copy -> idDisco.equals(copy.getIdDisco()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("Copia", idCopia));
+        if (current.getEstado() == EstadoCopiaDisco.VENDIDO
+                && nuevoEstado == EstadoCopiaDisco.DISPONIBLE
+                && copyHasHistoricalCommerce(current, idDisco)) {
+            throw new ConflictoNegocioException(
+                    "Una copia vinculada a historial de ventas solo puede restaurarse mediante la cancelación exacta.");
+        }
         qrCopyService.changeCopyStatus(disco, idCopia, nuevoEstado);
         disco.setCantidadCopias((int) qrCopyService.countAvailableCopies(idDisco));
         discoEstadoService.aplicar(disco);
@@ -633,9 +642,25 @@ public class DiscoService {
     }
 
     private DiscoResponseDTO saveWithQr(Disco disco) {
+        return saveWithQr(disco, null);
+    }
+
+    private DiscoResponseDTO saveWithQr(Disco disco, DiscoRequestDTO creationRequest) {
         Disco saved = discoRepository.save(disco);
         if (!qrCopyService.hasManualReceiptHistory(saved.getIdDisco())) {
-            qrCopyService.synchronize(saved);
+            DiscoQrCopyService.CopySynchronizationResult synchronization =
+                    qrCopyService.synchronizeAvailableCopiesWithResult(
+                            saved, saved.getCantidadCopias() == null ? 0 : saved.getCantidadCopias());
+            if (creationRequest != null) {
+                BigDecimal explicitPrice = saved.getPricingMode() == PricingMode.MANUAL
+                        ? creationRequest.getPrecioVenta()
+                        : null;
+                String explicitCondition = creationRequest.getCondicionFisica() == null
+                        ? null
+                        : saved.getCondicionFisica();
+                qrCopyService.initializeCreatedUsedCopyCommercialData(
+                        saved, synchronization.addedCopies(), explicitPrice, explicitCondition);
+            }
         }
         discoEstadoService.aplicar(saved);
         saved = discoRepository.save(saved);
@@ -655,14 +680,16 @@ public class DiscoService {
         return (int) available;
     }
 
-    private void rejectManualAggregateChange(Disco disco, Integer requested) {
-        if (requested == null || !qrCopyService.hasManualReceiptHistory(disco.getIdDisco())) return;
+    private void rejectUnsafeAggregateChange(Disco disco, Integer requested) {
+        if (requested == null) return;
         int available = Math.toIntExact(qrCopyService.countAvailableCopies(disco.getIdDisco()));
-        if (requested < available) {
+        boolean usedInventory = disco.getCondicion() == com.sonograma.enums.CondicionDisco.USADO;
+        boolean manualInventory = qrCopyService.hasManualReceiptHistory(disco.getIdDisco());
+        if (requested < available && (usedInventory || manualInventory)) {
             throw new ConflictoNegocioException(
-                    "El stock manual USED requiere seleccionar la copia física exacta que se retirará.");
+                    "El stock USED requiere seleccionar la copia física exacta que se retirará.");
         }
-        if (requested > available) {
+        if (requested > available && manualInventory) {
             throw new ConflictoNegocioException(
                     "Otra copia física manual USED debe recibirse mediante el flujo de recepción exacta.");
         }

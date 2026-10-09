@@ -3,6 +3,8 @@ package com.sonograma.service;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
+import com.sonograma.enums.CondicionDisco;
+import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.repository.DiscoQrCopyRepository;
@@ -12,9 +14,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +33,55 @@ class DiscoQrCopyServiceTest {
     @BeforeEach
     void setUp() {
         service = new DiscoQrCopyService(repository);
+    }
+
+    @Test
+    void initializesOnlyTheExactNewUsedCopiesFromExplicitCommercialData() {
+        Disco disco = Disco.builder().idDisco(42L).condicion(CondicionDisco.USADO).build();
+        DiscoQrCopy created = DiscoQrCopy.builder().id(10L).idDisco(42L).build();
+        List<DiscoQrCopy> createdCopies = List.of(created);
+        when(repository.saveAll(createdCopies)).thenReturn(createdCopies);
+
+        service.initializeCreatedUsedCopyCommercialData(
+                disco, createdCopies, new BigDecimal("900"), " vg+ ");
+
+        assertEquals(new BigDecimal("900"), created.getPrecioVenta());
+        assertEquals("vg+", created.getCondicionFisica());
+        verify(repository).saveAll(createdCopies);
+    }
+
+    @Test
+    void doesNotApplyUsedCommercialInitializationToNewProducts() {
+        Disco disco = Disco.builder().idDisco(42L).condicion(CondicionDisco.NUEVO).build();
+        DiscoQrCopy created = DiscoQrCopy.builder().id(10L).idDisco(42L).build();
+
+        service.initializeCreatedUsedCopyCommercialData(
+                disco, List.of(created), new BigDecimal("900"), "VG+");
+
+        assertNull(created.getPrecioVenta());
+        assertNull(created.getCondicionFisica());
+        verify(repository, never()).saveAll(any());
+    }
+
+    @Test
+    void removedCopyIsTerminalForGenericStatusChanges() {
+        Disco disco = Disco.builder().idDisco(42L).build();
+        DiscoQrCopy removed = DiscoQrCopy.builder()
+                .id(10L)
+                .idDisco(42L)
+                .estado(EstadoCopiaDisco.REMOVED)
+                .build();
+        when(repository.findByIdForUpdate(10L)).thenReturn(java.util.Optional.of(removed));
+
+        ConflictoNegocioException availableError = assertThrows(ConflictoNegocioException.class,
+                () -> service.changeCopyStatus(disco, 10L, EstadoCopiaDisco.DISPONIBLE));
+        ConflictoNegocioException soldError = assertThrows(ConflictoNegocioException.class,
+                () -> service.changeCopyStatus(disco, 10L, EstadoCopiaDisco.VENDIDO));
+
+        assertTrue(availableError.getMessage().contains("terminal"));
+        assertTrue(soldError.getMessage().contains("terminal"));
+        assertEquals(EstadoCopiaDisco.REMOVED, removed.getEstado());
+        verify(repository, never()).save(any(DiscoQrCopy.class));
     }
 
     @Test
@@ -115,6 +166,31 @@ class DiscoQrCopyServiceTest {
     }
 
     @Test
+    void genericAggregateDecrementRetainsExcessAvailableCopyAndQr() {
+        Disco disco = Disco.builder().idDisco(50L).cantidadCopias(3).codigoQr("qr-1").build();
+        List<DiscoQrCopy> stored = new ArrayList<>(List.of(
+                DiscoQrCopy.builder().id(1L).idDisco(50L).copyNumber(1).codigoQr("qr-1").build(),
+                DiscoQrCopy.builder().id(2L).idDisco(50L).copyNumber(2).codigoQr("qr-2").build(),
+                DiscoQrCopy.builder().id(3L).idDisco(50L).copyNumber(3).codigoQr("qr-3").build()));
+        when(repository.findByIdDiscoOrderByCopyNumber(50L)).thenAnswer(invocation -> new ArrayList<>(stored));
+        when(repository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DiscoQrCopyService.CopySynchronizationResult result =
+                service.synchronizeAvailableCopiesWithResult(disco, 2);
+
+        assertEquals(3, result.copies().size());
+        assertEquals(2, disco.getCantidadCopias());
+        assertEquals("qr-1", disco.getCodigoQr());
+        assertEquals(EstadoCopiaDisco.REMOVED, stored.get(2).getEstado());
+        assertEquals("qr-3", stored.get(2).getCodigoQr());
+        assertEquals(DisposicionCopiaReason.REMOVED_FROM_INVENTORY, stored.get(2).getDispositionReason());
+        assertEquals("Ajuste de cantidad disponible", stored.get(2).getDispositionNote());
+        assertEquals("system:aggregate-quantity", stored.get(2).getDisposedBy());
+        assertNotNull(stored.get(2).getDisposedAt());
+        verify(repository, never()).deleteAll(anyList());
+    }
+
+    @Test
     void restoreCopiesForDebtOnlyRestoresExactSoldCopies() {
         Disco disco = Disco.builder().idDisco(8L).build();
         List<DiscoQrCopy> copies = List.of(
@@ -139,6 +215,17 @@ class DiscoQrCopyServiceTest {
         assertThrows(ConflictoNegocioException.class,
             () -> service.restoreCopiesForDebt(disco, "11"));
         verify(repository, never()).saveAll(any());
+    }
+
+    @Test
+    void restoreCopiesForDebtRejectsMissingExactIdentityForPhysicalInventory() {
+        Disco disco = Disco.builder().idDisco(8L).build();
+
+        ConflictoNegocioException error = assertThrows(ConflictoNegocioException.class,
+                () -> service.restoreCopiesForDebt(disco, null));
+
+        assertTrue(error.getMessage().contains("no tiene copias identificadas"));
+        verifyNoInteractions(repository);
     }
 
     @Test
@@ -197,26 +284,60 @@ class DiscoQrCopyServiceTest {
 
     @Test
     void manualInventoryCannotUseProductLevelFallback() {
-        Disco disco = Disco.builder().idDisco(8L).build();
-        when(repository.existsByIdDiscoAndEstadoAndManualDiscogsBatchIsNotNull(
-                8L, EstadoCopiaDisco.DISPONIBLE)).thenReturn(true);
+        Disco disco = Disco.builder().idDisco(8L).condicion(CondicionDisco.USADO).build();
+        DiscoQrCopy manual = DiscoQrCopy.builder().id(20L).idDisco(8L)
+                .manualDiscogsBatch(DiscogsManualBatch.builder().id(7L).build())
+                .estado(EstadoCopiaDisco.DISPONIBLE).build();
+        when(repository.findByIdDiscoAndEstadoOrderByCopyNumber(8L, EstadoCopiaDisco.DISPONIBLE))
+                .thenReturn(List.of(manual));
 
         ConflictoNegocioException error = assertThrows(ConflictoNegocioException.class,
                 () -> service.reserveCopies(disco, 1, null, null));
 
         assertTrue(error.getMessage().contains("copia física exacta"));
-        verify(repository, never()).findByIdDiscoAndEstadoOrderByCopyNumber(anyLong(), any());
+        verify(repository, never()).save(any(DiscoQrCopy.class));
     }
 
     @Test
-    void productLevelFallbackRemainsAvailableForEquivalentLegacyInventory() {
-        Disco disco = Disco.builder().idDisco(8L).build();
+    void ordinaryUsedSingleCopyIsAutomaticallyReservedAsThatExactRow() {
+        Disco disco = Disco.builder().idDisco(8L).condicion(CondicionDisco.USADO).build();
+        DiscoQrCopy only = DiscoQrCopy.builder().id(21L).idDisco(8L).copyNumber(1)
+                .codigoQr("used-only").estado(EstadoCopiaDisco.DISPONIBLE).build();
+        when(repository.findByIdDiscoAndEstadoOrderByCopyNumber(8L, EstadoCopiaDisco.DISPONIBLE))
+                .thenReturn(List.of(only));
+        when(repository.save(only)).thenReturn(only);
+
+        assertEquals(List.of(only), service.reserveCopies(disco, 1, null, null));
+        assertEquals(EstadoCopiaDisco.VENDIDO, only.getEstado());
+        verify(repository).save(only);
+    }
+
+    @Test
+    void ordinaryUsedMultipleCopiesRequireExplicitExactSelection() {
+        Disco disco = Disco.builder().idDisco(8L).condicion(CondicionDisco.USADO).build();
+        List<DiscoQrCopy> copies = List.of(
+                DiscoQrCopy.builder().id(21L).idDisco(8L).copyNumber(1)
+                        .estado(EstadoCopiaDisco.DISPONIBLE).build(),
+                DiscoQrCopy.builder().id(22L).idDisco(8L).copyNumber(2)
+                        .estado(EstadoCopiaDisco.DISPONIBLE).build());
+        when(repository.findByIdDiscoAndEstadoOrderByCopyNumber(8L, EstadoCopiaDisco.DISPONIBLE))
+                .thenReturn(copies);
+
+        ConflictoNegocioException error = assertThrows(ConflictoNegocioException.class,
+                () -> service.reserveCopies(disco, 1, null, null));
+
+        assertTrue(error.getMessage().contains("copia física exacta"));
+        assertTrue(copies.stream().allMatch(copy -> copy.getEstado() == EstadoCopiaDisco.DISPONIBLE));
+        verify(repository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void productLevelFallbackRemainsAvailableForEquivalentNewInventory() {
+        Disco disco = Disco.builder().idDisco(8L).condicion(CondicionDisco.NUEVO).build();
         DiscoQrCopy first = DiscoQrCopy.builder().id(21L).idDisco(8L).copyNumber(1)
                 .estado(EstadoCopiaDisco.DISPONIBLE).build();
         DiscoQrCopy second = DiscoQrCopy.builder().id(22L).idDisco(8L).copyNumber(2)
                 .estado(EstadoCopiaDisco.DISPONIBLE).build();
-        when(repository.existsByIdDiscoAndEstadoAndManualDiscogsBatchIsNotNull(
-                8L, EstadoCopiaDisco.DISPONIBLE)).thenReturn(false);
         when(repository.findByIdDiscoAndEstadoOrderByCopyNumber(8L, EstadoCopiaDisco.DISPONIBLE))
                 .thenReturn(List.of(first, second));
         when(repository.saveAll(List.of(first))).thenReturn(List.of(first));
@@ -236,6 +357,19 @@ class DiscoQrCopyServiceTest {
         assertThrows(ConflictoNegocioException.class, () -> service.restoreCopies("16"));
 
         assertEquals(EstadoCopiaDisco.REMOVED, removed.getEstado());
+        verify(repository, never()).saveAll(any());
+    }
+
+    @Test
+    void cancellationRejectsSnapshotCopyFromAnotherProduct() {
+        Disco disco = Disco.builder().idDisco(8L).build();
+        DiscoQrCopy otherProduct = DiscoQrCopy.builder().id(17L).idDisco(9L)
+                .estado(EstadoCopiaDisco.VENDIDO).build();
+        when(repository.findAllByIdForUpdate(List.of(17L))).thenReturn(List.of(otherProduct));
+
+        assertThrows(ConflictoNegocioException.class, () -> service.restoreCopies(disco, "17"));
+
+        assertEquals(EstadoCopiaDisco.VENDIDO, otherProduct.getEstado());
         verify(repository, never()).saveAll(any());
     }
 }

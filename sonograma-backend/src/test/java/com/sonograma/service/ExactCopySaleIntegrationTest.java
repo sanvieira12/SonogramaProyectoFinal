@@ -43,6 +43,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ExactCopySaleIntegrationTest {
 
     @Autowired private VentaService ventaService;
+    @Autowired private DiscoService discoService;
+    @Autowired private StockValuationService stockValuationService;
     @Autowired private DeudaService deudaService;
     @Autowired private DiscoQrCopyService copyService;
     @Autowired private ClienteRepository clienteRepository;
@@ -69,6 +71,8 @@ class ExactCopySaleIntegrationTest {
                 .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
         assertThat(copyRepository.findById(fixture.copyBId()).orElseThrow().getEstado())
                 .isEqualTo(EstadoCopiaDisco.VENDIDO);
+        assertThat(discoRepository.findById(fixture.productId()).orElseThrow().getCodigoQr())
+                .isEqualTo(copyRepository.findById(fixture.copyAId()).orElseThrow().getCodigoQr());
         DetalleVentaResponseDTO detail = response.getDetalles().getFirst();
         assertThat(detail.getCopyId()).isEqualTo(fixture.copyBId());
         assertThat(detail.getCopyIds()).containsExactly(fixture.copyBId());
@@ -96,6 +100,72 @@ class ExactCopySaleIntegrationTest {
                 .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
         assertThat(copyRepository.findById(debtFixture.copyBId()).orElseThrow().getEstado())
                 .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
+    void cancelledNewCopyRemainsRetainedWhenLaterAggregateDecrementRemovesItFromStock() {
+        String suffix = Long.toString(System.nanoTime());
+        Cliente customer = new Cliente();
+        customer.setNombre("NEW Lifecycle " + suffix);
+        customer.setCedula("NEW-LIFE-" + suffix);
+        customer.setActivo(true);
+        customer = clienteRepository.save(customer);
+        Disco product = discoRepository.save(Disco.builder()
+                .codigoInterno("NEW-LIFE-" + suffix)
+                .codigoQr("new-life-qr-" + suffix)
+                .artista("NEW Lifecycle Artist")
+                .album("NEW Lifecycle Album")
+                .condicion(CondicionDisco.NUEVO)
+                .estado(EstadoDisco.DISPONIBLE)
+                .cantidadCopias(1)
+                .precioVenta(new BigDecimal("1000"))
+                .pricingMode(PricingMode.AUTO)
+                .build());
+        DiscoQrCopy copy = copyRepository.save(DiscoQrCopy.builder()
+                .idDisco(product.getIdDisco())
+                .copyNumber(1)
+                .codigoQr("new-life-copy-" + suffix)
+                .estado(EstadoCopiaDisco.DISPONIBLE)
+                .build());
+        assertThat(stockValuationService.current().projectedNewUyu()).isEqualByComparingTo("1000");
+
+        VentaRequestDTO saleRequest = VentaRequestDTO.builder()
+                .idCliente(customer.getIdCliente())
+                .canalVenta("LOCAL")
+                .tipoEntrega("RETIRO")
+                .total(new BigDecimal("1000"))
+                .detalles(List.of(DetalleVentaDTO.builder()
+                        .idDisco(product.getIdDisco())
+                        .cantidad(1)
+                        .precioUnitario(new BigDecimal("1000"))
+                        .build()))
+                .build();
+        VentaResponseDTO sale = ventaService.registrarVenta(saleRequest);
+        Long detailId = sale.getDetalles().getFirst().getIdDetalle();
+        assertThat(copyRepository.findById(copy.getId()).orElseThrow().getEstado())
+                .isEqualTo(EstadoCopiaDisco.VENDIDO);
+        assertThat(sale.getDetalles().getFirst().getCopyIds()).containsExactly(copy.getId());
+        assertThat(stockValuationService.current().projectedNewUyu()).isEqualByComparingTo("0");
+
+        ventaService.cancelarVenta(sale.getIdVenta());
+        assertThat(copyRepository.findById(copy.getId()).orElseThrow().getEstado())
+                .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(stockValuationService.current().projectedNewUyu()).isEqualByComparingTo("1000");
+
+        discoService.actualizarCopias(product.getIdDisco(), 0);
+
+        assertThat(copyRepository.findById(copy.getId())).get().satisfies(retained -> {
+            assertThat(retained.getEstado()).isEqualTo(EstadoCopiaDisco.REMOVED);
+            assertThat(retained.getCodigoQr()).isEqualTo(copy.getCodigoQr());
+        });
+        assertThat(detalleRepository.findById(detailId)).get()
+                .extracting(detail -> detail.getCopyIdsSnapshot()).isEqualTo(copy.getId().toString());
+        assertThat(discoRepository.findById(product.getIdDisco())).get().satisfies(parent -> {
+            assertThat(parent.getCantidadCopias()).isZero();
+            assertThat(parent.getEstado()).isEqualTo(EstadoDisco.SIN_STOCK);
+            assertThat(parent.getCodigoQr()).isEqualTo(copy.getCodigoQr());
+        });
+        assertThat(stockValuationService.current().projectedNewUyu()).isEqualByComparingTo("0");
     }
 
     @Test

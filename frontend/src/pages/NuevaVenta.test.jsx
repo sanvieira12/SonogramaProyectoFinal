@@ -214,7 +214,7 @@ describe('NuevaVenta manual items', () => {
     expect(screen.queryByRole('combobox', { name: /copia/i })).not.toBeInTheDocument()
   })
 
-  it('keeps normal text sales product-level and omits copyId from submission', async () => {
+  it('keeps normal NEW text sales product-level and omits copyId from submission', async () => {
     vi.useFakeTimers()
     api.discos.buscarVenta.mockResolvedValue([saleResult()])
     render(<NuevaVenta />)
@@ -254,6 +254,35 @@ describe('NuevaVenta manual items', () => {
     expect(screen.getByText('Copia 1 · LO · NM')).toBeInTheDocument()
     expect(screen.getByLabelText('Cantidad fija para copia exacta')).toBeDisabled()
     expect(screen.getByDisplayValue('1100')).toBeInTheDocument()
+  })
+
+  it('auto-selects the exact row for ordinary USED inventory without manual provenance', async () => {
+    vi.useFakeTimers()
+    api.discos.buscarVenta.mockResolvedValue([saleResult({
+      idDisco: 91,
+      condicion: 'USADO',
+      requiresExactCopySelection: true,
+      availableCopyCount: 1,
+      availableCopies: [exactCopy({
+        copyId: 911,
+        copyNumber: 1,
+        codigoQr: 'ordinary-used-911',
+        precioVenta: 875,
+        condicionFisica: 'VG',
+        sourceCustomerCode: null,
+        normalizedSourceCustomerCode: null,
+        manualBatchId: null,
+      })],
+    })])
+    render(<NuevaVenta />)
+    fireEvent.change(screen.getByPlaceholderText('Buscar disco disponible para agregar…'), { target: { value: 'ordinary' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+
+    expect(screen.getByText(/Seleccionada: Copia 1/)).toHaveTextContent('Sin origen registrado · VG · $875')
+    fireEvent.click(screen.getByRole('button', { name: '+ Agregar' }))
+    expect(screen.getByText('Copia 1 · Sin origen registrado · VG')).toBeInTheDocument()
+    expect(screen.getByLabelText('Cantidad fija para copia exacta')).toBeDisabled()
+    expect(screen.getByDisplayValue('875')).toBeInTheDocument()
   })
 
   it('requires a choice among multiple copies and keeps LO/NM and SV3/VG+ prices independent', async () => {
@@ -362,7 +391,7 @@ function saleResult(overrides = {}) {
     album: 'Search Album',
     codigoInterno: 'SEARCH-81',
     estado: 'DISPONIBLE',
-    condicion: 'USADO',
+    condicion: 'NUEVO',
     precioVenta: 1250,
     availableCopyCount: 1,
     availableCopies: [{ copyId: 811, copyNumber: 1, codigoQr: 'search-copy-1', estado: 'DISPONIBLE' }],
@@ -393,6 +422,7 @@ function exactSaleResult(overrides = {}) {
     album: 'Exact Album',
     codigoInterno: 'EXACT-90',
     precioVenta: 1200,
+    condicion: 'USADO',
     requiresExactCopySelection: true,
     availableCopyCount: 2,
     availableCopies: [

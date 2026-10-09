@@ -15,6 +15,7 @@ import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.ClasificacionItemVenta;
 import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoVenta;
+import com.sonograma.exception.ConflictoNegocioException;
 import com.sonograma.exception.NegocioException;
 import com.sonograma.repository.ClienteRepository;
 import com.sonograma.repository.DetalleVentaRepository;
@@ -259,12 +260,42 @@ class VentaServiceTest {
         detail.setVenta(sale);
         when(ventaRepository.findById(109L)).thenReturn(Optional.of(sale));
         when(ventaRepository.save(any(Venta.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
 
         ventaService.cancelarVenta(109L);
 
-        verify(discoQrCopyService).restoreCopies("2");
+        verify(discoQrCopyService).restoreCopies(disco, "2");
         assertThat(sale.getEstado()).isEqualTo(EstadoVenta.CANCELADA);
         assertThat(detail.getCopyIdsSnapshot()).isEqualTo("2");
+    }
+
+    @Test
+    void legacyCancellationWithPhysicalRowsFailsBeforeAggregateOrSaleMutation() {
+        Disco disco = disco(10L, "Legacy", "Ambiguous", "400", "1250", 0);
+        DetalleVenta detail = DetalleVenta.builder()
+                .idDetalle(91L)
+                .disco(disco)
+                .cantidad(1)
+                .precioUnitario(new BigDecimal("1250"))
+                .copyIdsSnapshot(null)
+                .build();
+        Venta sale = Venta.builder()
+                .idVenta(110L)
+                .estado(EstadoVenta.COMPLETADA)
+                .detalles(new java.util.ArrayList<>(java.util.List.of(detail)))
+                .build();
+        detail.setVenta(sale);
+        when(ventaRepository.findById(110L)).thenReturn(Optional.of(sale));
+        when(discoQrCopyService.hasCopyInventory(10L)).thenReturn(true);
+
+        assertThatThrownBy(() -> ventaService.cancelarVenta(110L))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("copia física exacta");
+
+        assertThat(sale.getEstado()).isEqualTo(EstadoVenta.COMPLETADA);
+        assertThat(disco.getCantidadCopias()).isZero();
+        verify(discoQrCopyService, never()).restoreCopies(any(Disco.class), any());
+        verify(ventaRepository, never()).save(sale);
     }
 
     @Test
@@ -272,6 +303,7 @@ class VentaServiceTest {
         Cliente cliente = cliente(1L);
         Disco disco = disco(10L, "A", "Uno", "400", "1000", 1);
         disco.setCondicion(CondicionDisco.NUEVO);
+        disco.setEstado(EstadoDisco.SIN_STOCK); // stale aggregate state; physical AVAILABLE row remains authoritative
         when(clienteRepository.findById(1L)).thenReturn(Optional.of(cliente));
         when(discoRepository.findById(10L)).thenReturn(Optional.of(disco));
         when(discoQrCopyService.countAvailableCopies(10L)).thenReturn(1L, 0L);

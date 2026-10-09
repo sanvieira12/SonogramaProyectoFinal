@@ -1,12 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PricingSettingsPage from './PricingSettingsPage'
 import { api } from '../api/sonograma'
 
 vi.mock('../api/sonograma', () => ({
+  FINANCIAL_DATA_CHANGED_EVENT: 'sonograma:financial-data-changed',
   api: {
     pricing: {
       settings: vi.fn(),
+      stockValuation: vi.fn(),
       preview: vi.fn(),
       apply: vi.fn(),
       updateMarkup: vi.fn(),
@@ -72,6 +74,19 @@ const rows = [
   },
 ]
 
+const valuation = {
+  importedNewEur: 320,
+  importedNewUyu: 18500,
+  projectedNewUyu: 6000,
+  projectedUsedKnownUyu: 25400,
+  availableNewCopies: 3,
+  availableUsedCopies: 4,
+  usedAvailableCopiesWithoutPrice: 1,
+  newAvailableCopiesWithoutSalePrice: 0,
+  newAvailableCopiesWithoutAcquisitionCost: 1,
+  newAvailableCopiesWithUnknownAcquisitionCurrency: 1,
+}
+
 function renderPage() {
   return render(<PricingSettingsPage />)
 }
@@ -80,6 +95,7 @@ describe('PricingSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.pricing.settings.mockResolvedValue(settings)
+    api.pricing.stockValuation.mockResolvedValue(valuation)
     api.pricing.preview.mockResolvedValue({ rows })
     api.pricing.apply.mockResolvedValue({ updatedCount: 1 })
     api.pricing.updateMarkup.mockResolvedValue({
@@ -96,8 +112,86 @@ describe('PricingSettingsPage', () => {
     await screen.findByText('Cotización EUR/UYU')
     expect(screen.getByText('Costo extra disco simple (EUR)')).toBeInTheDocument()
     expect(screen.getByText('Actualizar vista previa')).toBeInTheDocument()
-    expect(screen.getByText('Discos en la vista previa')).toBeInTheDocument()
+    expect(screen.getByText('Discos en la vista previa de precios')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aplicar a seleccionados' })).toBeDisabled()
+  })
+
+  it('separa inversión NUEVA y proyecciones NUEVA/USADA con faltantes explícitos', async () => {
+    renderPage()
+
+    const cards = await screen.findByRole('region', { name: 'Valoración actual de Stock' })
+    expect(within(cards).getByText('Valor total importado — Nuevos')).toBeInTheDocument()
+    expect(within(cards).getByText('EUR 320')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $18.500')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $6.000')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $25.400')).toBeInTheDocument()
+    expect(within(cards).getByText('1 copia disponible sin precio específico, excluida del valor')).toBeInTheDocument()
+    expect(within(cards).getByText(/sin envío ni conversión entre monedas/i)).toBeInTheDocument()
+    expect(within(cards).getByText(/1 copia NUEVA excluida por moneda no identificada/i)).toBeInTheDocument()
+  })
+
+  it('mantiene los titulares globales al buscar o filtrar la tabla', async () => {
+    renderPage()
+
+    const cards = await screen.findByRole('region', { name: 'Valoración actual de Stock' })
+    fireEvent.click(screen.getByRole('button', { name: 'Usados' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar discos en stock' }), {
+      target: { value: 'Árbol Negro' },
+    })
+
+    expect(screen.getByText('1 resultado')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $6.000')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $25.400')).toBeInTheDocument()
+    expect(api.pricing.stockValuation).toHaveBeenCalledTimes(1)
+  })
+
+  it('no altera la valoración real al previsualizar una cotización sin guardar', async () => {
+    api.pricing.preview
+      .mockResolvedValueOnce({ rows })
+      .mockResolvedValueOnce({ rows: [{ ...rows[0], finalSalePriceUyu: 999999 }] })
+    renderPage()
+
+    const cards = await screen.findByRole('region', { name: 'Valoración actual de Stock' })
+    fireEvent.change(screen.getByLabelText('Cotización EUR/UYU'), { target: { value: '75' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar vista previa' }))
+
+    await waitFor(() => expect(api.pricing.preview).toHaveBeenCalledTimes(2))
+    expect(within(cards).getByText('EUR 320')).toBeInTheDocument()
+    expect(within(cards).getByText('UYU $6.000')).toBeInTheDocument()
+    expect(api.pricing.stockValuation).toHaveBeenCalledTimes(1)
+  })
+
+  it('recarga la valoración ante el evento compartido de inventario', async () => {
+    api.pricing.stockValuation
+      .mockResolvedValueOnce(valuation)
+      .mockResolvedValueOnce({ ...valuation, projectedNewUyu: 4000, availableNewCopies: 2 })
+    renderPage()
+
+    await screen.findByText('UYU $6.000')
+    fireEvent(window, new Event('sonograma:financial-data-changed'))
+
+    expect(await screen.findByText('UYU $4.000')).toBeInTheDocument()
+    expect(api.pricing.stockValuation).toHaveBeenCalledTimes(2)
+  })
+
+  it('descarta una respuesta de valoración anterior que llega fuera de orden', async () => {
+    let resolveFirst
+    api.pricing.stockValuation
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ ...valuation, projectedUsedKnownUyu: 1600 })
+    renderPage()
+
+    await screen.findByText('2 resultados')
+    fireEvent(window, new Event('sonograma:financial-data-changed'))
+    expect(await screen.findByText('UYU $1.600')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveFirst({ ...valuation, projectedUsedKnownUyu: 999999 })
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('UYU $1.600')).toBeInTheDocument()
+    expect(screen.queryByText('UYU $999.999')).not.toBeInTheDocument()
   })
 
   it('ya no renderiza el helper text y usa la columna Actualizar para guardar markup', async () => {

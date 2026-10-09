@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
 import ConfirmModal from '../components/ConfirmModal'
@@ -611,28 +611,45 @@ export default function LibroVentas() {
   const [eliminandoPreVenta, setEliminandoPreVenta] = useState(null)
   const [eliminando, setEliminando] = useState(false)
   const [success, setSuccess] = useState('')
+  const ventasRequestId = useRef(0)
+  const resumenRequestId = useRef(0)
 
   const cargar = useCallback(async (params) => {
+    const requestId = ++ventasRequestId.current
     setLoading(true)
     setError(null)
     try {
       const data = await api.libro.listar(params)
+      if (requestId !== ventasRequestId.current) return undefined
       setVentas(data)
       return data
     } catch (e) {
-      setError(e.message)
+      if (requestId === ventasRequestId.current) setError(e.message)
     } finally {
-      setLoading(false)
+      if (requestId === ventasRequestId.current) setLoading(false)
     }
   }, [])
 
   const cargarResumen = useCallback(async (mes) => {
+    const requestId = ++resumenRequestId.current
     try {
-      setResumen(await api.ventas.resumenMensual(mes))
+      const data = await api.ventas.resumenMensual(mes)
+      if (requestId !== resumenRequestId.current) return undefined
+      setResumen(data)
+      return data
     } catch (e) {
-      setError(e.message)
+      if (requestId === resumenRequestId.current) setError(e.message)
     }
   }, [])
+
+  const refrescarDatosAplicados = useCallback(async () => {
+    const periodoAplicado = applied.desde.slice(0, 7)
+    const [movimientos] = await Promise.all([
+      cargar(applied),
+      cargarResumen(periodoAplicado),
+    ])
+    return movimientos
+  }, [applied, cargar, cargarResumen])
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -693,7 +710,7 @@ export default function LibroVentas() {
       } else {
         await api.ventas.cancelar(ventaCancelar.idVenta)
       }
-      await cargar(applied)
+      await refrescarDatosAplicados()
       window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
       setVentaPanel(null)
       setVentaCancelar(null)
@@ -709,8 +726,7 @@ export default function LibroVentas() {
 
   async function guardarPagoPreVenta(payload) {
     await api.preVentas.actualizarPago(editandoPreVenta.idPreVentaOrigen, payload)
-    await cargar(applied)
-    await cargarResumen(periodo)
+    await refrescarDatosAplicados()
     window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     setVentaPanel(null)
     setEditandoPreVenta(null)
@@ -723,8 +739,7 @@ export default function LibroVentas() {
     setError(null)
     try {
       await api.preVentas.eliminarPago(eliminandoPreVenta.idPreVentaOrigen)
-      await cargar(applied)
-      await cargarResumen(periodo)
+      await refrescarDatosAplicados()
       window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
       setVentaPanel(null)
       setEliminandoPreVenta(null)
@@ -737,12 +752,13 @@ export default function LibroVentas() {
   }
 
   async function guardarVentaActualizada(updated) {
-    setVentas(prev => prev.map(v => v.idVenta === updated.idVenta ? updated : v))
-    setVentaPanel(updated)
+    const refreshed = await refrescarDatosAplicados()
+    const refreshedSale = refreshed?.find(v => v.idVenta === updated.idVenta) || updated
+    setVentaPanel(refreshedSale)
     setEditMode(false)
     setSelectedDisk(current => {
       if (!current) return null
-      const detalleActualizado = updated.detalles?.find(d => (
+      const detalleActualizado = refreshedSale.detalles?.find(d => (
         (current.idDetalle && d.idDetalle === current.idDetalle)
           || (current.idDisco && d.idDisco === current.idDisco)
       ))
@@ -750,15 +766,13 @@ export default function LibroVentas() {
         ? { ...detalleActualizado, imagenUrl: current.imagenUrl || detalleActualizado.imagenUrl }
         : null
     })
-    await cargarResumen(periodo)
     window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     setSuccess('Venta actualizada correctamente.')
   }
 
   async function guardarPagoDeudaActualizado(payload) {
     await api.deudas.actualizarPago(ventaPanel.idPagoDeuda, payload)
-    const refreshed = await cargar(applied)
-    await cargarResumen(periodo)
+    const refreshed = await refrescarDatosAplicados()
     const updated = refreshed?.find(v => v.idPagoDeuda === ventaPanel.idPagoDeuda)
     setEditMode(false)
     setVentaPanel(updated || null)

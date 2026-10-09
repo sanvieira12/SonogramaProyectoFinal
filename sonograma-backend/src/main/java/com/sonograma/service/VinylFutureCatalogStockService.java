@@ -19,6 +19,7 @@ public class VinylFutureCatalogStockService {
     private final DiscoRepository discoRepository;
     private final DiscoQrCopyService qrCopyService;
     private final VinylFutureIdentityNormalizer identityNormalizer;
+    private final DiscoEstadoService discoEstadoService;
 
     @Transactional(readOnly = true)
     public Resolution preview(String supplierCode) {
@@ -62,6 +63,7 @@ public class VinylFutureCatalogStockService {
         }
         disco = discoRepository.save(disco);
         qrCopyService.synchronizeAvailableCopies(disco, previousStock + incomingQuantity);
+        discoEstadoService.aplicar(disco);
         disco = discoRepository.save(disco);
         return new Resolution(
             disco,

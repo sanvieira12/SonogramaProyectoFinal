@@ -54,6 +54,38 @@ describe('normalizeApiBase', () => {
       .rejects.toBe(abortError)
   })
 
+  it('retires one exact physical copy with the backend reason and optional note contract', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"idDisco":42,"cantidadCopias":1}'),
+    })
+
+    await api.discos.retirarCopia(42, 77, {
+      reason: 'DAMAGED',
+      note: 'Rayón profundo',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/discos/42/copias/77/retiro', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ reason: 'DAMAGED', note: 'Rayón profundo' }),
+    }))
+  })
+
+  it('loads the authoritative Stock valuation independently from pricing preview settings', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"projectedNewUyu":6000}'),
+    })
+
+    await api.pricing.stockValuation()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/pricing/stock-valuation', expect.objectContaining({
+      method: 'GET',
+    }))
+  })
+
   it('exchanges the Google handoff code through a POST body', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

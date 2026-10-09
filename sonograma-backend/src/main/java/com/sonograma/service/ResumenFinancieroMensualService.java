@@ -142,7 +142,7 @@ public class ResumenFinancieroMensualService {
                 .ingresosRegistrados(ingresosRegistrados)
                 .gananciaItems(ganancia)
                 .gastos(totalGastos)
-                .balanceFinal(ingresosRegistrados)
+                .balanceFinal(ingresosRegistrados.subtract(totalGastos))
                 .itemsGananciaNoDisponible(faltantes)
                 .advertenciaGanancia(faltantes > 0
                         ? faltantes + " ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida."

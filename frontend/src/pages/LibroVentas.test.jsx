@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LibroVentas from './LibroVentas'
 import { api } from '../api/sonograma'
@@ -12,6 +12,7 @@ vi.mock('../api/sonograma', () => ({
     ventas: {
       resumenMensual: vi.fn(),
       actualizar: vi.fn(),
+      cancelar: vi.fn(),
     },
     preVentas: {
       actualizarPago: vi.fn(),
@@ -206,24 +207,32 @@ function rowContaining(table, text) {
   return within(table).getAllByRole('row').find(row => row.textContent.includes(text))
 }
 
+function deferred() {
+  let resolve
+  const promise = new Promise(next => { resolve = next })
+  return { promise, resolve }
+}
+
+const initialSummary = {
+  cantidadVentas: 4,
+  cantidadItems: 4,
+  cantidadItemsNuevos: 3,
+  cantidadItemsUsados: 1,
+  cantidadItemsSinClasificar: 0,
+  totalVentas: 3470,
+  ingresosRegistrados: 2850,
+  gananciaItems: 170,
+  gastos: 100,
+  balanceFinal: 2750,
+  advertenciaGanancia: '20 ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida.',
+}
+
 describe('LibroVentas profit display', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.libro.listar.mockResolvedValue(movements)
     api.libro.exportarUrl.mockReturnValue('/api/ventas/libro/exportar')
-    api.ventas.resumenMensual.mockResolvedValue({
-      cantidadVentas: 4,
-      cantidadItems: 4,
-      cantidadItemsNuevos: 3,
-      cantidadItemsUsados: 1,
-      cantidadItemsSinClasificar: 0,
-      totalVentas: 3470,
-      ingresosRegistrados: 2850,
-      gananciaItems: 170,
-      gastos: 100,
-      balanceFinal: 2850,
-      advertenciaGanancia: '20 ítem(s) no tienen un costo de adquisición histórico válido; su ganancia no fue inventada ni incluida.',
-    })
+    api.ventas.resumenMensual.mockResolvedValue(initialSummary)
   })
 
   it('keeps the existing sold-items total and shows the New/Used breakdown', async () => {
@@ -336,6 +345,8 @@ describe('LibroVentas profit display', () => {
       cantidad: 2,
       fechaPago: '2026-07-18T11:30',
     })))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
 
     fireEvent.click(rowContaining(table, 'Lucía Silva'))
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar' }))
@@ -343,6 +354,8 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar permanentemente' }))
 
     await waitFor(() => expect(api.preVentas.eliminarPago).toHaveBeenCalledWith(20))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(3))
   })
 
   it('keeps normal sales on the existing edit/cancel actions', async () => {
@@ -353,8 +366,42 @@ describe('LibroVentas profit display', () => {
     expect(screen.getByRole('button', { name: 'Cancelar venta' })).toBeInTheDocument()
   })
 
-  it('annuls a debt payment and emits the shared financial refresh event', async () => {
+  it('refreshes the table and KPI cards after cancelling a sale', async () => {
+    const refreshedSummary = {
+      ...initialSummary,
+      cantidadVentas: 3,
+      totalVentas: 2100,
+      ingresosRegistrados: 1850,
+      balanceFinal: 1750,
+    }
+    api.ventas.cancelar.mockResolvedValue(undefined)
+    api.libro.listar.mockResolvedValueOnce(movements).mockResolvedValue(movements.slice(1))
+    api.ventas.resumenMensual.mockResolvedValueOnce(initialSummary).mockResolvedValue(refreshedSummary)
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar venta' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(api.ventas.cancelar).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
+    const salesCard = screen.getByText('Ventas').closest('.card')
+    expect(within(salesCard).getByText('3', { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByText('UYU $1.750,00')).toBeInTheDocument()
+    expect(screen.queryByText('Ana Pérez')).not.toBeInTheDocument()
+  })
+
+  it('annuls a debt payment and refreshes the table and KPI cards', async () => {
+    const refreshedSummary = {
+      ...initialSummary,
+      ingresosRegistrados: 2600,
+      balanceFinal: 2500,
+    }
     api.deudas.eliminarPago.mockResolvedValue(undefined)
+    api.libro.listar.mockResolvedValueOnce(movements).mockResolvedValue(movements.slice(0, -1))
+    api.ventas.resumenMensual.mockResolvedValueOnce(initialSummary).mockResolvedValue(refreshedSummary)
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     render(<LibroVentas />)
 
@@ -364,10 +411,89 @@ describe('LibroVentas profit display', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
 
     await waitFor(() => expect(api.deudas.eliminarPago).toHaveBeenCalledWith(5))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('UYU $2.500,00')).toBeInTheDocument()
+    expect(screen.queryByText('Eva López')).not.toBeInTheDocument()
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'sonograma:financial-data-changed',
     }))
     dispatchSpy.mockRestore()
+  })
+
+  it('refreshes mutations with the applied period instead of an unapplied editable month', async () => {
+    api.ventas.cancelar.mockResolvedValue(undefined)
+    render(<LibroVentas />)
+    const table = await screen.findByRole('table')
+
+    const monthInput = document.querySelector('input[type="month"]')
+    fireEvent.change(monthInput, { target: { value: '2026-09' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenLastCalledWith('2026-09'))
+
+    fireEvent.change(monthInput, { target: { value: '2026-08' } })
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar venta' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(api.ventas.cancelar).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(3))
+    expect(api.ventas.resumenMensual).toHaveBeenLastCalledWith('2026-09')
+    expect(api.libro.listar).toHaveBeenLastCalledWith({
+      desde: '2026-09-01',
+      hasta: '2026-09-30',
+    })
+  })
+
+  it('keeps existing cards and does not refresh data when sale cancellation fails', async () => {
+    api.ventas.cancelar.mockRejectedValue(new Error('No se pudo cancelar la venta'))
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(rowContaining(table, 'Ana Pérez'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar venta' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    expect(await screen.findByText('No se pudo cancelar la venta')).toBeInTheDocument()
+    expect(api.libro.listar).toHaveBeenCalledTimes(1)
+    expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('UYU $2.750,00')).toBeInTheDocument()
+  })
+
+  it('ignores stale table and summary responses from an older applied period', async () => {
+    const oldTableRequest = deferred()
+    const oldSummaryRequest = deferred()
+    const newestSummary = { ...initialSummary, balanceFinal: 2222 }
+    api.libro.listar
+      .mockResolvedValueOnce(movements)
+      .mockImplementationOnce(() => oldTableRequest.promise)
+      .mockResolvedValueOnce([movements[2]])
+    api.ventas.resumenMensual
+      .mockResolvedValueOnce(initialSummary)
+      .mockImplementationOnce(() => oldSummaryRequest.promise)
+      .mockResolvedValueOnce(newestSummary)
+    render(<LibroVentas />)
+    await screen.findByRole('table')
+
+    const monthInput = document.querySelector('input[type="month"]')
+    fireEvent.change(monthInput, { target: { value: '2026-09' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
+
+    fireEvent.change(monthInput, { target: { value: '2026-08' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+    expect(await screen.findByText('UYU $2.222,00')).toBeInTheDocument()
+    expect(screen.getByText('Carla Ruiz')).toBeInTheDocument()
+
+    await act(async () => {
+      oldTableRequest.resolve([movements[0]])
+      oldSummaryRequest.resolve({ ...initialSummary, balanceFinal: 1111 })
+    })
+
+    expect(screen.getByText('UYU $2.222,00')).toBeInTheDocument()
+    expect(screen.queryByText('UYU $1.111,00')).not.toBeInTheDocument()
+    expect(screen.getByText('Carla Ruiz')).toBeInTheDocument()
+    expect(screen.queryByText('Ana Pérez')).not.toBeInTheDocument()
   })
 
   it('edits a debt payment in the same drawer and refreshes financial data', async () => {
@@ -403,6 +529,8 @@ describe('LibroVentas profit display', () => {
       numeroRecibo: 'B-2',
       notas: 'Corrección de boleta',
     }))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByText('Pago de deuda actualizado correctamente.')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Anular pago' })).toBeInTheDocument()
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -464,6 +592,7 @@ describe('LibroVentas profit display', () => {
       total: 1500,
       detalles: [expect.objectContaining({ idDetalle: 11, cantidad: 1, precioUnitario: 1500, clasificacionItem: 'USADO', copyId: 88 })],
     })))
+    await waitFor(() => expect(api.libro.listar).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(api.ventas.resumenMensual).toHaveBeenCalledTimes(2))
 
     expect(screen.getByText('Discos vendidos')).toBeInTheDocument()
@@ -550,11 +679,12 @@ describe('LibroVentas profit display', () => {
     expect(table.parentElement.parentElement).toHaveClass('overflow-hidden')
   })
 
-  it('uses recorded income for final balance and removes the warning and PDF action', async () => {
+  it('shows the backend balance after expenses and removes the warning and PDF action', async () => {
     render(<LibroVentas />)
 
     expect(await screen.findByText('Balance final')).toBeInTheDocument()
-    expect(screen.getAllByText('UYU $2.850,00')).toHaveLength(2)
+    expect(screen.getByText('UYU $2.850,00')).toBeInTheDocument()
+    expect(screen.getByText('UYU $2.750,00')).toBeInTheDocument()
     expect(screen.getByText('UYU $100,00')).toBeInTheDocument()
     expect(screen.queryByText(/no tienen un costo de adquisición histórico válido/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Descargar resumen PDF' })).not.toBeInTheDocument()

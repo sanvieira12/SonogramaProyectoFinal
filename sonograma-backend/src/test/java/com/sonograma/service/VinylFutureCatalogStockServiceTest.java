@@ -25,13 +25,14 @@ class VinylFutureCatalogStockServiceTest {
 
     @Mock private DiscoRepository discoRepository;
     @Mock private DiscoQrCopyService qrCopyService;
+    @Mock private DiscoEstadoService discoEstadoService;
 
     private VinylFutureCatalogStockService service;
 
     @BeforeEach
     void setUp() {
         service = new VinylFutureCatalogStockService(
-            discoRepository, qrCopyService, new VinylFutureIdentityNormalizer()
+            discoRepository, qrCopyService, new VinylFutureIdentityNormalizer(), discoEstadoService
         );
     }
 
@@ -55,6 +56,7 @@ class VinylFutureCatalogStockServiceTest {
         assertThat(result.disco().getVinylFutureSupplierCodeNormalized()).isEqualTo("GM-05");
         assertThat(result.disco().getCantidadCopias()).isEqualTo(3);
         verify(qrCopyService).synchronizeAvailableCopies(result.disco(), 3);
+        verify(discoEstadoService).aplicar(result.disco());
     }
 
     @Test
@@ -83,6 +85,7 @@ class VinylFutureCatalogStockServiceTest {
         assertThat(existing.getFechaIngreso()).isEqualTo(originalCreation);
         assertThat(existing.getFechaActualizacion()).isAfter(oldUpdate);
         verify(qrCopyService).synchronizeAvailableCopies(existing, 6);
+        verify(discoEstadoService).aplicar(existing);
     }
 
     @Test

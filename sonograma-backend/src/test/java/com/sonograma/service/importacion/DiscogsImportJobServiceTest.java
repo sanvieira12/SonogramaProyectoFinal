@@ -26,6 +26,7 @@ import com.sonograma.repository.PagoDeudaRepository;
 import com.sonograma.repository.VentaRepository;
 import com.sonograma.service.AudioPreviewService;
 import com.sonograma.service.DiscoService;
+import com.sonograma.service.StockValuationService;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,6 +107,9 @@ class DiscogsImportJobServiceTest {
 
     @Autowired
     private DiscoService discoService;
+
+    @Autowired
+    private StockValuationService stockValuationService;
 
     @MockBean
     private DiscogsApiClient apiClient;
@@ -286,8 +290,11 @@ class DiscogsImportJobServiceTest {
             assertThat(disco.getCantidadCopias()).isEqualTo(1);
             assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco()))
                     .singleElement()
-                    .extracting(copy -> copy.getEstado())
-                    .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+                    .satisfies(copy -> {
+                        assertThat(copy.getEstado()).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+                        assertThat(copy.getPrecioVenta()).isNull();
+                        assertThat(copy.getCondicionFisica()).isNull();
+                    });
         });
     }
 
@@ -579,11 +586,16 @@ class DiscogsImportJobServiceTest {
 
     @Test
     void sameDiscogsReleaseIncrementsStockEvenWhenBusinessCodeIsSingleLetter() {
+        var valuationBefore = stockValuationService.current();
         DiscogsImportJob job = completedJob("same-release.xlsx");
         DiscogsImportRow first = parsedRow(job, 1, 111L);
         DiscogsImportRow second = parsedRow(job, 2, 111L);
         first.setInternalCode("F");
+        first.setManualPriceUyu(new BigDecimal("700"));
+        first.setManualCondition("VG");
         second.setInternalCode("F");
+        second.setManualPriceUyu(new BigDecimal("900"));
+        second.setManualCondition("NM");
         rowRepository.saveAll(List.of(first, second));
 
         DiscogsImportJobDTO imported = service.importParsedRows(job.getIdDiscogsImportJob());
@@ -600,7 +612,25 @@ class DiscogsImportJobServiceTest {
             assertThat(disco.getCodigoInterno()).isEqualTo("F");
             assertThat(disco.getCantidadCopias()).isEqualTo(2);
             assertThat(disco.getDiscogsUrl()).endsWith("/release/111");
+            assertThat(qrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco()))
+                    .satisfiesExactly(
+                            copy -> {
+                                assertThat(copy.getPrecioVenta()).isEqualByComparingTo("700");
+                                assertThat(copy.getCondicionFisica()).isEqualTo("VG");
+                            },
+                            copy -> {
+                                assertThat(copy.getPrecioVenta()).isEqualByComparingTo("900");
+                                assertThat(copy.getCondicionFisica()).isEqualTo("NM");
+                            });
         });
+        var valuationAfter = stockValuationService.current();
+        assertThat(valuationAfter.projectedUsedKnownUyu()
+                .subtract(valuationBefore.projectedUsedKnownUyu())).isEqualByComparingTo("1600");
+        assertThat(valuationAfter.availableUsedCopies() - valuationBefore.availableUsedCopies()).isEqualTo(2);
+        assertThat(valuationAfter.usedAvailableCopiesWithoutPrice()
+                - valuationBefore.usedAvailableCopiesWithoutPrice()).isZero();
+        assertThat(valuationAfter.importedNewEur().subtract(valuationBefore.importedNewEur())).isZero();
+        assertThat(valuationAfter.importedNewUyu().subtract(valuationBefore.importedNewUyu())).isZero();
     }
 
     @Test

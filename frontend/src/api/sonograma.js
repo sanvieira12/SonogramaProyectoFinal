@@ -127,6 +127,8 @@ export const api = {
       request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     cambiarEstadoCopia: (idDisco, idCopia, estado) =>
       request('PATCH', `/discos/${idDisco}/copias/${idCopia}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
+    retirarCopia: (idDisco, idCopia, data) =>
+      request('POST', `/discos/${idDisco}/copias/${idCopia}/retiro`, data),
     eliminarCopia: (idDisco, idCopia) =>
       request('DELETE', `/discos/${idDisco}/copias/${idCopia}`),
     eliminar: (id) => request('DELETE', `/discos/${id}`),
@@ -148,6 +150,7 @@ export const api = {
 
   pricing: {
     settings: () => request('GET', '/pricing/settings'),
+    stockValuation: () => request('GET', '/pricing/stock-valuation'),
     updateSettings: (settings) => request('PUT', '/pricing/settings', settings),
     preview: (settings) => request('POST', '/pricing/preview', { settings }),
     apply: (settings, scope, selectedIds = []) => request('POST', '/pricing/apply', { settings, scope, selectedIds }),

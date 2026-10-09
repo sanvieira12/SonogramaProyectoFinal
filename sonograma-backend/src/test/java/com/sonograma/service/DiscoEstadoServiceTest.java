@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DiscoEstadoServiceTest {
@@ -23,6 +24,7 @@ class DiscoEstadoServiceTest {
 
         assertThat(disco.getEstado()).isEqualTo(EstadoDisco.VENDIDO);
         assertThat(disco.getCantidadCopias()).isZero();
+        verify(copies).synchronizeParentQrAlias(disco);
     }
 
     @Test
@@ -34,6 +36,7 @@ class DiscoEstadoServiceTest {
         service.aplicar(disco);
 
         assertThat(disco.getEstado()).isEqualTo(EstadoDisco.RESERVADO);
+        verify(copies).synchronizeParentQrAlias(disco);
     }
 
     @Test
@@ -45,5 +48,6 @@ class DiscoEstadoServiceTest {
         service.aplicar(disco);
 
         assertThat(disco.getEstado()).isEqualTo(EstadoDisco.SIN_STOCK);
+        verify(copies).synchronizeParentQrAlias(disco);
     }
 }

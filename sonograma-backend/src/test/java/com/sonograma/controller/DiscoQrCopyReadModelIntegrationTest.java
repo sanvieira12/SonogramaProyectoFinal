@@ -1,15 +1,19 @@
 package com.sonograma.controller;
 
+import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
+import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.DiscogsManualBatchStatus;
 import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.EstadoDisco;
 import com.sonograma.enums.PricingMode;
+import com.sonograma.enums.TipoDisco;
 import com.sonograma.repository.DiscoQrCopyRepository;
 import com.sonograma.repository.DiscoRepository;
+import com.sonograma.service.DiscoService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +44,7 @@ class DiscoQrCopyReadModelIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private DiscoRepository discoRepository;
     @Autowired private DiscoQrCopyRepository copyRepository;
+    @Autowired private DiscoService discoService;
     @Autowired private EntityManager entityManager;
 
     private Disco disco;
@@ -198,6 +203,54 @@ class DiscoQrCopyReadModelIntegrationTest {
     void missingProductUsesProjectNotFoundResponse() throws Exception {
         mockMvc.perform(get("/discos/{id}/copias", Long.MAX_VALUE))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ordinaryUsedCreationStoresSubmittedCommercialDataOnlyOnCopiesCreatedByThatOperation() {
+        DiscoRequestDTO request = usedRequest("Ordinary USED", "850", " vg+ ", 1);
+
+        Long productId = discoService.crearDisco(request).getIdDisco();
+        List<DiscoQrCopy> afterCreation = copyRepository.findByIdDiscoOrderByCopyNumber(productId);
+
+        assertThat(afterCreation).singleElement().satisfies(copy -> {
+            assertThat(copy.getPrecioVenta()).isEqualByComparingTo("850");
+            assertThat(copy.getCondicionFisica()).isEqualTo("VG+");
+        });
+
+        discoService.actualizarCopias(productId, 2);
+        List<DiscoQrCopy> afterQuantityIncrease = copyRepository.findByIdDiscoOrderByCopyNumber(productId);
+        assertThat(afterQuantityIncrease).hasSize(2);
+        assertThat(afterQuantityIncrease.get(0).getPrecioVenta()).isEqualByComparingTo("850");
+        assertThat(afterQuantityIncrease.get(0).getCondicionFisica()).isEqualTo("VG+");
+        assertThat(afterQuantityIncrease.get(1).getPrecioVenta()).isNull();
+        assertThat(afterQuantityIncrease.get(1).getCondicionFisica()).isNull();
+        assertThat(afterQuantityIncrease).extracting(DiscoQrCopy::getCodigoQr).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void ordinaryUsedCreationLeavesMissingExactCommercialDataNull() {
+        DiscoRequestDTO request = usedRequest("Incomplete USED", null, null, 1);
+
+        Long productId = discoService.crearDisco(request).getIdDisco();
+
+        assertThat(copyRepository.findByIdDiscoOrderByCopyNumber(productId)).singleElement().satisfies(copy -> {
+            assertThat(copy.getPrecioVenta()).isNull();
+            assertThat(copy.getCondicionFisica()).isNull();
+        });
+    }
+
+    private DiscoRequestDTO usedRequest(String album, String price, String condition, int quantity) {
+        DiscoRequestDTO request = new DiscoRequestDTO();
+        request.setCodigoInterno("USED-" + System.nanoTime());
+        request.setArtista("USED creation artist");
+        request.setAlbum(album);
+        request.setCondicion(CondicionDisco.USADO);
+        request.setCondicionFisica(condition);
+        request.setTipoDisco(TipoDisco.VINILO);
+        request.setPrecioVenta(price == null ? null : new BigDecimal(price));
+        request.setPricingMode(price == null ? PricingMode.AUTO : PricingMode.MANUAL);
+        request.setCantidadCopias(quantity);
+        return request;
     }
 
     private DiscogsManualBatch saveBatch(String source) {

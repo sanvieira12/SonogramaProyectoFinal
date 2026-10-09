@@ -132,6 +132,8 @@ class DiscoSaleSearchIntegrationTest {
         DiscogsManualBatch lo = saveBatch("LO");
         DiscogsManualBatch sv3 = saveBatch("SV3");
         Disco product = saveProduct("LO-EXACT-" + suffix, "Lo Artist", "Source Match");
+        product.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(product);
         DiscoQrCopy first = saveCopy(product, 1, EstadoCopiaDisco.DISPONIBLE, lo, "1100", "NM");
         saveCopy(product, 2, EstadoCopiaDisco.VENDIDO, sv3, "950", "VG");
         DiscoQrCopy third = saveCopy(product, 3, EstadoCopiaDisco.DISPONIBLE, sv3, "875", "VG+");
@@ -155,6 +157,42 @@ class DiscoSaleSearchIntegrationTest {
         assertThat(discoService.buscarParaVenta("sv3", 20))
                 .singleElement()
                 .satisfies(result -> assertThat(result.idDisco()).isEqualTo(product.getIdDisco()));
+    }
+
+    @Test
+    void everyUsedProductWithPhysicalRowsRequiresExactCopySelectionRegardlessOfProvenance() {
+        Disco ordinaryUsed = saveProduct("ORDINARY-USED-" + suffix, "Ordinary Used Artist", "Single Copy");
+        ordinaryUsed.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(ordinaryUsed);
+        DiscoQrCopy ordinaryCopy = saveCopy(
+                ordinaryUsed, 1, EstadoCopiaDisco.DISPONIBLE, null, "700", "VG");
+
+        Disco excelUsed = saveProduct("EXCEL-USED-" + suffix, "Excel Used Artist", "Multiple Copies");
+        excelUsed.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(excelUsed);
+        DiscoQrCopy excelFirst = saveCopy(
+                excelUsed, 1, EstadoCopiaDisco.DISPONIBLE, null, "900", "NM");
+        DiscoQrCopy excelSecond = saveCopy(
+                excelUsed, 2, EstadoCopiaDisco.DISPONIBLE, null, "850", "VG+");
+
+        assertThat(discoService.buscarParaVenta("ordinary used artist", 20))
+                .singleElement()
+                .satisfies(result -> {
+                    assertThat(result.requiresExactCopySelection()).isTrue();
+                    assertThat(result.availableCopies()).extracting(copy -> copy.copyId())
+                            .containsExactly(ordinaryCopy.getId());
+                });
+        assertThat(discoService.buscarParaVenta("excel used artist", 20))
+                .singleElement()
+                .satisfies(result -> {
+                    assertThat(result.requiresExactCopySelection()).isTrue();
+                    assertThat(result.availableCopies()).extracting(copy -> copy.copyId())
+                            .containsExactly(excelFirst.getId(), excelSecond.getId());
+                    assertThat(result.availableCopies()).allSatisfy(copy -> {
+                        assertThat(copy.manualBatchId()).isNull();
+                        assertThat(copy.sourceCustomerCode()).isNull();
+                    });
+                });
     }
 
     @Test

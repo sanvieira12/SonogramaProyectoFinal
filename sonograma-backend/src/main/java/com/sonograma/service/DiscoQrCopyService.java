@@ -4,6 +4,7 @@ import com.sonograma.dto.DiscoQrCopyDTO;
 import com.sonograma.dto.DiscoQrCopyDetailDTO;
 import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
+import com.sonograma.enums.CondicionDisco;
 import com.sonograma.enums.EstadoCopiaDisco;
 import com.sonograma.enums.DisposicionCopiaReason;
 import com.sonograma.exception.ConflictoNegocioException;
@@ -15,18 +16,22 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class DiscoQrCopyService {
+
+    private static final String AGGREGATE_DECREMENT_NOTE = "Ajuste de cantidad disponible";
+    private static final String AGGREGATE_DECREMENT_ACTOR = "system:aggregate-quantity";
 
     private final DiscoQrCopyRepository repository;
 
@@ -110,8 +115,12 @@ public class DiscoQrCopyService {
 
         if (available.size() > target) {
             List<DiscoQrCopy> removed = new ArrayList<>(available.subList(target, available.size()));
-            repository.deleteAll(removed);
-            current.removeIf(copy -> removed.stream().anyMatch(candidate -> Objects.equals(candidate.getId(), copy.getId())));
+            removed.forEach(copy -> retainAsRemoved(
+                    copy,
+                    DisposicionCopiaReason.REMOVED_FROM_INVENTORY,
+                    AGGREGATE_DECREMENT_NOTE,
+                    AGGREGATE_DECREMENT_ACTOR));
+            repository.saveAll(removed);
         }
 
         List<DiscoQrCopy> fresh = repository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco());
@@ -173,7 +182,56 @@ public class DiscoQrCopyService {
                 .orElse(null));
     }
 
+    /** Keeps the legacy parent QR as an alias, never as physical identity authority. */
+    public void synchronizeParentQrAlias(Disco disco) {
+        List<DiscoQrCopy> copies = repository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco());
+        if (copies.isEmpty()) return;
+        disco.setCodigoQr(copies.stream()
+                .filter(copy -> copy.getEstado() == EstadoCopiaDisco.DISPONIBLE)
+                .findFirst()
+                .or(() -> copies.stream().findFirst())
+                .map(DiscoQrCopy::getCodigoQr)
+                .orElse(null));
+    }
+
     public record CopySynchronizationResult(List<DiscoQrCopy> copies, List<DiscoQrCopy> addedCopies) {}
+
+    /**
+     * Initializes commercial data only on the exact USED rows created by the
+     * current operation. Callers must pass the created-row result from their
+     * receipt/create boundary; retained historical rows are never inferred or
+     * backfilled from the parent product.
+     */
+    public List<DiscoQrCopy> initializeCreatedUsedCopyCommercialData(
+            Disco disco,
+            List<DiscoQrCopy> createdCopies,
+            BigDecimal explicitSalePrice,
+            String explicitPhysicalCondition) {
+        if (disco == null || disco.getCondicion() != CondicionDisco.USADO
+                || createdCopies == null || createdCopies.isEmpty()) {
+            return createdCopies == null ? List.of() : List.copyOf(createdCopies);
+        }
+        if (createdCopies.stream().anyMatch(copy -> copy == null
+                || !Objects.equals(copy.getIdDisco(), disco.getIdDisco()))) {
+            throw new IllegalArgumentException("Las copias creadas deben pertenecer al producto USED recibido.");
+        }
+
+        String condition = normalizeExplicitCondition(explicitPhysicalCondition);
+        if (explicitSalePrice == null && condition == null) {
+            return List.copyOf(createdCopies);
+        }
+        createdCopies.forEach(copy -> {
+            if (explicitSalePrice != null) copy.setPrecioVenta(explicitSalePrice);
+            if (condition != null) copy.setCondicionFisica(condition);
+        });
+        return List.copyOf(repository.saveAll(createdCopies));
+    }
+
+    private String normalizeExplicitCondition(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim();
+        return normalized.length() <= 50 ? normalized : normalized.substring(0, 50);
+    }
 
     @Transactional(readOnly = true)
     public List<DiscoQrCopyDTO> listDtos(Disco disco) {
@@ -266,15 +324,21 @@ public class DiscoQrCopyService {
             repository.save(requested);
             return List.of(requested);
         }
-        if (repository.existsByIdDiscoAndEstadoAndManualDiscogsBatchIsNotNull(
-                disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE)) {
-            throw new ConflictoNegocioException(
-                    "Seleccioná la copia física exacta para vender este disco usado.");
-        }
         List<DiscoQrCopy> available = repository.findByIdDiscoAndEstadoOrderByCopyNumber(
                 disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE);
         if (available.size() < quantity) {
             throw new NegocioException("No hay suficientes copias disponibles para esa venta");
+        }
+        boolean manualInventory = available.stream().anyMatch(copy -> copy.getManualDiscogsBatch() != null);
+        boolean usedInventory = disco.getCondicion() == CondicionDisco.USADO;
+        if (manualInventory || usedInventory) {
+            if (!manualInventory && usedInventory && quantity == 1 && available.size() == 1) {
+                DiscoQrCopy onlyCopy = available.getFirst();
+                onlyCopy.setEstado(EstadoCopiaDisco.VENDIDO);
+                return List.of(repository.save(onlyCopy));
+            }
+            throw new ConflictoNegocioException(
+                    "Seleccioná la copia física exacta para vender este disco usado.");
         }
         List<DiscoQrCopy> reserved = new ArrayList<>(available.subList(0, quantity));
         reserved.forEach(copy -> copy.setEstado(EstadoCopiaDisco.VENDIDO));
@@ -289,6 +353,10 @@ public class DiscoQrCopyService {
     }
 
     public void restoreCopies(String copyIdsSnapshot) {
+        restoreCopies(null, copyIdsSnapshot);
+    }
+
+    public void restoreCopies(Disco disco, String copyIdsSnapshot) {
         if (copyIdsSnapshot == null || copyIdsSnapshot.isBlank()) {
             return;
         }
@@ -314,6 +382,11 @@ public class DiscoQrCopyService {
         if (copies.size() != ids.size()) {
             throw new ConflictoNegocioException(
                     "No se puede restaurar el stock porque la venta tiene copias inválidas.");
+        }
+        if (disco != null && copies.stream()
+                .anyMatch(copy -> !Objects.equals(copy.getIdDisco(), disco.getIdDisco()))) {
+            throw new ConflictoNegocioException(
+                    "No se puede restaurar el stock porque una copia no pertenece al disco vendido.");
         }
         if (copies.stream().anyMatch(copy -> copy.getEstado() != EstadoCopiaDisco.VENDIDO)) {
             throw new ConflictoNegocioException(
@@ -370,6 +443,10 @@ public class DiscoQrCopyService {
         DiscoQrCopy copy = repository.findByIdForUpdate(copyId)
             .filter(candidate -> Objects.equals(candidate.getIdDisco(), disco.getIdDisco()))
             .orElseThrow(() -> new RecursoNoEncontradoException("Copia", copyId));
+        if (copy.getEstado() == EstadoCopiaDisco.REMOVED) {
+            throw new ConflictoNegocioException(
+                    "Una copia retirada conserva un estado terminal y no puede reactivarse ni venderse.");
+        }
         if (newState == EstadoCopiaDisco.REMOVED) {
             throw new ConflictoNegocioException(
                     "El retiro de una copia requiere el endpoint de retiro retenido y un motivo explícito.");
@@ -403,12 +480,20 @@ public class DiscoQrCopyService {
             throw new ConflictoNegocioException("La copia ya fue retirada del inventario.");
         }
 
+        retainAsRemoved(copy, reason, note, actor);
+        return repository.save(copy);
+    }
+
+    private void retainAsRemoved(
+            DiscoQrCopy copy,
+            DisposicionCopiaReason reason,
+            String note,
+            String actor) {
         copy.setEstado(EstadoCopiaDisco.REMOVED);
         copy.setDispositionReason(reason);
         copy.setDispositionNote(normalizeNote(note));
         copy.setDisposedAt(LocalDateTime.now());
         copy.setDisposedBy(normalizeActor(actor));
-        return repository.save(copy);
     }
 
     private String normalizeNote(String note) {
