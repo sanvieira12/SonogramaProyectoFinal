@@ -21,6 +21,12 @@ public class PreVenta {
     private Long idPreVenta;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_pre_venta_transaccion", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private PreVentaTransaccion transaccion;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_cliente", nullable = false)
     private Cliente cliente;
 
@@ -33,6 +39,9 @@ public class PreVenta {
 
     @Column(name = "codigo_disco_normalizado", length = 255)
     private String codigoDiscoNormalizado;
+
+    @Column(name = "operation_key", length = 120)
+    private String operationKey;
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_venta_pago", unique = true)

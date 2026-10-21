@@ -51,6 +51,7 @@ class CatalogCleanupServiceTest {
     @Autowired private VentaRepository ventaRepository;
     @Autowired private DetalleVentaRepository detalleVentaRepository;
     @Autowired private PreVentaRepository preVentaRepository;
+    @Autowired private PreVentaTransaccionRepository preVentaTransaccionRepository;
     @Autowired private EntityManager entityManager;
 
     @BeforeEach
@@ -63,6 +64,7 @@ class CatalogCleanupServiceTest {
         entityManager.createNativeQuery("DELETE FROM pedido").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM reserva").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM pre_venta").executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM pre_venta_transaccion").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM catalog_audio_preview").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM disco_qr_copy").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM movimiento_stock").executeUpdate();
@@ -142,7 +144,13 @@ class CatalogCleanupServiceTest {
             .activa(true)
             .build());
 
+        PreVentaTransaccion preVentaTransaccion = preVentaTransaccionRepository.save(PreVentaTransaccion.builder()
+            .cliente(cliente)
+            .fecha(LocalDate.now())
+            .idempotencyKey("catalog-cleanup-test")
+            .build());
         preVentaRepository.save(PreVenta.builder()
+            .transaccion(preVentaTransaccion)
             .cliente(cliente)
             .disco(sold)
             .fecha(LocalDate.now())

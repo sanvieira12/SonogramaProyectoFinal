@@ -17,6 +17,15 @@ public interface PreVentaRepository extends JpaRepository<PreVenta, Long> {
     @Query("select p from PreVenta p where p.idPreVenta = :id")
     Optional<PreVenta> findByIdForUpdate(@Param("id") Long id);
 
+    @Query("select p.transaccion.idPreVentaTransaccion from PreVenta p where p.idPreVenta = :id")
+    Optional<Long> findTransactionIdByItemId(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from PreVenta p where p.transaccion.idPreVentaTransaccion = :id order by p.idPreVenta")
+    List<PreVenta> findAllByTransaccionIdForUpdate(@Param("id") Long id);
+
+    long countByTransaccionIdPreVentaTransaccion(Long id);
+
     List<PreVenta> findByCodigoDiscoNormalizadoAndDiscoIsNullAndEstadoNot(
         String codigoDiscoNormalizado, String estado);
 }

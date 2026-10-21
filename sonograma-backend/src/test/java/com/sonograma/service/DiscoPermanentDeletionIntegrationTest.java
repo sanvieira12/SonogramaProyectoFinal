@@ -8,6 +8,7 @@ import com.sonograma.entity.Disco;
 import com.sonograma.entity.DiscoQrCopy;
 import com.sonograma.entity.DiscogsManualBatch;
 import com.sonograma.entity.PreVenta;
+import com.sonograma.entity.PreVentaTransaccion;
 import com.sonograma.entity.Reserva;
 import com.sonograma.entity.Venta;
 import com.sonograma.dto.DiscoResponseDTO;
@@ -82,6 +83,7 @@ class DiscoPermanentDeletionIntegrationTest {
         entityManager.createNativeQuery("DELETE FROM pedido").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM reserva").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM pre_venta").executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM pre_venta_transaccion").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM catalog_audio_preview").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM disco_qr_copy").executeUpdate();
         entityManager.createNativeQuery("DELETE FROM movimiento_stock").executeUpdate();
@@ -246,8 +248,10 @@ class DiscoPermanentDeletionIntegrationTest {
     @Test
     void pendingPresaleBlocksDeletionWithConflictAndKeepsCatalogRecord() {
         Disco disco = saveDisco("PRESALE-1");
+        Cliente cliente = saveClient();
         entityManager.persist(PreVenta.builder()
-                .cliente(saveClient())
+                .transaccion(savePreVentaTransaction(cliente, "delete-product"))
+                .cliente(cliente)
                 .disco(disco)
                 .fecha(LocalDate.now())
                 .cantidad(1)
@@ -555,8 +559,10 @@ class DiscoPermanentDeletionIntegrationTest {
         Disco disco = saveDisco("COPY-PRESALE-GUARD");
         DiscoQrCopy deletable = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
         DiscoQrCopy retained = saveManualCopyWithNumber(disco, batch, EstadoCopiaDisco.DISPONIBLE, 2);
+        Cliente cliente = saveClient();
         entityManager.persist(PreVenta.builder()
-                .cliente(saveClient())
+                .transaccion(savePreVentaTransaction(cliente, "delete-copy"))
+                .cliente(cliente)
                 .disco(disco)
                 .fecha(LocalDate.now())
                 .cantidad(1)
@@ -888,6 +894,16 @@ class DiscoPermanentDeletionIntegrationTest {
         client.setCedula("CI-" + System.nanoTime());
         client.setActivo(true);
         return clienteRepository.save(client);
+    }
+
+    private PreVentaTransaccion savePreVentaTransaction(Cliente cliente, String suffix) {
+        PreVentaTransaccion transaction = PreVentaTransaccion.builder()
+                .cliente(cliente)
+                .fecha(LocalDate.now())
+                .idempotencyKey("test-" + suffix + "-" + cliente.getIdCliente())
+                .build();
+        entityManager.persist(transaction);
+        return transaction;
     }
 
     private DiscogsManualBatch saveManualBatch(String source) {

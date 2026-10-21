@@ -283,6 +283,16 @@ export const api = {
     eliminar: (id) => request('DELETE', `/pre-ventas/${id}`),
   },
 
+  preVentaTransacciones: {
+    listar: () => request('GET', '/pre-venta-transacciones'),
+    obtener: (id) => request('GET', `/pre-venta-transacciones/${id}`),
+    crear: (payload) => request('POST', '/pre-venta-transacciones', payload),
+    agregarItem: (id, payload) => request('POST', `/pre-venta-transacciones/${id}/items`, payload),
+    actualizarItem: (id, itemId, payload) => request('PUT', `/pre-venta-transacciones/${id}/items/${itemId}`, payload),
+    eliminarItem: (id, itemId) => request('DELETE', `/pre-venta-transacciones/${id}/items/${itemId}`),
+    pagarPendientes: (id) => request('POST', `/pre-venta-transacciones/${id}/pagar-pendientes`),
+  },
+
   gastosTienda: {
     listar: () => request('GET', '/gastos-tienda'),
     resumen: () => request('GET', '/gastos-tienda/resumen'),

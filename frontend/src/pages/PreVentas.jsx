@@ -1,1076 +1,490 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
-import { calculatePreVentaGroupSummary, groupPreVentasByClient } from './preVentaGrouping'
 import { businessDateInMontevideo } from '../utils/businessDate'
+import { mergePreVentaItem, transactionTotal } from './preVentaTransactionUtils'
 
-const emptyManualForm = () => ({ descripcion: '', codigo: '', cantidad: '1', precio: '', notas: '' })
-const emptyMetaForm = () => ({ fecha: businessDateInMontevideo(), notas: '' })
+const emptyManual = () => ({ descripcion: '', codigoDisco: '', cantidad: '1', precioUnitario: '', notas: '' })
+const emptyMeta = () => ({ fecha: businessDateInMontevideo(), notas: '' })
 
-const ESTADO_LABELS = {
-  DISPONIBLE: 'Disponible',
-  RESERVADO: 'Reservado',
-  VENDIDO: 'Vendido',
-  FUERA_STOCK: 'Fuera de stock',
-  DESCONTINUADO: 'Descontinuado',
+function newKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `preventa-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function money(value) {
-  return value == null || value === '' ? '—' : `UYU $${Number(value).toLocaleString('es-UY', { maximumFractionDigits: 2 })}`
+  return `UYU $${Number(value || 0).toLocaleString('es-UY', { maximumFractionDigits: 2 })}`
 }
 
 function fmtDate(value) {
   if (!value) return '—'
   const [year, month, day] = String(value).slice(0, 10).split('-')
-  if (!year || !month || !day) return value
-  return `${day}/${month}/${year}`
+  return year && month && day ? `${day}/${month}/${year}` : value
 }
 
-function fmtDateTime(value) {
-  if (!value) return '—'
-  const date = String(value).replace('T', ' ')
-  return date.length >= 16 ? `${fmtDate(date)} ${date.slice(11, 16)}` : fmtDate(date)
+function normalize(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
-function asDateStamp(value) {
-  const stamp = Date.parse(`${value}T00:00:00`)
-  return Number.isFinite(stamp) ? stamp : 0
+function quantity(item) {
+  const value = Number(item?.cantidad)
+  return Number.isInteger(value) && value > 0 ? value : 0
 }
 
-function normalizeText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
+function unitPrice(item) {
+  const value = Number(item?.precioUnitario)
+  return Number.isFinite(value) && value > 0 ? value : 0
 }
 
-function selectedPrice(selectedItem) {
-  return Number(selectedItem?.precio || 0)
+function lineTotal(item) {
+  return Number((quantity(item) * unitPrice(item)).toFixed(2))
 }
 
-function selectedQuantity(selectedItem) {
-  const qty = Number(selectedItem?.cantidad || 0)
-  return Number.isFinite(qty) && qty > 0 ? qty : 1
-}
-
-function buildSelectedFromDisco(disco) {
+function catalogItem(disco) {
   return {
-    mode: 'catalogo',
-    idDisco: disco.idDisco,
-    artista: disco.artista || '',
-    album: disco.album || '',
-    descripcion: '',
-    codigoDisco: disco.codigoInterno || '',
-    cantidad: '1',
-    precio: disco.precioVenta != null ? String(Number(disco.precioVenta)) : '',
-    notas: '',
-    imagenUrl: disco.imagenUrl || '',
-    estado: disco.estado || '',
-    selloDiscografico: disco.selloDiscografico || '',
+    uid: newKey(), mode: 'catalogo', idDisco: disco.idDisco,
+    titulo: [disco.artista, disco.album].filter(Boolean).join(' — ') || 'Disco de catálogo',
+    descripcion: null, codigoDisco: disco.codigoInterno || '', cantidad: '1',
+    precioUnitario: disco.precioVenta != null ? String(Number(disco.precioVenta)) : '',
+    notas: '', imagenUrl: disco.imagenUrl || '',
   }
 }
 
-function buildSelectedFromManual(manualForm) {
+function manualItem(form) {
   return {
-    mode: 'manual',
-    idDisco: null,
-    artista: '',
-    album: '',
-    descripcion: manualForm.descripcion.trim(),
-    codigoDisco: manualForm.codigo.trim(),
-    cantidad: manualForm.cantidad,
-    precio: manualForm.precio,
-    notas: manualForm.notas.trim(),
-    imagenUrl: '',
-    estado: '',
-    selloDiscografico: '',
+    uid: newKey(), mode: 'manual', idDisco: null, titulo: form.descripcion.trim(),
+    descripcion: form.descripcion.trim(), codigoDisco: form.codigoDisco.trim(),
+    cantidad: String(form.cantidad), precioUnitario: String(form.precioUnitario),
+    notas: form.notas.trim(), imagenUrl: '',
   }
 }
 
-function preVentaTitle(preVenta) {
-  if (preVenta.idDisco) {
-    return [preVenta.artista, preVenta.album].filter(Boolean).join(' — ') || preVenta.descripcion || 'Disco de catálogo'
-  }
-  return preVenta.descripcion || [preVenta.artista, preVenta.album].filter(Boolean).join(' — ') || 'Ítem manual'
+function itemTitle(item) {
+  return item.descripcion || [item.artista, item.album].filter(Boolean).join(' — ') || item.titulo || 'Ítem manual'
 }
 
-function statusSummary(summary) {
-  const pendingLabel = `${summary.pendingCount} ${summary.pendingCount === 1 ? 'pendiente' : 'pendientes'}`
-  const paidLabel = `${summary.paidCount} ${summary.paidCount === 1 ? 'pagada' : 'pagadas'}`
-  if (summary.pendingCount > 0 && summary.paidCount > 0) {
-    return `${pendingLabel} · ${paidLabel}`
-  }
-  if (summary.pendingCount > 0) return pendingLabel
-  if (summary.paidCount > 0) return paidLabel
-  return 'Sin estado'
+function paymentLabel(status) {
+  if (status === 'PAGADA') return 'Pagada'
+  if (status === 'PARCIALMENTE_PAGADA') return 'Parcialmente pagada'
+  return 'Pendiente'
+}
+
+function paymentClasses(status) {
+  if (status === 'PAGADA') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+  if (status === 'PARCIALMENTE_PAGADA') return 'bg-slate-100 text-slate-700 dark:bg-stone-800 dark:text-stone-200'
+  return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
 }
 
 export default function PreVentas() {
-  const clientSearchRef = useRef(null)
-  const listSectionRef = useRef(null)
-  const [preVentas, setPreVentas] = useState([])
+  const [transactions, setTransactions] = useState([])
   const [clientes, setClientes] = useState([])
   const [discos, setDiscos] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [busyId, setBusyId] = useState(null)
-  const [deleting, setDeleting] = useState(null)
-  const [error, setError] = useState('')
-
-  const [selectedItem, setSelectedItem] = useState(null)
-  const [metaForm, setMetaForm] = useState(emptyMetaForm)
-  const [showManualForm, setShowManualForm] = useState(false)
-  const [manualForm, setManualForm] = useState(emptyManualForm)
-  const [discoQuery, setDiscoQuery] = useState('')
-  const [selectedDiscoDetalle, setSelectedDiscoDetalle] = useState(null)
-  const [clienteQuery, setClienteQuery] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
   const [selectedCliente, setSelectedCliente] = useState(null)
-  const [showClienteResults, setShowClienteResults] = useState(false)
+  const [clienteQuery, setClienteQuery] = useState('')
+  const [discoQuery, setDiscoQuery] = useState('')
+  const [items, setItems] = useState([])
+  const [manual, setManual] = useState(emptyManual)
+  const [showManual, setShowManual] = useState(false)
+  const [meta, setMeta] = useState(emptyMeta)
+  const [idempotencyKey, setIdempotencyKey] = useState(newKey)
+  const [selectedId, setSelectedId] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [payingAll, setPayingAll] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const [showClienteModal, setShowClienteModal] = useState(false)
-  const [sortOrder, setSortOrder] = useState('desc')
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [selectedClientId, setSelectedClientId] = useState(null)
+
+  const loadTransactions = () => api.preVentaTransacciones.listar().then(setTransactions)
 
   useEffect(() => {
-    api.preVentas.listar().then(setPreVentas).catch(() => setPreVentas([]))
+    loadTransactions().catch(err => setError(err.message))
     api.clientes.todos().then(setClientes).catch(() => setClientes([]))
     api.discos.todos().then(setDiscos).catch(() => setDiscos([]))
   }, [])
 
-  const discosById = useMemo(
-    () => new Map(discos.map(d => [String(d.idDisco), d])),
-    [discos],
-  )
+  const hasDraft = Boolean(selectedCliente || items.length || meta.notas.trim())
+  useEffect(() => {
+    const warn = event => {
+      if (!hasDraft) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [hasDraft])
+
+  const filteredClients = useMemo(() => {
+    const q = normalize(clienteQuery)
+    return clientes.filter(cliente => normalize([
+      cliente.nombre, cliente.apellido, cliente.cedula, cliente.instagramUsuario, cliente.telefono,
+    ].filter(Boolean).join(' ')).includes(q)).slice(0, 8)
+  }, [clientes, clienteQuery])
 
   const filteredDiscos = useMemo(() => {
-    const q = normalizeText(discoQuery.trim())
-    const pool = [...discos].sort((a, b) => {
-      const aDisponible = a.estado === 'DISPONIBLE' ? -1 : 0
-      const bDisponible = b.estado === 'DISPONIBLE' ? -1 : 0
-      if (aDisponible !== bDisponible) return aDisponible - bDisponible
-      return `${a.artista || ''} ${a.album || ''}`.localeCompare(`${b.artista || ''} ${b.album || ''}`)
-    })
-    if (!q) return pool.slice(0, 10)
-    return pool.filter(d => [d.artista, d.album, d.codigoInterno, d.selloDiscografico].some(field => normalizeText(field).includes(q))).slice(0, 12)
-  }, [discoQuery, discos])
+    const q = normalize(discoQuery)
+    return discos.filter(disco => normalize([
+      disco.artista, disco.album, disco.codigoInterno, disco.selloDiscografico,
+    ].filter(Boolean).join(' ')).includes(q)).slice(0, 12)
+  }, [discos, discoQuery])
 
-  const filteredClientes = useMemo(() => {
-    const q = normalizeText(clienteQuery.trim())
-    if (!q) return clientes.slice(0, 8)
-    return clientes.filter(c => [
-      [c.nombre, c.apellido].filter(Boolean).join(' '),
-      c.cedula,
-      c.instagramUsuario,
-      c.telefono,
-      c.direccion,
-    ].some(field => normalizeText(field).includes(q))).slice(0, 10)
-  }, [clienteQuery, clientes])
+  const selectedTransaction = transactions.find(tx => String(tx.idPreVentaTransaccion) === String(selectedId)) || null
+  const total = transactionTotal(items)
 
-  const sortedPreVentas = useMemo(() => {
-    const dir = sortOrder === 'asc' ? 1 : -1
-    return [...preVentas].sort((a, b) => {
-      const dateDiff = (asDateStamp(a.fecha) - asDateStamp(b.fecha)) * dir
-      if (dateDiff !== 0) return dateDiff
-      return ((a.idPreVenta || 0) - (b.idPreVenta || 0)) * dir
-    })
-  }, [preVentas, sortOrder])
-
-  const clientGroups = useMemo(() => groupPreVentasByClient(sortedPreVentas), [sortedPreVentas])
-  const selectedClientGroup = useMemo(
-    () => clientGroups.find(group => String(group.idCliente) === String(selectedClientId)) || null,
-    [clientGroups, selectedClientId],
-  )
-
-  const totalSeleccionado = useMemo(
-    () => selectedPrice(selectedItem) * selectedQuantity(selectedItem),
-    [selectedItem],
-  )
-
-  function handleAddCatalogDisco(disco) {
-    setSelectedItem(buildSelectedFromDisco(disco))
-    setSelectedDiscoDetalle(null)
-    setShowManualForm(false)
-    setManualForm(emptyManualForm())
-    setError('')
+  function addCatalog(disco) {
+    const incoming = catalogItem(disco)
+    if (!unitPrice(incoming)) {
+      setError('Ingresá un precio válido después de agregar el disco.')
+    } else {
+      setError('')
+    }
+    setItems(current => mergePreVentaItem(current, incoming))
   }
 
-  function handleAddManual() {
-    const description = manualForm.descripcion.trim()
-    const quantity = Number(manualForm.cantidad || 0)
-    const price = Number(manualForm.precio || 0)
-    if (!description || quantity <= 0 || price <= 0) {
+  function addManual() {
+    const incoming = manualItem(manual)
+    if (!incoming.descripcion || !quantity(incoming) || !unitPrice(incoming)) {
       setError('Completá descripción, cantidad y precio para el disco fuera de catálogo.')
       return
     }
-    setSelectedItem(buildSelectedFromManual(manualForm))
-    setShowManualForm(false)
-    setManualForm(emptyManualForm())
+    setItems(current => [...current, incoming])
+    setManual(emptyManual())
+    setShowManual(false)
     setError('')
   }
 
-  function handleRemoveSelected() {
-    setSelectedItem(null)
+  function updateDraft(uid, field, value) {
+    setItems(current => current.map(item => item.uid === uid ? { ...item, [field]: value } : item))
   }
 
-  function selectCliente(cliente) {
-    setSelectedCliente(cliente)
+  function resetDraft() {
+    setSelectedCliente(null)
     setClienteQuery('')
-    setShowClienteResults(false)
-    setError('')
+    setDiscoQuery('')
+    setItems([])
+    setManual(emptyManual())
+    setShowManual(false)
+    setMeta(emptyMeta())
+    setIdempotencyKey(newKey())
   }
 
-  async function submit(e) {
-    e.preventDefault()
-    setSaving(true)
+  async function submit(event) {
+    event.preventDefault()
     setError('')
+    if (!selectedCliente) return setError('Seleccioná un cliente.')
+    if (!items.length) return setError('Agregá al menos un disco.')
+    if (items.some(item => !quantity(item) || !unitPrice(item))) {
+      return setError('Todos los ítems deben tener cantidad y precio positivos.')
+    }
+    setBusy(true)
     try {
-      if (!selectedCliente) throw new Error('Seleccioná un cliente.')
-      if (!selectedItem) throw new Error('Agregá un disco para registrar la pre-venta.')
-      if (selectedQuantity(selectedItem) <= 0) throw new Error('La cantidad debe ser mayor a cero.')
-      if (selectedPrice(selectedItem) <= 0) throw new Error('Ingresá un precio válido para la pre-venta.')
-
-      const created = await api.preVentas.crear({
-        idCliente: Number(selectedCliente.idCliente),
-        idDisco: selectedItem.idDisco ? Number(selectedItem.idDisco) : null,
-        descripcion: selectedItem.idDisco ? null : selectedItem.descripcion,
-        codigoDisco: selectedItem.codigoDisco || null,
-        cantidad: selectedQuantity(selectedItem),
-        precio: Number(totalSeleccionado.toFixed(2)),
-        fecha: metaForm.fecha,
-        notas: [metaForm.notas.trim(), selectedItem.mode === 'manual' ? selectedItem.notas.trim() : ''].filter(Boolean).join('\n\n') || null,
+      const created = await api.preVentaTransacciones.crear({
+        idCliente: Number(selectedCliente.idCliente), fecha: meta.fecha,
+        notas: meta.notas.trim() || null, idempotencyKey,
+        items: items.map(item => ({
+          idDisco: item.idDisco ? Number(item.idDisco) : null,
+          descripcion: item.idDisco ? null : item.descripcion,
+          codigoDisco: item.codigoDisco || null,
+          cantidad: quantity(item), precio: lineTotal(item), notas: item.notas || null,
+        })),
       })
-      setPreVentas(prev => [created, ...prev])
-      setSelectedItem(null)
-      setMetaForm(emptyMetaForm())
-      setManualForm(emptyManualForm())
-      setSelectedCliente(null)
-      setClienteQuery('')
-      setShowManualForm(false)
-      setDiscoQuery('')
-      setShowCreateForm(false)
-      setTimeout(() => {
-        listSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 0)
+      setTransactions(current => [created, ...current.filter(tx => tx.idPreVentaTransaccion !== created.idPreVentaTransaccion)])
+      resetDraft()
+      setShowCreate(false)
     } catch (err) {
       setError(err.message || 'No se pudo registrar la pre-venta')
-      setShowCreateForm(true)
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  async function marcarPagada(item) {
-    setBusyId(item.idPreVenta)
+  function toggleCreate() {
+    if (showCreate && hasDraft && !window.confirm('Hay cambios sin guardar. ¿Cerrar la nueva pre-venta?')) return
+    setShowCreate(value => !value)
+  }
+
+  function replaceTransaction(updated) {
+    setTransactions(current => current.map(tx =>
+      tx.idPreVentaTransaccion === updated.idPreVentaTransaccion ? updated : tx))
+  }
+
+  async function markPaid(item) {
+    setBusy(true)
     setError('')
     try {
-      const updated = await api.preVentas.marcarPagada(item.idPreVenta)
-      setPreVentas(prev => prev.map(p => p.idPreVenta === updated.idPreVenta ? updated : p))
+      await api.preVentas.marcarPagada(item.idPreVenta)
+      const updated = await api.preVentaTransacciones.obtener(selectedTransaction.idPreVentaTransaccion)
+      replaceTransaction(updated)
       window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     } catch (err) {
-      setError(err.message || 'No se pudo marcar la pre-venta como pagada')
+      setError(err.message || 'No se pudo registrar el pago')
     } finally {
-      setBusyId(null)
+      setBusy(false)
     }
   }
 
-  async function eliminar() {
-    if (!deleting) return
-    setBusyId(deleting.idPreVenta)
+  async function payRemaining() {
+    if (!payingAll) return
+    setBusy(true)
     setError('')
     try {
-      await api.preVentas.eliminar(deleting.idPreVenta)
-      setPreVentas(prev => prev.filter(p => p.idPreVenta !== deleting.idPreVenta))
-      if (selectedClientGroup?.preVentas.length === 1) setSelectedClientId(null)
+      const updated = await api.preVentaTransacciones.pagarPendientes(payingAll.idPreVentaTransaccion)
+      replaceTransaction(updated)
+      setPayingAll(null)
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
+    } catch (err) {
+      setError(err.message || 'No se pudo cobrar el saldo pendiente')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteItem() {
+    if (!deleting) return
+    setBusy(true)
+    setError('')
+    try {
+      const updated = await api.preVentaTransacciones.eliminarItem(
+        deleting.transactionId, deleting.item.idPreVenta)
+      replaceTransaction(updated)
       setDeleting(null)
     } catch (err) {
-      setError(err.message || 'No se pudo eliminar la pre-venta')
+      setError(err.message || 'No se pudo eliminar el ítem')
     } finally {
-      setBusyId(null)
+      setBusy(false)
     }
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
-      <div>
+      <header>
         <h1 className="text-xl font-bold text-slate-900 dark:text-white">Pre-ventas</h1>
-        <p className="text-slate-400 dark:text-stone-500 text-sm mt-0.5">
-          Reservas y pedidos anticipados sin tocar el stock físico actual.
-        </p>
-      </div>
+        <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">Transacciones con uno o varios discos, sin modificar el stock físico.</p>
+      </header>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          {error}
-        </div>
-      )}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</div>}
 
       <section className="card overflow-hidden">
-        <button
-          type="button"
-          aria-expanded={showCreateForm}
-          aria-controls="nueva-preventa-panel"
-          onClick={() => setShowCreateForm(prev => !prev)}
-          className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-stone-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-stone-950"
-        >
-          <div>
-            <h2 className="font-semibold text-slate-900 dark:text-white">Nueva preventa</h2>
-            <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-              Abrí este bloque para cargar una nueva reserva sin perder el listado de vista.
-            </p>
-          </div>
-          <ChevronDown className={`h-5 w-5 text-slate-400 dark:text-stone-500 transition-transform duration-200 ${showCreateForm ? 'rotate-180' : ''}`} />
+        <button type="button" onClick={toggleCreate} aria-expanded={showCreate} className="w-full p-5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-stone-900/60">
+          <div><h2 className="font-semibold text-slate-900 dark:text-white">Nueva pre-venta</h2><p className="text-sm text-slate-400 mt-1">Seleccioná un cliente y agregá todos los discos de esta reserva.</p></div>
+          <span className="text-xl text-slate-400">{showCreate ? '−' : '+'}</span>
         </button>
 
-        <div
-          id="nueva-preventa-panel"
-          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${showCreateForm ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
-        >
-          <div className="overflow-hidden">
-            <div className="border-t border-slate-100 dark:border-stone-800 p-5">
-              <form onSubmit={submit} className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_390px]">
-                <div className="space-y-5 min-w-0">
-                  <section className="card p-5 space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Discos</h2>
-                <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-                  La pre-venta guarda un solo disco por registro. Elegí el ítem a reservar y mantené el flujo visual de selección.
-                </p>
-              </div>
-              {selectedItem && (
-                <button type="button" onClick={handleRemoveSelected} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
-                  Quitar selección
-                </button>
-              )}
-            </div>
-
-            {selectedItem ? (
-              <div className="rounded-xl border border-slate-200 dark:border-stone-700 bg-slate-50 dark:bg-stone-950 p-4">
-                <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-3">Disco seleccionado</h3>
-                <div className="flex flex-col gap-4 md:flex-row md:items-start">
-                  {selectedItem.imagenUrl ? (
-                    <img src={resolveApiUrl(selectedItem.imagenUrl)} alt="" className="w-20 h-20 rounded-xl object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
-                  ) : (
-                    <div className="w-20 h-20 rounded-xl bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[11px] text-slate-400 dark:text-stone-500 flex-shrink-0">
-                      {selectedItem.mode === 'manual' ? 'Manual' : 'Sin portada'}
-                    </div>
-                  )}
-
-                  <div className="flex-1 min-w-0 space-y-3">
-                    <div>
-                      <div className="font-semibold text-slate-900 dark:text-white text-sm">
-                        {selectedItem.mode === 'catalogo'
-                          ? `${selectedItem.artista || '—'} — ${selectedItem.album || '—'}`
-                          : selectedItem.descripcion}
-                      </div>
-                      <div className="text-xs text-slate-400 dark:text-stone-500 mt-1">
-                        {[
-                          selectedItem.codigoDisco && `Código ${selectedItem.codigoDisco}`,
-                          selectedItem.mode === 'catalogo' && selectedItem.estado ? ESTADO_LABELS[selectedItem.estado] || selectedItem.estado : null,
-                          selectedItem.mode === 'catalogo' && selectedItem.selloDiscografico ? selectedItem.selloDiscografico : null,
-                        ].filter(Boolean).join(' · ') || 'Sin datos adicionales'}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <Field label="Cantidad">
-                        <input
-                          required
-                          className="input"
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={selectedItem.cantidad}
-                          onChange={e => setSelectedItem(prev => ({ ...prev, cantidad: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="Precio por unidad">
-                        <input
-                          required
-                          className="input"
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={selectedItem.precio}
-                          onChange={e => setSelectedItem(prev => ({ ...prev, precio: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="Subtotal">
-                        <div className="input flex items-center font-semibold text-slate-900 dark:text-white">
-                          {money(totalSeleccionado)}
-                        </div>
-                      </Field>
-                    </div>
-
-                    {selectedItem.mode === 'manual' && (
-                      <Field label="Notas del disco fuera de catálogo">
-                        <textarea
-                          className="input min-h-20 resize-y"
-                          rows={3}
-                          value={selectedItem.notas}
-                          onChange={e => setSelectedItem(prev => ({ ...prev, notas: e.target.value }))}
-                          placeholder="Proveedor, referencia de compra o aclaraciones..."
-                        />
-                      </Field>
-                    )}
+        {showCreate && (
+          <form onSubmit={submit} className="border-t border-slate-100 dark:border-stone-800 p-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-5 min-w-0">
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Cliente</h3><button type="button" className="text-xs text-[#5C7D87]" onClick={() => setShowClienteModal(true)}>+ Nuevo cliente</button></div>
+                {selectedCliente ? (
+                  <div className="rounded-xl border border-[#5C7D87]/30 bg-[#5C7D87]/5 p-3 flex items-center justify-between">
+                    <span className="font-medium text-slate-900 dark:text-white">{[selectedCliente.nombre, selectedCliente.apellido].filter(Boolean).join(' ')}</span>
+                    <button type="button" className="text-xs text-slate-500 hover:text-red-500" onClick={() => setSelectedCliente(null)}>Cambiar</button>
                   </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 dark:border-stone-700 px-4 py-5 text-sm text-slate-400 dark:text-stone-500">
-                Todavía no hay ningún disco seleccionado.
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button type="button" onClick={() => setShowManualForm(v => !v)} className="btn-secondary text-sm">
-                  Agregar disco fuera de catálogo
-                </button>
-                <p className="text-xs text-slate-400 dark:text-stone-500">
-                  El código queda disponible para vincular esta pre-venta con una futura importación o compra.
-                </p>
-              </div>
-
-              {showManualForm && (
-                <div className="rounded-xl border border-slate-200 dark:border-stone-700 bg-slate-50 dark:bg-stone-950 p-4 space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Descripción / release title">
-                      <input
-                        className="input"
-                        value={manualForm.descripcion}
-                        onChange={e => setManualForm(prev => ({ ...prev, descripcion: e.target.value }))}
-                        placeholder="Título o release esperado"
-                      />
-                    </Field>
-                    <Field label="Disc code">
-                      <input
-                        className="input"
-                        value={manualForm.codigo}
-                        onChange={e => setManualForm(prev => ({ ...prev, codigo: e.target.value }))}
-                        placeholder="Future, Discogs o proveedor"
-                      />
-                    </Field>
-                    <Field label="Cantidad">
-                      <input
-                        className="input"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={manualForm.cantidad}
-                        onChange={e => setManualForm(prev => ({ ...prev, cantidad: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Precio por unidad">
-                      <input
-                        className="input"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={manualForm.precio}
-                        onChange={e => setManualForm(prev => ({ ...prev, precio: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Notas" className="sm:col-span-2">
-                      <textarea
-                        className="input min-h-20 resize-y"
-                        rows={3}
-                        value={manualForm.notas}
-                        onChange={e => setManualForm(prev => ({ ...prev, notas: e.target.value }))}
-                      />
-                    </Field>
+                ) : <>
+                  <input className="input" value={clienteQuery} onChange={e => setClienteQuery(e.target.value)} placeholder="Buscar cliente por nombre, cédula o teléfono…" />
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {filteredClients.map(cliente => <button type="button" key={cliente.idCliente} onClick={() => setSelectedCliente(cliente)} className="rounded-xl border border-slate-200 dark:border-stone-700 p-3 text-left hover:border-[#5C7D87]">
+                      <span className="block text-sm font-medium text-slate-900 dark:text-white">{[cliente.nombre, cliente.apellido].filter(Boolean).join(' ')}</span>
+                      <span className="text-xs text-slate-400">{cliente.cedula || cliente.telefono || 'Sin documento'}</span>
+                    </button>)}
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => setShowManualForm(false)} className="btn-secondary text-sm">Cancelar</button>
-                    <button type="button" onClick={handleAddManual} className="btn-primary text-sm">Agregar ítem</button>
-                  </div>
-                </div>
-              )}
+                </>}
+              </section>
 
-              <div className="relative">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-stone-500" />
-                <input
-                  value={discoQuery}
-                  onChange={e => setDiscoQuery(e.target.value)}
-                  placeholder="Buscar disco para agregar..."
-                  className="input pl-9"
-                />
-              </div>
+              <section className="space-y-3">
+                <div className="flex items-center justify-between"><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Discos de la transacción</h3><span className="text-xs text-slate-400">{items.length} {items.length === 1 ? 'ítem' : 'ítems'}</span></div>
+                {items.map(item => <DraftItem key={item.uid} item={item} onChange={updateDraft} onRemove={() => setItems(current => current.filter(candidate => candidate.uid !== item.uid))} />)}
+                {!items.length && <div className="rounded-xl border border-dashed border-slate-200 dark:border-stone-700 p-5 text-sm text-slate-400">Todavía no agregaste discos.</div>}
 
-              <div className="space-y-2 max-h-[28rem] overflow-y-auto">
-                {filteredDiscos.map(disco => (
-                  <div key={disco.idDisco} className="rounded-xl border border-slate-200 dark:border-stone-800 bg-slate-50 dark:bg-stone-950 px-3 py-3 flex items-center gap-3">
-                    {disco.imagenUrl ? (
-                      <img src={resolveApiUrl(disco.imagenUrl)} alt="" className="w-12 h-12 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-lg bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[10px] text-slate-400 dark:text-stone-500 flex-shrink-0">
-                        Sin portada
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-900 dark:text-white text-sm truncate">
-                        {disco.artista || '—'} — {disco.album || '—'}
-                      </div>
-                      <div className="text-xs text-slate-400 dark:text-stone-500 truncate mt-1">
-                        {[
-                          disco.codigoInterno,
-                          disco.estado ? ESTADO_LABELS[disco.estado] || disco.estado : null,
-                          disco.selloDiscografico,
-                          disco.precioVenta != null ? money(disco.precioVenta) : 'Sin precio',
-                        ].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                    <button type="button" onClick={() => setSelectedDiscoDetalle(disco)} className="text-xs text-slate-500 dark:text-stone-400 hover:text-slate-900 dark:hover:text-white font-medium flex-shrink-0">
-                      Ver
-                    </button>
-                    <button type="button" onClick={() => handleAddCatalogDisco(disco)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] font-medium flex-shrink-0">
-                      + Agregar
-                    </button>
-                  </div>
-                ))}
-                {filteredDiscos.length === 0 && (
-                  <p className="text-slate-400 dark:text-stone-600 text-sm text-center py-3">
-                    No hay discos que coincidan con esa búsqueda.
-                  </p>
-                )}
-              </div>
-            </div>
-                  </section>
-
-                  <section className="card p-5 space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Cliente</h2>
-              <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-                Buscá por nombre, cédula, Instagram, teléfono o dirección y evitá duplicar registros.
-              </p>
-            </div>
-
-            {selectedCliente ? (
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 dark:border-stone-700 bg-slate-50 dark:bg-stone-950 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="font-semibold text-slate-900 dark:text-white text-sm">
-                    {[selectedCliente.nombre, selectedCliente.apellido].filter(Boolean).join(' ')}
-                  </div>
-                  <div className="text-xs text-slate-400 dark:text-stone-500 mt-1 truncate">
-                    {[selectedCliente.cedula && `CI ${selectedCliente.cedula}`, selectedCliente.instagramUsuario, selectedCliente.telefono, selectedCliente.direccion].filter(Boolean).join(' · ') || 'Cliente seleccionado'}
-                  </div>
-                </div>
-                <button type="button" onClick={() => { setSelectedCliente(null); setTimeout(() => clientSearchRef.current?.focus(), 0) }} className="text-xs text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
-                  Cambiar
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="relative">
-                  <input
-                    ref={clientSearchRef}
-                    value={clienteQuery}
-                    onChange={e => { setClienteQuery(e.target.value); setShowClienteResults(true) }}
-                    onFocus={() => setShowClienteResults(true)}
-                    placeholder="Buscar por nombre, cédula, Instagram, teléfono o dirección..."
-                    className="input"
-                    autoComplete="off"
-                  />
-                  {showClienteResults && filteredClientes.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-xl shadow-lg overflow-hidden">
-                      {filteredClientes.map(cliente => (
-                        <button
-                          key={cliente.idCliente}
-                          type="button"
-                          onClick={() => selectCliente(cliente)}
-                          className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-stone-800 transition-colors"
-                        >
-                          <div className="font-medium text-slate-800 dark:text-stone-200 text-sm">
-                            {[cliente.nombre, cliente.apellido].filter(Boolean).join(' ')}
-                          </div>
-                          <div className="text-xs text-slate-400 dark:text-stone-500">
-                            {[cliente.cedula && `CI ${cliente.cedula}`, cliente.instagramUsuario, cliente.telefono, cliente.direccion].filter(Boolean).join(' · ') || 'Sin datos adicionales'}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button type="button" onClick={() => setShowClienteModal(true)} className="text-xs text-[#5C7D87] dark:text-[#7E9FA8] hover:underline">
-                  + Nuevo cliente
-                </button>
-              </div>
-            )}
-                  </section>
+                <input className="input" value={discoQuery} onChange={e => setDiscoQuery(e.target.value)} placeholder="Buscar disco por artista, álbum o código…" />
+                <div className="grid gap-2 sm:grid-cols-2 max-h-72 overflow-y-auto">
+                  {filteredDiscos.map(disco => <button type="button" key={disco.idDisco} onClick={() => addCatalog(disco)} className="rounded-xl border border-slate-200 dark:border-stone-700 p-3 flex items-center gap-3 text-left hover:border-[#5C7D87]">
+                    {disco.imagenUrl ? <img src={resolveApiUrl(disco.imagenUrl)} alt="" className="w-10 h-10 rounded object-cover" /> : <span className="w-10 h-10 rounded bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-[9px] text-slate-400">Sin tapa</span>}
+                    <span className="min-w-0"><span className="block text-sm font-medium truncate text-slate-900 dark:text-white">{[disco.artista, disco.album].filter(Boolean).join(' — ')}</span><span className="block text-xs text-slate-400">{money(disco.precioVenta)}</span></span>
+                  </button>)}
                 </div>
 
-                <aside className="space-y-5">
-                  <section className="card p-5 space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-700 dark:text-stone-300 uppercase tracking-wider">Datos de la pre-venta</h2>
-              <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-                El estado inicial se mantiene en pendiente y el total se calcula con el disco seleccionado.
-              </p>
+                <button type="button" className="btn-secondary text-sm" onClick={() => setShowManual(value => !value)}>Agregar disco fuera de catálogo</button>
+                {showManual && <ManualItemForm form={manual} setForm={setManual} onAdd={addManual} onCancel={() => setShowManual(false)} />}
+              </section>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <Field label="Fecha">
-                <input
-                  required
-                  className="input"
-                  type="date"
-                  value={metaForm.fecha}
-                  onChange={e => setMetaForm(prev => ({ ...prev, fecha: e.target.value }))}
-                />
-              </Field>
-              <Field label="Estado inicial">
-                <div className="input flex items-center text-sm text-amber-700 dark:text-amber-300">
-                  Pendiente
-                </div>
-              </Field>
-            </div>
-
-            <Field label="Total preventa">
-              <div className="input flex items-center font-semibold text-slate-900 dark:text-white">
-                {money(totalSeleccionado)}
-              </div>
-            </Field>
-
-            <Field label="Notas generales">
-              <textarea
-                className="input min-h-24 resize-y"
-                rows={4}
-                value={metaForm.notas}
-                onChange={e => setMetaForm(prev => ({ ...prev, notas: e.target.value }))}
-                placeholder="Notas internas sobre la reserva..."
-              />
-            </Field>
-
-            <button className="btn-primary w-full" disabled={saving}>
-              {saving ? 'Guardando…' : 'Registrar pre-venta'}
-            </button>
-                  </section>
-                </aside>
-              </form>
-            </div>
-          </div>
-        </div>
+            <aside className="card p-5 h-fit space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Resumen</h3>
+              <Field label="Fecha"><input required type="date" className="input" value={meta.fecha} onChange={e => setMeta(current => ({ ...current, fecha: e.target.value }))} /></Field>
+              <Field label="Notas generales"><textarea className="input min-h-24 resize-y" value={meta.notas} onChange={e => setMeta(current => ({ ...current, notas: e.target.value }))} /></Field>
+              <div className="rounded-xl bg-slate-50 dark:bg-stone-900 p-4 flex justify-between"><span className="text-sm text-slate-500">Total</span><strong className="text-slate-900 dark:text-white">{money(total)}</strong></div>
+              <button className="btn-primary w-full" disabled={busy}>{busy ? 'Guardando…' : 'Guardar pre-venta'}</button>
+            </aside>
+          </form>
+        )}
       </section>
 
-      <section ref={listSectionRef} className="card overflow-hidden min-w-0">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="font-semibold text-slate-900 dark:text-white">Listado</h2>
-            <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-              Seguimiento por cliente, con cada pre-venta conservando su propia identidad.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-            className="btn-secondary text-xs whitespace-nowrap"
-            aria-label={`Ordenar por fecha ${sortOrder === 'desc' ? 'ascendente' : 'descendente'}`}
-          >
-            Fecha <SortChevron direction={sortOrder} />
-          </button>
-        </div>
+      <TransactionList transactions={transactions} onOpen={tx => setSelectedId(tx.idPreVentaTransaccion)} />
 
-        <div className="hidden md:block">
-          <table className="w-full text-sm" data-testid="preventa-client-table">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Cliente', 'Pre-ventas', 'Unidades', 'Total', 'Estado', 'Acciones'].map(label => (
-                  <th key={label} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500 whitespace-nowrap">
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-              {clientGroups.map(group => {
-                const summary = calculatePreVentaGroupSummary(group.preVentas)
-                return (
-                  <tr key={String(group.idCliente)} className="align-middle">
-                    <td className="px-3 py-3 text-slate-900 dark:text-white">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedClientId(String(group.idCliente))}
-                        className="text-left font-semibold hover:text-[#5C7D87] dark:hover:text-[#7E9FA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] rounded"
-                        aria-label={`Ver detalle de ${group.clienteNombre}`}
-                      >
-                        {group.clienteNombre}
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 tabular-nums">{summary.preVentaCount}</td>
-                    <td className="px-3 py-3 text-slate-600 dark:text-stone-400 tabular-nums">{summary.totalQuantity}</td>
-                    <td className="px-3 py-3 text-slate-900 dark:text-white tabular-nums whitespace-nowrap">{money(summary.totalAmount)}</td>
-                    <td className="px-3 py-3">
-                      <StatusSummary summary={summary} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <button type="button" onClick={() => setSelectedClientId(String(group.idCliente))} className="btn-secondary text-xs whitespace-nowrap">
-                        Ver detalle
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {clientGroups.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">
-                    No hay pre-ventas registradas.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {selectedTransaction && <TransactionPanel
+        transaction={selectedTransaction} discos={discos} busy={busy}
+        onClose={() => setSelectedId(null)} onUpdated={replaceTransaction}
+        onMarkPaid={markPaid} onDelete={item => setDeleting({ transactionId: selectedTransaction.idPreVentaTransaccion, item })}
+        onPayAll={() => setPayingAll(selectedTransaction)} onError={setError}
+      />}
 
-        <div className="md:hidden divide-y divide-slate-100 dark:divide-stone-800" data-testid="preventa-client-cards">
-          {clientGroups.map(group => {
-            const summary = calculatePreVentaGroupSummary(group.preVentas)
-            return (
-              <article key={String(group.idCliente)} className="p-4 space-y-4">
-                <div className="flex items-start justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedClientId(String(group.idCliente))}
-                    className="text-left font-semibold text-slate-900 dark:text-white hover:text-[#5C7D87] dark:hover:text-[#7E9FA8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5C7D87] rounded"
-                    aria-label={`Ver detalle de ${group.clienteNombre}`}
-                  >
-                    {group.clienteNombre}
-                  </button>
-                  <StatusSummary summary={summary} />
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <SummaryMetric label="Pre-ventas" value={summary.preVentaCount} />
-                  <SummaryMetric label="Unidades" value={summary.totalQuantity} />
-                  <SummaryMetric label="Total" value={money(summary.totalAmount)} />
-                </div>
-                <button type="button" onClick={() => setSelectedClientId(String(group.idCliente))} className="btn-secondary w-full text-sm">
-                  Ver detalle
-                </button>
-              </article>
-            )
-          })}
-          {clientGroups.length === 0 && (
-            <p className="px-4 py-10 text-center text-slate-400 dark:text-stone-500">No hay pre-ventas registradas.</p>
-          )}
-        </div>
-      </section>
+      {showClienteModal && <NuevoClienteModal onCerrar={() => setShowClienteModal(false)} onCreado={cliente => {
+        setClientes(current => [cliente, ...current]); setSelectedCliente(cliente); setShowClienteModal(false)
+      }} />}
 
-      {selectedClientGroup && (
-        <ClientPreVentaPanel
-          group={selectedClientGroup}
-          discosById={discosById}
-          busyId={busyId}
-          onClose={() => setSelectedClientId(null)}
-          onMarkPaid={marcarPagada}
-          onDelete={setDeleting}
-        />
-      )}
-
-      {selectedDiscoDetalle && (
-        <DiscoDetalleModal
-          disco={selectedDiscoDetalle}
-          onClose={() => setSelectedDiscoDetalle(null)}
-          onAgregar={handleAddCatalogDisco}
-        />
-      )}
-
-      {showClienteModal && (
-        <NuevoClienteModal
-          onCerrar={() => setShowClienteModal(false)}
-          onCreado={(cliente) => {
-            setClientes(prev => [cliente, ...prev])
-            selectCliente(cliente)
-            setShowClienteModal(false)
-          }}
-        />
-      )}
-
-      {deleting && (
-        <ConfirmModal
-          titulo="Eliminar pre-venta"
-          mensaje="¿Seguro que querés eliminar esta pre-venta pendiente? No se registrará ningún ingreso ni se modificará el stock."
-          onConfirmar={eliminar}
-          onCancelar={() => setDeleting(null)}
-          cargando={busyId === deleting.idPreVenta}
-        />
-      )}
+      {deleting && <ConfirmModal titulo="Eliminar ítem pendiente" mensaje={`¿Eliminar “${itemTitle(deleting.item)}” de esta pre-venta?`} onConfirmar={deleteItem} onCancelar={() => setDeleting(null)} cargando={busy} />}
+      {payingAll && <ConfirmModal titulo="Pagar saldo pendiente" mensaje={`Se registrarán cobros individuales por ${money(payingAll.pendiente)}. Los ítems ya pagados no se cobrarán nuevamente.`} onConfirmar={payRemaining} onCancelar={() => setPayingAll(null)} cargando={busy} />}
     </div>
   )
+}
+
+function DraftItem({ item, onChange, onRemove }) {
+  return <article className="rounded-xl border border-slate-200 dark:border-stone-700 p-4 space-y-3">
+    <div className="flex items-start justify-between gap-3"><div><h4 className="font-medium text-slate-900 dark:text-white">{item.titulo}</h4>{item.codigoDisco && <p className="text-xs text-slate-400 mt-1">Código: {item.codigoDisco}</p>}</div><button type="button" className="text-xs text-red-500" onClick={onRemove}>Quitar</button></div>
+    <div className="grid gap-3 sm:grid-cols-3">
+      <Field label="Cantidad"><input className="input" type="number" min="1" step="1" value={item.cantidad} onChange={e => onChange(item.uid, 'cantidad', e.target.value)} /></Field>
+      <Field label="Precio por unidad"><input className="input" type="number" min="0.01" step="0.01" value={item.precioUnitario} onChange={e => onChange(item.uid, 'precioUnitario', e.target.value)} /></Field>
+      <Field label="Subtotal"><div className="input flex items-center font-semibold">{money(lineTotal(item))}</div></Field>
+    </div>
+  </article>
+}
+
+function ManualItemForm({ form, setForm, onAdd, onCancel, disabled = false }) {
+  const set = (field, value) => setForm(current => ({ ...current, [field]: value }))
+  return <div className="rounded-xl border border-slate-200 dark:border-stone-700 bg-slate-50 dark:bg-stone-950 p-4 grid gap-3 sm:grid-cols-2">
+    <Field label="Descripción"><input className="input" value={form.descripcion} onChange={e => set('descripcion', e.target.value)} /></Field>
+    <Field label="Código"><input className="input" value={form.codigoDisco} onChange={e => set('codigoDisco', e.target.value)} /></Field>
+    <Field label="Cantidad"><input className="input" type="number" min="1" step="1" value={form.cantidad} onChange={e => set('cantidad', e.target.value)} /></Field>
+    <Field label="Precio por unidad"><input className="input" type="number" min="0.01" step="0.01" value={form.precioUnitario} onChange={e => set('precioUnitario', e.target.value)} /></Field>
+    <Field label="Notas" className="sm:col-span-2"><textarea className="input" value={form.notas} onChange={e => set('notas', e.target.value)} /></Field>
+    <div className="sm:col-span-2 flex justify-end gap-2"><button type="button" className="btn-secondary text-sm" disabled={disabled} onClick={onCancel}>Cancelar</button><button type="button" className="btn-primary text-sm" disabled={disabled} onClick={onAdd}>{disabled ? 'Agregando…' : 'Agregar ítem'}</button></div>
+  </div>
+}
+
+function TransactionList({ transactions, onOpen }) {
+  return <section className="card overflow-hidden">
+    <div className="p-5 border-b border-slate-100 dark:border-stone-800"><h2 className="font-semibold text-slate-900 dark:text-white">Transacciones</h2><p className="text-sm text-slate-400 mt-1">Cada fila representa una reserva independiente.</p></div>
+    <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm" data-testid="preventa-transaction-table"><thead><tr className="border-b border-slate-100 dark:border-stone-800">{['Pre-venta', 'Fecha', 'Cliente', 'Discos', 'Total', 'Pagado', 'Pendiente', 'Estado', ''].map(label => <th key={label} className="px-3 py-2.5 text-left text-xs uppercase tracking-wider text-slate-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 dark:divide-stone-800">
+      {transactions.map(tx => <tr key={tx.idPreVentaTransaccion}><td className="px-3 py-3 font-semibold">#{tx.idPreVentaTransaccion}</td><td className="px-3 py-3 whitespace-nowrap">{fmtDate(tx.fecha)}</td><td className="px-3 py-3">{tx.clienteNombre}</td><td className="px-3 py-3">{tx.cantidadItems} · {tx.cantidadUnidades} u.</td><td className="px-3 py-3 whitespace-nowrap">{money(tx.total)}</td><td className="px-3 py-3 whitespace-nowrap">{money(tx.pagado)}</td><td className="px-3 py-3 whitespace-nowrap">{money(tx.pendiente)}</td><td className="px-3 py-3"><PaymentBadge status={tx.estadoPago} /></td><td className="px-3 py-3"><button type="button" className="btn-secondary text-xs" onClick={() => onOpen(tx)}>Ver detalle</button></td></tr>)}
+      {!transactions.length && <tr><td colSpan={9} className="p-10 text-center text-slate-400">No hay pre-ventas registradas.</td></tr>}
+    </tbody></table></div>
+    <div className="md:hidden divide-y divide-slate-100 dark:divide-stone-800" data-testid="preventa-transaction-cards">{transactions.map(tx => <article key={tx.idPreVentaTransaccion} className="p-4 space-y-3"><div className="flex items-start justify-between"><div><p className="text-xs text-slate-400">Pre-venta #{tx.idPreVentaTransaccion} · {fmtDate(tx.fecha)}</p><h3 className="font-semibold text-slate-900 dark:text-white">{tx.clienteNombre}</h3></div><PaymentBadge status={tx.estadoPago} /></div><div className="grid grid-cols-3 gap-2"><Metric label="Total" value={money(tx.total)} /><Metric label="Pagado" value={money(tx.pagado)} /><Metric label="Pendiente" value={money(tx.pendiente)} /></div><button type="button" className="btn-secondary w-full text-sm" onClick={() => onOpen(tx)}>Ver {tx.cantidadItems} {tx.cantidadItems === 1 ? 'disco' : 'discos'}</button></article>)}</div>
+  </section>
+}
+
+function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMarkPaid, onDelete, onPayAll, onError }) {
+  const [drafts, setDrafts] = useState({})
+  const [query, setQuery] = useState('')
+  const [manual, setManual] = useState(emptyManual)
+  const [showManual, setShowManual] = useState(false)
+  const [actionBusy, setActionBusy] = useState('')
+  const actionInFlight = useRef(false)
+  const addRetry = useRef(null)
+  const dirty = Object.keys(drafts).length > 0
+  const panelBusy = busy || Boolean(actionBusy)
+  const matches = useMemo(() => {
+    const q = normalize(query)
+    return discos.filter(disco => normalize([disco.artista, disco.album, disco.codigoInterno].filter(Boolean).join(' ')).includes(q)).slice(0, 6)
+  }, [discos, query])
+
+  function close() {
+    if (dirty && !window.confirm('Hay cambios de ítems sin guardar. ¿Cerrar el detalle?')) return
+    onClose()
+  }
+
+  function draftFor(item) {
+    return drafts[item.idPreVenta] || {
+      cantidad: String(item.cantidad),
+      precioUnitario: String(Number(item.precio || 0) / Number(item.cantidad || 1)),
+      notas: item.notas || '',
+    }
+  }
+
+  function change(item, field, value) {
+    setDrafts(current => ({ ...current, [item.idPreVenta]: { ...draftFor(item), [field]: value } }))
+  }
+
+  async function saveItem(item) {
+    if (actionInFlight.current) return
+    const draft = draftFor(item)
+    if (!quantity(draft) || !unitPrice(draft)) return onError('Cantidad y precio deben ser positivos.')
+    actionInFlight.current = true
+    setActionBusy(`save-${item.idPreVenta}`)
+    try {
+      const updated = await api.preVentaTransacciones.actualizarItem(transaction.idPreVentaTransaccion, item.idPreVenta, {
+        cantidad: quantity(draft), precio: lineTotal(draft), notas: draft.notas || null,
+      })
+      onUpdated(updated)
+      setDrafts(current => { const next = { ...current }; delete next[item.idPreVenta]; return next })
+      onError('')
+    } catch (err) { onError(err.message) }
+    finally { actionInFlight.current = false; setActionBusy('') }
+  }
+
+  async function addItem(item) {
+    if (actionInFlight.current) return
+    const payload = {
+      idDisco: item.idDisco || null, descripcion: item.descripcion || null,
+      codigoDisco: item.codigoDisco || null, cantidad: quantity(item),
+      precio: lineTotal(item), notas: item.notas || null,
+    }
+    const signature = JSON.stringify(payload)
+    const idempotencyKey = addRetry.current?.signature === signature
+      ? addRetry.current.idempotencyKey : newKey()
+    addRetry.current = { signature, idempotencyKey }
+    actionInFlight.current = true
+    setActionBusy('add')
+    try {
+      const updated = await api.preVentaTransacciones.agregarItem(transaction.idPreVentaTransaccion, {
+        ...payload, idempotencyKey,
+      })
+      addRetry.current = null
+      onUpdated(updated); setQuery(''); setManual(emptyManual()); setShowManual(false); onError('')
+    } catch (err) { onError(err.message) }
+    finally { actionInFlight.current = false; setActionBusy('') }
+  }
+
+  return <><div className="fixed inset-0 z-40 bg-black/30" onClick={close} /><aside className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto" role="dialog" aria-modal="true">
+    <div className="sticky top-0 z-10 bg-white/95 dark:bg-stone-950/95 backdrop-blur p-5 border-b border-slate-100 dark:border-stone-800 flex justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-400">Pre-venta #{transaction.idPreVentaTransaccion}</p><h2 className="font-bold text-slate-900 dark:text-white">{transaction.clienteNombre}</h2><p className="text-sm text-slate-400">{fmtDate(transaction.fecha)} · {transaction.cantidadItems} ítems</p></div><button type="button" onClick={close} aria-label="Cerrar">✕</button></div>
+    <div className="p-5 space-y-5">
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3"><Metric label="Total" value={money(transaction.total)} /><Metric label="Pagado" value={money(transaction.pagado)} /><Metric label="Pendiente" value={money(transaction.pendiente)} /><div className="rounded-lg bg-slate-50 dark:bg-stone-900 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400">Estado</p><div className="mt-1"><PaymentBadge status={transaction.estadoPago} /></div></div></section>
+      {actionBusy && <p role="status" className="text-sm text-slate-500">{actionBusy === 'add' ? 'Agregando ítem…' : 'Guardando cambios…'}</p>}
+      {Number(transaction.pendiente) > 0 && <button type="button" className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50" disabled={panelBusy} onClick={onPayAll}>Pagar saldo pendiente · {money(transaction.pendiente)}</button>}
+      <section className="space-y-3">{transaction.items.map(item => {
+        const paid = item.estado === 'PAGADA'
+        const draft = draftFor(item)
+        return <article key={item.idPreVenta} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900 dark:text-white">{itemTitle(item)}</h3><p className="text-xs text-slate-400">Ítem #{item.idPreVenta}{item.codigoDisco ? ` · ${item.codigoDisco}` : ''}</p></div><PaymentBadge status={paid ? 'PAGADA' : 'PENDIENTE'} /></div>
+          {paid ? <div className="grid grid-cols-3 gap-2"><Metric label="Cantidad" value={item.cantidad} /><Metric label="Total" value={money(item.precio)} /><Metric label="Pago" value={item.fechaPago ? fmtDate(item.fechaPago) : 'Registrado'} /></div> : <><div className="grid gap-3 sm:grid-cols-3"><Field label="Cantidad"><input className="input" type="number" min="1" step="1" value={draft.cantidad} onChange={e => change(item, 'cantidad', e.target.value)} /></Field><Field label="Precio por unidad"><input className="input" type="number" min="0.01" step="0.01" value={draft.precioUnitario} onChange={e => change(item, 'precioUnitario', e.target.value)} /></Field><Field label="Subtotal"><div className="input flex items-center font-semibold">{money(lineTotal(draft))}</div></Field></div><div className="flex flex-wrap gap-2"><button type="button" className="btn-secondary text-xs" disabled={panelBusy || !drafts[item.idPreVenta]} onClick={() => saveItem(item)}>{actionBusy === `save-${item.idPreVenta}` ? 'Guardando…' : 'Guardar cambios'}</button><button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-xs text-white" disabled={panelBusy} onClick={() => onMarkPaid(item)}>Marcar pago</button><button type="button" className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600" disabled={panelBusy} onClick={() => onDelete(item)}>Eliminar</button></div></>}
+        </article>
+      })}</section>
+      <section className="border-t border-slate-100 dark:border-stone-800 pt-5 space-y-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Agregar ítem</h3><input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar catálogo…" /><div className="grid gap-2 sm:grid-cols-2">{matches.map(disco => <button type="button" key={disco.idDisco} disabled={panelBusy} className="rounded-lg border p-3 text-left disabled:opacity-50" onClick={() => addItem(catalogItem(disco))}><span className="block text-sm font-medium">{[disco.artista, disco.album].filter(Boolean).join(' — ')}</span><span className="text-xs text-slate-400">{money(disco.precioVenta)}</span></button>)}</div><button type="button" className="btn-secondary text-sm" disabled={panelBusy} onClick={() => setShowManual(value => !value)}>Agregar manual</button>{showManual && <ManualItemForm form={manual} setForm={setManual} disabled={panelBusy} onAdd={() => { const item = manualItem(manual); if (!item.descripcion || !quantity(item) || !unitPrice(item)) return onError('Completá descripción, cantidad y precio.'); addItem(item) }} onCancel={() => setShowManual(false)} />}</section>
+    </div>
+  </aside></>
+}
+
+function PaymentBadge({ status }) {
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${paymentClasses(status)}`}>{paymentLabel(status)}</span>
+}
+
+function Metric({ label, value }) {
+  return <div className="rounded-lg bg-slate-50 dark:bg-stone-900 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400">{label}</p><p className="text-sm font-semibold text-slate-800 dark:text-stone-200 tabular-nums">{value}</p></div>
 }
 
 function Field({ label, children, className = '' }) {
-  return (
-    <div className={className}>
-      <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function StatusSummary({ summary }) {
-  const mixed = summary.pendingCount > 0 && summary.paidCount > 0
-  const paidOnly = summary.pendingCount === 0 && summary.paidCount > 0
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
-      mixed
-        ? 'bg-slate-100 text-slate-700 dark:bg-stone-800 dark:text-stone-200'
-        : paidOnly
-          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-    }`}>
-      {statusSummary(summary)}
-    </span>
-  )
-}
-
-function SummaryMetric({ label, value }) {
-  return (
-    <div className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-800 dark:text-stone-200 tabular-nums">{value}</p>
-    </div>
-  )
-}
-
-function ClientPreVentaPanel({ group, discosById, busyId, onClose, onMarkPaid, onDelete }) {
-  const summary = calculatePreVentaGroupSummary(group.preVentas)
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" aria-hidden="true" onClick={onClose} />
-      <aside
-        className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preventa-client-panel-title"
-      >
-        <div className="sticky top-0 z-10 bg-white/95 dark:bg-stone-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-stone-800 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Cliente</p>
-            <h2 id="preventa-client-panel-title" className="font-bold text-slate-900 dark:text-white truncate">{group.clienteNombre}</h2>
-            <p className="text-sm text-slate-400 dark:text-stone-500 mt-1">
-              {summary.preVentaCount} {summary.preVentaCount === 1 ? 'preventa' : 'preventas'} · {summary.totalQuantity} {summary.totalQuantity === 1 ? 'unidad' : 'unidades'}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Cerrar detalle del cliente" className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg leading-none">✕</button>
-        </div>
-
-        <div className="p-5 space-y-5">
-          <section className="grid grid-cols-2 gap-3" aria-label="Resumen de preventas">
-            <SummaryMetric label="Total" value={money(summary.totalAmount)} />
-            <SummaryMetric label="Pendiente" value={money(summary.pendingAmount)} />
-            <SummaryMetric label="Pagado" value={money(summary.paidAmount)} />
-            <SummaryMetric label="Preventas" value={summary.preVentaCount} />
-            <SummaryMetric label="Unidades" value={summary.totalQuantity} />
-            <div className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-900 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">Estado</p>
-              <div className="mt-1"><StatusSummary summary={summary} /></div>
-            </div>
-          </section>
-
-          <section>
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-xs font-semibold text-slate-500 dark:text-stone-400 uppercase tracking-wider">Pre-ventas individuales</h3>
-              <span className="text-xs text-slate-400 dark:text-stone-500">{summary.preVentaCount}</span>
-            </div>
-            <div className="space-y-3">
-              {group.preVentas.map(preVenta => {
-                const paid = preVenta.estado === 'PAGADA'
-                const busy = busyId === preVenta.idPreVenta
-                const linkedDisco = preVenta.idDisco ? discosById.get(String(preVenta.idDisco)) : null
-
-                return (
-                  <article key={preVenta.idPreVenta} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3">
-                    <div className="flex items-start gap-3">
-                      {linkedDisco?.imagenUrl && (
-                        <img src={resolveApiUrl(linkedDisco.imagenUrl)} alt="" className="w-12 h-12 rounded-lg object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <h4 className="font-semibold text-slate-900 dark:text-white truncate" title={preVentaTitle(preVenta)}>{preVentaTitle(preVenta)}</h4>
-                        <p className="text-xs text-slate-400 dark:text-stone-500 mt-1">
-                          {preVenta.idDisco && linkedDisco?.estado ? ESTADO_LABELS[linkedDisco.estado] || linkedDisco.estado : 'Preventa'} · #{preVenta.idPreVenta}
-                        </p>
-                        {preVenta.codigoDisco && (
-                          <p className="text-xs text-slate-500 dark:text-stone-400 mt-1 truncate">Código: {preVenta.codigoDisco}</p>
-                        )}
-                      </div>
-                      <StatusBadge paid={paid} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <SummaryMetric label="Fecha" value={fmtDate(preVenta.fecha)} />
-                      <SummaryMetric label="Cantidad" value={preVenta.cantidad} />
-                      <SummaryMetric label="Total" value={money(preVenta.precio)} />
-                      <SummaryMetric label="Pago" value={preVenta.fechaPago ? fmtDateTime(preVenta.fechaPago) : paid ? 'Registrado' : 'Pendiente'} />
-                    </div>
-
-                    {preVenta.notas && (
-                      <p className="text-xs text-slate-500 dark:text-stone-400 whitespace-pre-wrap">{preVenta.notas}</p>
-                    )}
-
-                    {!paid && (
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => onMarkPaid(preVenta)}
-                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50 flex-1"
-                        >
-                          {busy ? 'Procesando…' : 'Marcar pago'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => onDelete(preVenta)}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-35 dark:border-red-900 dark:hover:bg-red-950/30"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          </section>
-        </div>
-      </aside>
-    </>
-  )
-}
-
-function StatusBadge({ paid }) {
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium flex-shrink-0 ${paid ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-      {paid ? 'Pagada' : 'Pendiente'}
-    </span>
-  )
-}
-
-function DiscoDetalleModal({ disco, onClose, onAgregar }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-6 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-slate-900 dark:text-white font-bold text-base">{disco.artista || '—'}</h3>
-            <p className="text-slate-500 dark:text-stone-400 text-sm">{disco.album || '—'}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
-        </div>
-        <div className="flex flex-col gap-4 sm:flex-row">
-          {disco.imagenUrl ? (
-            <img src={resolveApiUrl(disco.imagenUrl)} alt="" className="w-32 h-32 rounded-xl object-cover bg-slate-100 dark:bg-stone-800 flex-shrink-0" />
-          ) : (
-            <div className="w-32 h-32 rounded-xl bg-slate-100 dark:bg-stone-800 flex items-center justify-center text-sm text-slate-400 dark:text-stone-500 flex-shrink-0">
-              Sin portada
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3 flex-1">
-            {[
-              ['Código', disco.codigoInterno],
-              ['Estado', ESTADO_LABELS[disco.estado] || disco.estado],
-              ['Sello', disco.selloDiscografico],
-              ['Precio', disco.precioVenta != null ? money(disco.precioVenta) : '—'],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-slate-100 dark:border-stone-800 bg-slate-50 dark:bg-stone-950 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>
-                <p className="text-sm text-slate-700 dark:text-stone-300 truncate">{value || '—'}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="btn-secondary">Cerrar</button>
-          <button type="button" onClick={() => onAgregar(disco)} className="btn-primary">+ Agregar</button>
-        </div>
-      </div>
-    </div>
-  )
+  return <div className={className}><label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">{label}</label>{children}</div>
 }
 
 function NuevoClienteModal({ onCerrar, onCreado }) {
-  const [form, setForm] = useState({
-    nombre: '', apellido: '', cedula: '', telefono: '',
-    instagramUsuario: '', email: '', direccion: '', observaciones: '',
-  })
+  const [form, setForm] = useState({ nombre: '', apellido: '', cedula: '', telefono: '', instagramUsuario: '', email: '', direccion: '', observaciones: '' })
   const [error, setError] = useState('')
-  const [cargando, setCargando] = useState(false)
-
-  function set(field, value) {
-    setForm(prev => ({ ...prev, [field]: value }))
+  const [loading, setLoading] = useState(false)
+  const set = (field, value) => setForm(current => ({ ...current, [field]: value }))
+  async function submit(event) {
+    event.preventDefault()
+    if (!form.nombre.trim()) return setError('El nombre es obligatorio')
+    setLoading(true); setError('')
+    try { onCreado(await api.clientes.crear(form)) } catch (err) { setError(err.message) } finally { setLoading(false) }
   }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!form.nombre.trim()) {
-      setError('El nombre es obligatorio')
-      return
-    }
-    setError('')
-    setCargando(true)
-    try {
-      onCreado(await api.clientes.crear(form))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setCargando(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-6 overflow-y-auto" onClick={onCerrar}>
-      <div className="bg-white dark:bg-stone-900 border border-slate-200 dark:border-stone-700 rounded-2xl shadow-2xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-slate-900 dark:text-white font-bold text-base">Nuevo cliente</h3>
-            <p className="text-slate-500 dark:text-stone-400 text-sm">Completá los datos necesarios para usarlo en la pre-venta.</p>
-          </div>
-          <button onClick={onCerrar} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">✕</button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Nombre"><input className="input" value={form.nombre} onChange={e => set('nombre', e.target.value)} /></Field>
-            <Field label="Apellido"><input className="input" value={form.apellido} onChange={e => set('apellido', e.target.value)} /></Field>
-            <Field label="Cédula"><input className="input" value={form.cedula} onChange={e => set('cedula', e.target.value)} /></Field>
-            <Field label="Teléfono"><input className="input" value={form.telefono} onChange={e => set('telefono', e.target.value)} /></Field>
-            <Field label="Instagram"><input className="input" value={form.instagramUsuario} onChange={e => set('instagramUsuario', e.target.value)} /></Field>
-            <Field label="Email"><input className="input" value={form.email} onChange={e => set('email', e.target.value)} /></Field>
-            <Field label="Dirección" className="sm:col-span-2"><input className="input" value={form.direccion} onChange={e => set('direccion', e.target.value)} /></Field>
-            <Field label="Observaciones" className="sm:col-span-2">
-              <textarea className="input min-h-24 resize-y" rows={4} value={form.observaciones} onChange={e => set('observaciones', e.target.value)} />
-            </Field>
-          </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <div className="flex gap-3">
-            <button type="button" onClick={onCerrar} disabled={cargando} className="btn-secondary flex-1">Cancelar</button>
-            <button type="submit" disabled={cargando} className="btn-primary flex-1">{cargando ? 'Guardando...' : 'Crear cliente'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function SearchIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-    </svg>
-  )
-}
-
-function ChevronDown({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.508a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-function SortChevron({ direction }) {
-  return (
-    <svg className={`h-3.5 w-3.5 transition-transform ${direction === 'asc' ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.508a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-    </svg>
-  )
+  return <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onCerrar}><div className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between mb-4"><div><h3 className="font-bold text-slate-900 dark:text-white">Nuevo cliente</h3><p className="text-sm text-slate-400">Crealo sin salir de la pre-venta.</p></div><button type="button" onClick={onCerrar}>✕</button></div><form onSubmit={submit} className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><Field label="Nombre"><input className="input" value={form.nombre} onChange={e => set('nombre', e.target.value)} /></Field><Field label="Apellido"><input className="input" value={form.apellido} onChange={e => set('apellido', e.target.value)} /></Field><Field label="Cédula"><input className="input" value={form.cedula} onChange={e => set('cedula', e.target.value)} /></Field><Field label="Teléfono"><input className="input" value={form.telefono} onChange={e => set('telefono', e.target.value)} /></Field><Field label="Instagram"><input className="input" value={form.instagramUsuario} onChange={e => set('instagramUsuario', e.target.value)} /></Field><Field label="Email"><input className="input" value={form.email} onChange={e => set('email', e.target.value)} /></Field><Field label="Dirección" className="sm:col-span-2"><input className="input" value={form.direccion} onChange={e => set('direccion', e.target.value)} /></Field><Field label="Observaciones" className="sm:col-span-2"><textarea className="input" value={form.observaciones} onChange={e => set('observaciones', e.target.value)} /></Field></div>{error && <p className="text-sm text-red-500">{error}</p>}<div className="flex gap-3"><button type="button" className="btn-secondary flex-1" onClick={onCerrar}>Cancelar</button><button className="btn-primary flex-1" disabled={loading}>{loading ? 'Guardando…' : 'Crear cliente'}</button></div></form></div></div>
 }
