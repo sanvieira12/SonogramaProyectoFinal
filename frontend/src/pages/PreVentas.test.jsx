@@ -77,6 +77,22 @@ describe('PreVentas transaction UI', () => {
     expect(within(table).getByText('#106')).toBeInTheDocument()
   })
 
+  it('applies explicit light and dark theme contrast to transaction content and details', async () => {
+    render(<PreVentas />)
+
+    const table = await screen.findByTestId('preventa-transaction-table')
+    expect(within(table).getByText('#105').closest('td')).toHaveClass('text-slate-900', 'dark:text-white')
+    expect(within(table).getByText('11/09/2026').closest('td')).toHaveClass('text-slate-500', 'dark:text-stone-400')
+    expect(within(table).getByText('Frank').closest('td')).toHaveClass('text-slate-900', 'dark:text-white')
+    expect(within(table).getByText('1 · 1 u.').closest('td')).toHaveClass('text-slate-700', 'dark:text-stone-300')
+    expect(within(table).getByText('Pre-venta')).toHaveClass('dark:text-stone-500')
+
+    fireEvent.click(within(table).getByRole('button', { name: 'Ver detalle' }))
+    const catalogButton = await screen.findByRole('button', { name: /Radiohead — OK Computer/i })
+    expect(catalogButton).toHaveClass('text-slate-900', 'dark:text-white', 'dark:bg-stone-900')
+    expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveClass('dark:text-stone-400', 'dark:hover:text-white')
+  })
+
   it('creates two records through one atomic transaction request', async () => {
     const created = { ...transaction, idPreVentaTransaccion: 107, items: [], cantidadItems: 2, cantidadUnidades: 2, total: 4800, pendiente: 4800 }
     api.preVentaTransacciones.crear.mockResolvedValue(created)
