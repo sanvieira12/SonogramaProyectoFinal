@@ -1,3 +1,4 @@
+import { salesChannelStats } from './salesChannelStats'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
@@ -593,6 +594,7 @@ function numeroBoletaMovimiento(v) {
 
 export default function LibroVentas() {
   const [ventas, setVentas] = useState([])
+  const canales = salesChannelStats(ventas)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const hoy = fechaInputLocal()
@@ -872,6 +874,13 @@ export default function LibroVentas() {
             { label: 'Ganancia bruta de ítems', value: fmtProfit(resumen.gananciaItems, null), tone: profitToneClass(null, resumen.gananciaItems) },
             { label: 'Gastos', value: fmt(resumen.gastos) },
             { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
+            {
+              label: 'Ventas por canal',
+              value: <span className="block text-sm leading-6">Local: {canales.local}<br />Instagram: {canales.instagram}</span>,
+              secondary: canales.unknown > 0 && (
+                <span className="text-xs text-slate-600 dark:text-stone-400">Sin canal: {canales.unknown}</span>
+              ),
+            },
           ].map(({ label, value, tone, secondary }) => (
             <div key={label} className="card p-4 text-center">
               <p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">{label}</p>

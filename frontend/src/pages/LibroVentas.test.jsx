@@ -235,6 +235,25 @@ describe('LibroVentas profit display', () => {
     api.ventas.resumenMensual.mockResolvedValue(initialSummary)
   })
 
+  it('renders the eighth card and refreshes channel counts with applied month and search filters', async () => {
+    const local = { ...movements[0], estado: 'COMPLETADA', canalVenta: 'LOCAL' }
+    const instagram = { ...movements[1], estado: 'COMPLETADA', canalVenta: 'INSTAGRAM' }
+    api.libro.listar.mockResolvedValueOnce([local, instagram]).mockResolvedValueOnce([instagram])
+    render(<LibroVentas />)
+    const label = await screen.findByText('Ventas por canal')
+    const card = label.closest('.card')
+    expect(card.parentElement.children).toHaveLength(8)
+    expect(card.parentElement.lastElementChild).toBe(card)
+    expect(card).toHaveTextContent('Local: 1')
+    expect(card).toHaveTextContent('Instagram: 1')
+    fireEvent.change(screen.getByPlaceholderText('Cliente, artista, álbum…'), { target: { value: 'Bruno' } })
+    fireEvent.change(screen.getByDisplayValue(new Date().toISOString().slice(0, 7)), { target: { value: '2026-09' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Filtrar' }))
+    await waitFor(() => expect(card).toHaveTextContent('Local: 0'))
+    expect(card).toHaveTextContent('Instagram: 1')
+    expect(api.libro.listar).toHaveBeenLastCalledWith({ desde: '2026-09-01', hasta: '2026-09-30', q: 'Bruno' })
+  })
+
   it('keeps the existing sold-items total and shows the New/Used breakdown', async () => {
     render(<LibroVentas />)
 
