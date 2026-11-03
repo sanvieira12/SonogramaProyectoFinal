@@ -55,6 +55,7 @@ services:
       VINYLFUTURE_MEDIA_DIRECTORY: /opt/sonograma/data/vinylfuture-media
       VINYLFUTURE_BASE_URL: ${VINYLFUTURE_BASE_URL:-https://www.deejay.de/}
       VINYLFUTURE_ARCHIVE_INDEX_URL: ${VINYLFUTURE_ARCHIVE_INDEX_URL:-https://monthlyvinyl.net/r/}
+      VINYLFUTURE_READER_URL_PREFIX: ${VINYLFUTURE_READER_URL_PREFIX:-https://r.jina.ai/https://}
     extra_hosts:
       # The public supplier hostname is protected by an interactive Cloudflare challenge.
       # Keep the origin configurable so imports remain server-to-server and operationally replaceable.

@@ -36,6 +36,10 @@ public class VinylFutureSearchService {
         "https://www\\.(?:deejay\\.de|vinylfuture\\.com)/.+__\\d+$",
         Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern PRODUCT_URL_IN_TEXT = Pattern.compile(
+        "https://www\\.(?:deejay\\.de|vinylfuture\\.com)/[^\\s\\]\\)\\\"'<>]+__\\d+",
+        Pattern.CASE_INSENSITIVE
+    );
     private static final Set<String> WEAK_TOKENS = Set.of(
         "a", "an", "and", "de", "del", "der", "die", "el", "en", "ep", "la", "las",
         "le", "les", "lp", "of", "the", "und", "vinyl", "vol"
@@ -48,6 +52,9 @@ public class VinylFutureSearchService {
 
     @Value("${sonograma.vinylfuture.archive-index-url:https://monthlyvinyl.net/r/}")
     private String archiveIndexUrl;
+
+    @Value("${sonograma.vinylfuture.reader-url-prefix:}")
+    private String readerUrlPrefix;
 
     @Value("${sonograma.vinylfuture.delay-ms:400}")
     private long delayMs;
@@ -97,6 +104,8 @@ public class VinylFutureSearchService {
         if (query == null || query.isBlank()) return List.of();
         throttle();
         String searchUrl = trailingSlash(baseUrl) + encodePathSegment(query);
+        List<String> readerLinks = searchViaReader(searchUrl);
+        if (!readerLinks.isEmpty()) return readerLinks;
         try {
             Document doc = Jsoup.connect(searchUrl)
                 .userAgent(USER_AGENT)
@@ -114,6 +123,32 @@ public class VinylFutureSearchService {
             log.warn("HTTP error searching supplier for '{}': {}", query, ex.getMessage());
             return List.of();
         }
+    }
+
+    private List<String> searchViaReader(String searchUrl) {
+        if (readerUrlPrefix == null || readerUrlPrefix.isBlank()) return List.of();
+        String target = searchUrl.replaceFirst("^https?://", "");
+        try {
+            String body = Jsoup.connect(trailingSlash(readerUrlPrefix) + target)
+                .userAgent(USER_AGENT)
+                .timeout(Math.max(timeoutMs, 30_000))
+                .followRedirects(true)
+                .ignoreContentType(true)
+                .execute()
+                .body();
+            return extractProductLinks(body);
+        } catch (IOException ex) {
+            log.warn("Reader fallback failed for '{}': {}", searchUrl, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    List<String> extractProductLinks(String body) {
+        if (body == null || body.isBlank()) return List.of();
+        LinkedHashSet<String> links = new LinkedHashSet<>();
+        java.util.regex.Matcher matcher = PRODUCT_URL_IN_TEXT.matcher(body);
+        while (matcher.find()) links.add(matcher.group());
+        return List.copyOf(links);
     }
 
     private Optional<String> searchArchiveIndex(InvoiceItem item) {

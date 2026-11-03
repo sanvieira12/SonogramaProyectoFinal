@@ -31,6 +31,18 @@ class VinylFutureSearchServiceTest {
         ))).contains("https://www.deejay.de/DUST_The_Spirit_DST001_Vinyl__1266377");
     }
 
+    @Test
+    void extractsSupplierProductLinksFromReaderMarkdown() {
+        String markdown = """
+            [DUST](https://www.deejay.de/DUST_The_Spirit_DST001_Vinyl__1266377)
+            [not a product](https://www.deejay.de/DUST)
+            """;
+
+        assertThat(service.extractProductLinks(markdown)).containsExactly(
+            "https://www.deejay.de/DUST_The_Spirit_DST001_Vinyl__1266377"
+        );
+    }
+
     private InvoiceItem item(String code, String artist, String title) {
         return new InvoiceItem(code, artist, title, "12inch", BigDecimal.TEN, 1, null);
     }
