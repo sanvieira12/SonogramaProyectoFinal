@@ -6,6 +6,7 @@ import com.sonograma.dto.TrackInfo;
 import com.sonograma.dto.VinylPageData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -35,6 +36,9 @@ public class VinylFutureScraperService {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
     private static final Pattern PRODUCT_ID = Pattern.compile("(?:__|/)(\\d+)(?:\\D*$|$)");
+    private static final Pattern CATALOG_CODE_IN_URL = Pattern.compile(
+        "_([^_/]+)_Vinyl__\\d+(?:\\D*$|$)", Pattern.CASE_INSENSITIVE
+    );
     private static final Pattern MP3_URL = Pattern.compile(
         "(?i)(https?:)?(?:\\\\?/\\\\?/|/)?[^\\s\"'<>\\\\]+\\.mp3(?:\\?[^\\s\"'<>\\\\]*)?"
     );
@@ -51,22 +55,84 @@ public class VinylFutureScraperService {
 
     public Optional<VinylPageData> scrape(String productUrl) {
         if (productUrl == null || productUrl.isBlank()) return Optional.empty();
-        return pageCache.computeIfAbsent(productUrl, this::scrapeSinCache);
+        Optional<VinylPageData> cached = pageCache.get(productUrl);
+        if (cached != null) return cached;
+        Optional<VinylPageData> result = scrapeSinCache(productUrl);
+        // Supplier outages and temporary HTTP failures must remain retryable.
+        result.ifPresent(page -> pageCache.put(productUrl, Optional.of(page)));
+        return result;
     }
 
     private Optional<VinylPageData> scrapeSinCache(String productUrl) {
         try {
-            Document doc = Jsoup.connect(productUrl)
+            Connection.Response response = Jsoup.connect(productUrl)
                 .userAgent(USER_AGENT)
                 .timeout(timeoutMs)
                 .followRedirects(true)
-                .get();
+                .ignoreHttpErrors(true)
+                .execute();
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                Optional<VinylPageData> archived = buildArchivedPageData(productUrl);
+                if (archived.isPresent()) {
+                    log.info("Recovered archived supplier media for '{}' after HTTP {}",
+                        productUrl, response.statusCode());
+                }
+                return archived;
+            }
+            Document doc = response.parse();
             VinylPageData data = extractPageData(doc, productUrl);
             log.debug("Scraped '{}': tracks={}, title='{}'", productUrl, data.tracks().size(), data.title());
             return Optional.of(data);
         } catch (Exception e) {
             log.warn("Cannot fetch '{}': {}", productUrl, e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    Optional<VinylPageData> buildArchivedPageData(String productUrl) {
+        String productId = extractProductId(productUrl).orElse(null);
+        if (productId == null) return Optional.empty();
+
+        String code = null;
+        Matcher codeMatcher = CATALOG_CODE_IN_URL.matcher(productUrl);
+        if (codeMatcher.find()) code = clean(codeMatcher.group(1));
+
+        String coverUrl = buildImageUrl(productId);
+        if (!mediaExists(coverUrl)) return Optional.empty();
+
+        List<TrackInfo> tracks = new ArrayList<>();
+        int misses = 0;
+        for (char suffix = 'a'; suffix <= 'p' && misses < 2; suffix++) {
+            String audioUrl = streamBase(productId) + suffix + ".mp3";
+            if (mediaExists(audioUrl)) {
+                int number = tracks.size() + 1;
+                tracks.add(new TrackInfo("T" + number, "Track " + number, audioUrl));
+                misses = 0;
+            } else {
+                misses++;
+            }
+        }
+
+        return Optional.of(new VinylPageData(
+            productUrl, null, null, code, null, null, null, null, null, null,
+            null, null, coverUrl, null, tracks
+        ));
+    }
+
+    boolean mediaExists(String url) {
+        if (url == null || url.isBlank()) return false;
+        try {
+            Connection.Response response = Jsoup.connect(url)
+                .method(Connection.Method.HEAD)
+                .userAgent(USER_AGENT)
+                .timeout(timeoutMs)
+                .followRedirects(true)
+                .ignoreHttpErrors(true)
+                .ignoreContentType(true)
+                .execute();
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (Exception ex) {
+            return false;
         }
     }
 
@@ -113,7 +179,8 @@ public class VinylFutureScraperService {
                 labelled.get("cat no"), labelled.get("cat. no"), labelled.get("barcode"),
                 labelled.get("catalog no"), labelled.get("release no"),
                 text(doc, "article.single_product .labelContainer [itemprop=alternateName]"),
-                text(doc, "article.product .musiclabel strong"), text(doc, ".musiclabel strong"), jsonLd.get("sku"))),
+                text(doc, "article.product .musiclabel strong"), text(doc, ".musiclabel strong"),
+                jsonLd.get("mpn"), jsonLd.get("sku"))),
             clean(firstNonBlank(labelled.get("label"), labelled.get("sello"),
                 labelled.get("brand"), labelled.get("provider"),
                 text(doc, "article.single_product .labelContainer [itemprop=provider]"),
@@ -322,7 +389,7 @@ public class VinylFutureScraperService {
             return;
         }
         if (!node.isObject()) return;
-        copyText(node, values, "name", "description", "sku", "datePublished", "price", "genre", "country", "brand");
+        copyText(node, values, "name", "description", "sku", "mpn", "datePublished", "price", "genre", "country", "brand");
         JsonNode artist = node.get("byArtist");
         if (artist != null) {
             if (artist.isTextual()) {

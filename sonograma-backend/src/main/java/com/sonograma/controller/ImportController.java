@@ -789,18 +789,43 @@ public class ImportController {
         String pageCode = vinylFutureIdentityNormalizer.normalize(page.code());
         if (code != null) {
             String decodedUrl = sourceUrl == null ? "" : java.net.URLDecoder.decode(sourceUrl, StandardCharsets.UTF_8);
-            String normalizedUrl = java.text.Normalizer.normalize(decodedUrl, java.text.Normalizer.Form.NFKC)
-                .toUpperCase(java.util.Locale.ROOT);
-            return code.equals(pageCode) || normalizedUrl.contains(code);
+            String normalizedUrl = normalize(decodedUrl);
+            String normalizedCode = normalize(item.codigoCatalogo());
+            boolean codeMatch = code.equals(pageCode)
+                || (" " + normalizedUrl + " ").contains(" " + normalizedCode + " ");
+            if (!codeMatch) return false;
+
+            boolean pageMetadataMatch = textPairMatches(
+                item.artista(), item.album(), page.artist(), page.title()
+            );
+            boolean urlMetadataMatch = tokenCoverage(item.artista(), normalizedUrl) >= 0.5
+                && tokenCoverage(item.album(), normalizedUrl) >= 0.5;
+            return pageMetadataMatch || urlMetadataMatch;
         }
-        String artist = normalize(item.artista());
-        String album = normalize(item.album());
-        String pageArtist = normalize(page.artist());
-        String pageTitle = normalize(page.title());
+        return textPairMatches(item.artista(), item.album(), page.artist(), page.title());
+    }
+
+    private boolean textPairMatches(String artistValue, String albumValue, String pageArtistValue, String pageTitleValue) {
+        String artist = normalize(artistValue);
+        String album = normalize(albumValue);
+        String pageArtist = normalize(pageArtistValue);
+        String pageTitle = normalize(pageTitleValue);
         return !artist.isBlank() && !album.isBlank()
             && !pageArtist.isBlank() && !pageTitle.isBlank()
             && (pageArtist.contains(artist) || artist.contains(pageArtist))
             && (pageTitle.contains(album) || album.contains(pageTitle));
+    }
+
+    private double tokenCoverage(String expectedValue, String normalizedCandidate) {
+        List<String> tokens = java.util.Arrays.stream(normalize(expectedValue).split("\\s+"))
+            .filter(token -> !token.isBlank())
+            .distinct()
+            .toList();
+        if (tokens.isEmpty()) return 0;
+        long matches = tokens.stream()
+            .filter(token -> (" " + normalizedCandidate + " ").contains(" " + token + " "))
+            .count();
+        return (double) matches / tokens.size();
     }
 
     private String normalize(String value) {

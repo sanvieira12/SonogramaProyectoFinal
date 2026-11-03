@@ -7,6 +7,7 @@ import org.jsoup.nodes.Document;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -187,5 +188,29 @@ class VinylFutureScraperServiceTest {
         assertEquals("ALT025", result.code());
         assertEquals("Altered Circuits", result.label());
         assertEquals("12inch Vinyl", result.format());
+    }
+
+    @Test
+    void recoversCoverAndAudioFromAnArchivedSupplierProductId() {
+        VinylFutureScraperService archivedService = new VinylFutureScraperService(new ObjectMapper()) {
+            @Override
+            boolean mediaExists(String url) {
+                return url.endsWith(".jpg")
+                    || url.endsWith("a.mp3")
+                    || url.endsWith("b.mp3")
+                    || url.endsWith("c.mp3")
+                    || url.endsWith("d.mp3");
+            }
+        };
+        String url = "https://www.deejay.de/Das_Firmament_Malware_Bizarre_SDT002_Vinyl__1228873";
+
+        Optional<VinylPageData> result = archivedService.buildArchivedPageData(url);
+
+        assertEquals("SDT002", result.orElseThrow().code());
+        assertEquals("https://www.deejay.de/images/xl/7/3/1228873.jpg",
+            result.orElseThrow().frontImageUrl());
+        assertEquals(4, result.orElseThrow().tracks().size());
+        assertEquals("https://www.deejay.de/streamit/7/3/1228873a.mp3",
+            result.orElseThrow().tracks().get(0).mp3Url());
     }
 }

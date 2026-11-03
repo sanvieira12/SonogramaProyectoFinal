@@ -53,6 +53,12 @@ services:
       DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
       DISCOGS_COVERS_DIRECTORY: /opt/sonograma/data/discogs-covers
       VINYLFUTURE_MEDIA_DIRECTORY: /opt/sonograma/data/vinylfuture-media
+      VINYLFUTURE_BASE_URL: ${VINYLFUTURE_BASE_URL:-https://www.deejay.de/}
+      VINYLFUTURE_ARCHIVE_INDEX_URL: ${VINYLFUTURE_ARCHIVE_INDEX_URL:-https://monthlyvinyl.net/r/}
+    extra_hosts:
+      # The public supplier hostname is protected by an interactive Cloudflare challenge.
+      # Keep the origin configurable so imports remain server-to-server and operationally replaceable.
+      - "www.deejay.de:${DEEJAY_ORIGIN_IP:-91.24.162.9}"
     volumes:
       - logs_data:/opt/sonograma/logs
       - discogs_covers_data:/opt/sonograma/data/discogs-covers
