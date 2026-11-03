@@ -261,6 +261,45 @@ class PdfInvoiceParserTest {
     }
 
     @Test
+    void parsesSpanishVinylFutureMetadataAndSummaryAcrossInterstitialPage() throws Exception {
+        byte[] pdf = buildPdf(
+            "deejay.de GmbH & Co. KG\n" +
+            "Factura nr.: 0041-188471\n" +
+            "Fecha: 30.10.2026\n" +
+            "Envío: UPS SAVER\n" +
+            "Pago: Paypal\n" +
+            "Peso total: 12,62 kg\n" +
+            "Moneda: EUR\n" +
+            "descripción Precio por pieza Cantidad Suma\n" +
+            "BLCH001 - Lee Burton- Acid Breeding     13,29   1   13,29",
+            "note next page",
+            "Factura nr.: 0041-188471\n" +
+            "Fecha: 30.10.2026\n" +
+            "descripción Precio por pieza Cantidad Suma\n" +
+            "SDT002 - Das Firmament- Malware Bizarre     16,79   1   16,79\n" +
+            "Cantidad Franqueo: Gastos: Neto: IVA. 7%: IVA. 19%: Total:\n" +
+            "2  168,86  30,99  229,94  0,00  0,00  229,94"
+        );
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(pdf);
+        ParsedInvoice invoice = result.invoice();
+
+        assertEquals("0041-188471", invoice.numeroFactura());
+        assertEquals(java.time.LocalDate.of(2026, 10, 30), invoice.fechaFactura());
+        assertEquals("UPS SAVER", invoice.envio());
+        assertEquals("Paypal", invoice.pago());
+        assertEquals(new BigDecimal("12.62"), invoice.pesoTotalKg());
+        assertEquals("kg", invoice.unidadPeso());
+        assertEquals("EUR", invoice.moneda());
+        assertEquals(2, invoice.items().size());
+        assertEquals(Integer.valueOf(2), invoice.cantidadTotalPdf());
+        assertEquals(new BigDecimal("168.86"), invoice.franqueo());
+        assertEquals(new BigDecimal("30.99"), invoice.tarifas());
+        assertEquals(new BigDecimal("229.94"), invoice.total());
+        assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
     void parsesSampleDeejayInvoiceRowsAcrossTwoPagesStrictly() throws Exception {
         byte[] pdf = buildPdf(
             "deejay.de GmbH & Co. KG\n" +
@@ -498,6 +537,39 @@ class PdfInvoiceParserTest {
             .findFirst().orElseThrow();
         assertEquals("Manuel De Lorenzi & Friends Ep", longEp.album());
         assertFalse(longEp.album().contains("10,49"));
+    }
+
+    @Test
+    void realSpanishVinylFutureInvoice0041188471ReconcilesAllPhysicalCopies() throws Exception {
+        String defaultFixture = Path.of(
+            System.getProperty("user.home"), "Downloads", "0041-188471.pdf"
+        ).toString();
+        Path fixture = Path.of(System.getProperty("vinylfuture.spanish-real-pdf", defaultFixture));
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isRegularFile(fixture),
+            "Fixture real no disponible: " + fixture);
+
+        InvoiceParseResult result = parser.parseInvoiceWithDiagnostics(Files.readAllBytes(fixture));
+        ParsedInvoice invoice = result.invoice();
+
+        assertEquals("0041-188471", invoice.numeroFactura());
+        assertEquals(java.time.LocalDate.of(2026, 10, 30), invoice.fechaFactura());
+        assertEquals(32, invoice.items().size());
+        assertEquals(45, invoice.items().stream().mapToInt(InvoiceItem::cantidad).sum());
+        assertEquals(Integer.valueOf(45), invoice.cantidadTotalPdf());
+        assertEquals(new BigDecimal("815.50"), invoice.total());
+        assertEquals(new BigDecimal("168.86"), invoice.franqueo());
+        assertEquals(new BigDecimal("30.99"), invoice.tarifas());
+        assertEquals("UPS SAVER", invoice.envio());
+        assertEquals("Paypal", invoice.pago());
+        assertEquals(new BigDecimal("12.62"), invoice.pesoTotalKg());
+        assertEquals("EUR", invoice.moneda());
+        assertEquals(3, quantityFor(invoice, "BLCH001"));
+        assertEquals(3, quantityFor(invoice, "GT9.02"));
+        assertEquals(4, quantityFor(invoice, "HD1"));
+        assertEquals(3, quantityFor(invoice, "SDT001"));
+        assertEquals(3, quantityFor(invoice, "WARPLP90R"));
+        assertTrue(result.sourceRows().stream().allMatch(row -> "PARSED".equals(row.status())));
+        assertTrue(result.errors().isEmpty());
     }
 
     @Test

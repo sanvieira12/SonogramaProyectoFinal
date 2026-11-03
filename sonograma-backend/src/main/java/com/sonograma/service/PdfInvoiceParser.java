@@ -78,13 +78,15 @@ public class PdfInvoiceParser {
 
     // Header field patterns (best-effort)
     private static final Pattern INVOICE_NO = Pattern.compile(
-        "(?i)invoice\\s*(?:no\\.?|number|#)[:\\s]+([A-Z0-9\\-]+)"
+        "(?iu)(?:invoice\\s*(?:no\\.?|number|#)|factura\\s*(?:n(?:r|ro)\\.?|n[úu]m(?:ero)?\\.?|#))"
+            + "\\s*:?\\s*([A-Z0-9\\-]+)"
     );
     private static final Pattern INVOICE_DATE_LABEL = Pattern.compile(
-        "(?i)(?:invoice\\s+)?date[:\\s]+([\\d]{1,2}[./\\-][\\d]{1,2}[./\\-][\\d]{2,4})"
+        "(?iu)(?:(?:invoice\\s+)?date|fecha)\\s*:\\s*"
+            + "([\\d]{1,2}[./\\-][\\d]{1,2}[./\\-][\\d]{2,4})"
     );
     private static final Pattern PESO = Pattern.compile(
-        "(?i)(?:total\\s+)?weight[:\\s]+([\\d.,]+)\\s*([a-zA-Z]+)"
+        "(?iu)(?:(?:total\\s+)?weight|peso\\s+total)\\s*:\\s*([\\d.,]+)\\s*([a-zA-Z]+)"
     );
     private static final Pattern CUSTOMS_TARIFF = Pattern.compile(
         "(?i)customs\\s+tariff[\\s\\w]*:[\\s]+([\\d.]+)"
@@ -93,19 +95,23 @@ public class PdfInvoiceParser {
         "(?i)eori[\\s\\w]*:[\\s]+([A-Z0-9]+)"
     );
     private static final Pattern PAYMENT_METHOD = Pattern.compile(
-        "(?i)payment[\\s\\w]*:[\\s]+(.+)"
+        "(?imu)^payment[\\p{L} ]*\\s*:\\s*(.+)$"
+            + "|pago\\s*:\\s*(.+?)(?=\\s+(?:DAP|DDP|EXW|FCA|FOB|CFR|CIF|CPT|CIP)\\b|$)"
     );
     private static final Pattern RECIPIENT = Pattern.compile(
         "(?im)^recipient\\s*:\\s*(.+)$"
     );
     private static final Pattern SHIPPING_METHOD = Pattern.compile(
-        "(?im)^(?:shipping|shipment)(?:\\s+method)?\\s*:\\s*(.+)$|^delivery\\s+method\\s*:\\s*(.+)$"
+        "(?imu)^(?:shipping|shipment)(?:\\s+method)?\\s*:\\s*(.+)$"
+            + "|^delivery\\s+method\\s*:\\s*(.+)$"
+            + "|env[ií]o\\s*:\\s*(.+?)(?=\\s+terms\\s+of\\s+(?:sale|delivery)\\s*:|$)"
     );
     private static final Pattern TERMS_OF_SALE = Pattern.compile(
-        "(?i)terms\\s+of\\s+(?:sale|delivery)[:\\s]+(.+)"
+        "(?isu)terms\\s+of\\s+(?:sale|delivery)\\s*:\\s*"
+            + "(?:[^\\r\\n]*\\R[^\\r\\n]*?)?\\b(DAP|DDP|EXW|FCA|FOB|CFR|CIF|CPT|CIP)\\b"
     );
     private static final Pattern CURRENCY = Pattern.compile(
-        "(?i)currency\\s*:\\s*([A-Z]{3})"
+        "(?iu)(?:currency|moneda)\\s*:\\s*([A-Z]{3})"
     );
 
     private static final List<String> IGNORED_PREFIXES = List.of(
@@ -113,7 +119,10 @@ public class PdfInvoiceParser {
         "shipping method:", "payment:", "payment method:", "total weight:", "currency:",
         "terms of sale:", "customs tariff", "eori", "description unit price quantity sum",
         "note next page", "quantity", "postage:", "fees:", "net:", "vat.", "total:",
-        "shipper's signature", "bank", "iban", "bic", "ust-id", "commercial register"
+        "shipper's signature", "bank", "iban", "bic", "ust-id", "commercial register",
+        "factura nr", "factura nro", "factura núm", "factura num", "fecha:", "página:",
+        "destinatario", "envío:", "envio:", "pago:", "peso total:", "moneda:",
+        "descripción", "descripcion", "cantidad", "franqueo:", "gastos:", "neto:"
     );
 
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
@@ -481,9 +490,9 @@ public class PdfInvoiceParser {
             .orElse(null);
         if (header == null) return new PageLayout(List.of());
 
-        Float unitPriceStart = findTextStart(header, "Unit");
-        Float quantityStart = findTextStart(header, "Quantity");
-        Float sumStart = findTextStart(header, "Sum");
+        Float unitPriceStart = findTextStartAny(header, "Unit", "Precio");
+        Float quantityStart = findTextStartAny(header, "Quantity", "Cantidad");
+        Float sumStart = findTextStartAny(header, "Sum", "Suma");
         if (unitPriceStart == null || quantityStart == null || sumStart == null
             || unitPriceStart >= quantityStart || quantityStart >= sumStart) {
             return new PageLayout(List.of());
@@ -503,8 +512,19 @@ public class PdfInvoiceParser {
 
     private boolean isProductTableHeader(List<PositionedGlyph> glyphs) {
         String text = textByPosition(glyphs).toLowerCase(Locale.ROOT);
-        return text.contains("description") && text.contains("unit") && text.contains("price")
-            && text.contains("quantity") && text.contains("sum");
+        boolean english = text.contains("description") && text.contains("unit")
+            && text.contains("price") && text.contains("quantity") && text.contains("sum");
+        boolean spanish = (text.contains("descripción") || text.contains("descripcion"))
+            && text.contains("precio") && text.contains("cantidad") && text.contains("suma");
+        return english || spanish;
+    }
+
+    private Float findTextStartAny(List<PositionedGlyph> glyphs, String... expectedValues) {
+        for (String expected : expectedValues) {
+            Float start = findTextStart(glyphs, expected);
+            if (start != null) return start;
+        }
+        return null;
     }
 
     private Float findTextStart(List<PositionedGlyph> glyphs, String expected) {
@@ -787,9 +807,13 @@ public class PdfInvoiceParser {
 
     private boolean isSummaryHeader(String line) {
         String lower = line == null ? "" : line.strip().toLowerCase(Locale.ROOT);
-        return lower.contains("quantity") && lower.contains("postage")
+        boolean english = lower.contains("quantity") && lower.contains("postage")
             && lower.contains("fees") && lower.contains("net")
             && lower.contains("total");
+        boolean spanish = lower.contains("cantidad") && lower.contains("franqueo")
+            && lower.contains("gastos") && lower.contains("neto")
+            && lower.contains("total");
+        return english || spanish;
     }
 
     private boolean shouldIgnoreLine(String line) {
