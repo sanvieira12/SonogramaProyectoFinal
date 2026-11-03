@@ -13,6 +13,8 @@ import com.sonograma.entity.Reserva;
 import com.sonograma.entity.Venta;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscoRequestDTO;
+import com.sonograma.dto.DiscoQrCopyCommercialUpdateDTO;
+import com.sonograma.dto.DiscoQrCopyCreateDTO;
 import com.sonograma.enums.AudioPreviewStatus;
 import com.sonograma.enums.CanalVenta;
 import com.sonograma.enums.CondicionDisco;
@@ -47,10 +49,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -666,6 +670,222 @@ class DiscoPermanentDeletionIntegrationTest {
     }
 
     @Test
+    void editingSingleAvailableUsedCopyUpdatesItsDisplayedPriceAndCondition() {
+        Disco disco = saveDisco("ELECNO-POSSE-EDIT");
+        disco.setArtista("Elecno Posse");
+        disco.setAlbum("ELECNO POSSE");
+        disco.setCondicion(CondicionDisco.USADO);
+        disco.setPrecioVenta(new BigDecimal("1035"));
+        disco.setCondicionFisica("VG+");
+        disco.setPricingMode(PricingMode.MANUAL);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy copy = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        copy.setPrecioVenta(new BigDecimal("1035"));
+        copy.setCondicionFisica("VG+");
+        discoQrCopyRepository.saveAndFlush(copy);
+
+        DiscoRequestDTO request = editableRequestFor(disco);
+        request.setPrecioVenta(new BigDecimal("1200"));
+        request.setCondicionFisica("NM");
+
+        DiscoResponseDTO result = discoService.actualizarDisco(disco.getIdDisco(), request);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoRepository.findById(disco.getIdDisco())).get().satisfies(updated -> {
+            assertThat(updated.getPrecioVenta()).isEqualByComparingTo("1200");
+            assertThat(updated.getCondicionFisica()).isEqualTo("NM");
+        });
+        assertThat(discoQrCopyRepository.findById(copy.getId())).get().satisfies(updated -> {
+            assertThat(updated.getPrecioVenta()).isEqualByComparingTo("1200");
+            assertThat(updated.getCondicionFisica()).isEqualTo("NM");
+        });
+        assertThat(result.getPrecioVenta()).isEqualByComparingTo("1200");
+        assertThat(result.getCondicionFisica()).isEqualTo("NM");
+        assertThat(discoService.obtenerCopias(disco.getIdDisco())).singleElement().satisfies(updated -> {
+            assertThat(updated.precioVenta()).isEqualByComparingTo("1200");
+            assertThat(updated.condicionFisica()).isEqualTo("NM");
+        });
+    }
+
+    @Test
+    void productEditDoesNotOverwriteCommercialDataAcrossMultipleAvailableUsedCopies() {
+        Disco disco = saveDisco("MULTI-USED-EDIT");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy first = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        first.setPrecioVenta(new BigDecimal("800"));
+        first.setCondicionFisica("VG+");
+        DiscoQrCopy second = saveCopy(disco, 2, EstadoCopiaDisco.DISPONIBLE);
+        second.setPrecioVenta(new BigDecimal("950"));
+        second.setCondicionFisica("NM");
+        discoQrCopyRepository.saveAllAndFlush(List.of(first, second));
+
+        DiscoRequestDTO request = editableRequestFor(disco);
+        request.setCantidadCopias(2);
+        request.setPrecioVenta(new BigDecimal("1100"));
+        request.setCondicionFisica("M");
+
+        discoService.actualizarDisco(disco.getIdDisco(), request);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoQrCopyRepository.findById(first.getId())).get().satisfies(updated -> {
+            assertThat(updated.getPrecioVenta()).isEqualByComparingTo("800");
+            assertThat(updated.getCondicionFisica()).isEqualTo("VG+");
+        });
+        assertThat(discoQrCopyRepository.findById(second.getId())).get().satisfies(updated -> {
+            assertThat(updated.getPrecioVenta()).isEqualByComparingTo("950");
+            assertThat(updated.getCondicionFisica()).isEqualTo("NM");
+        });
+    }
+
+    @Test
+    void exactCopyCommercialEditUpdatesOnlyTheSelectedPhysicalCopy() {
+        Disco disco = saveDisco("EXACT-COMMERCIAL-EDIT");
+        disco.setCondicion(CondicionDisco.USADO);
+        disco.setCantidadCopias(2);
+        disco.setPrecioVenta(new BigDecimal("700"));
+        disco.setCondicionFisica("VG");
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy selected = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+        selected.setPrecioVenta(new BigDecimal("700"));
+        selected.setCondicionFisica("VG");
+        DiscoQrCopy sibling = saveCopy(disco, 2, EstadoCopiaDisco.DISPONIBLE);
+        sibling.setPrecioVenta(new BigDecimal("900"));
+        sibling.setCondicionFisica("NM");
+        discoQrCopyRepository.saveAllAndFlush(List.of(selected, sibling));
+
+        DiscoResponseDTO result = discoService.actualizarDatosComercialesCopia(
+                disco.getIdDisco(), selected.getId(),
+                new DiscoQrCopyCommercialUpdateDTO(new BigDecimal("825"), " vg+ "));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoQrCopyRepository.findById(selected.getId())).get().satisfies(updated -> {
+            assertThat(updated.getPrecioVenta()).isEqualByComparingTo("825");
+            assertThat(updated.getCondicionFisica()).isEqualTo("VG+");
+        });
+        assertThat(discoQrCopyRepository.findById(sibling.getId())).get().satisfies(unchanged -> {
+            assertThat(unchanged.getPrecioVenta()).isEqualByComparingTo("900");
+            assertThat(unchanged.getCondicionFisica()).isEqualTo("NM");
+        });
+        assertThat(result.getCantidadCopias()).isEqualTo(2);
+        assertThat(discoRepository.findById(disco.getIdDisco())).get().satisfies(parent -> {
+            assertThat(parent.getPrecioVenta()).isEqualByComparingTo("700");
+            assertThat(parent.getCondicionFisica()).isEqualTo("VG");
+        });
+    }
+
+    @Test
+    void exactCommercialEditSynchronizesSingleAvailableUsedCompatibilityFields() {
+        Disco disco = saveDisco("SINGLE-COMMERCIAL-EDIT");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy copy = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+
+        discoService.actualizarDatosComercialesCopia(
+                disco.getIdDisco(), copy.getId(),
+                new DiscoQrCopyCommercialUpdateDTO(new BigDecimal("1300"), "nm"));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(discoRepository.findById(disco.getIdDisco())).get().satisfies(parent -> {
+            assertThat(parent.getPrecioVenta()).isEqualByComparingTo("1300");
+            assertThat(parent.getCondicionFisica()).isEqualTo("NM");
+            assertThat(parent.getPricingMode()).isEqualTo(PricingMode.MANUAL);
+        });
+    }
+
+    @Test
+    void removedCopyCommercialDataCannotBeRewritten() {
+        Disco disco = saveDisco("REMOVED-COMMERCIAL-EDIT");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy removed = saveCopy(disco, 1, EstadoCopiaDisco.REMOVED);
+
+        assertThatThrownBy(() -> discoService.actualizarDatosComercialesCopia(
+                disco.getIdDisco(), removed.getId(),
+                new DiscoQrCopyCommercialUpdateDTO(new BigDecimal("999"), "NM")))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("datos históricos");
+    }
+
+    @Test
+    void manualUsedReceiptCreatesOneExactPricedCopyAndRecalculatesProduct() {
+        Disco disco = saveDisco("USED-EXACT-RECEIPT");
+        disco.setCondicion(CondicionDisco.USADO);
+        disco.setCantidadCopias(0);
+        disco.setEstado(EstadoDisco.SIN_STOCK);
+        discoRepository.saveAndFlush(disco);
+
+        DiscoResponseDTO result = discoService.agregarCopiaUsada(
+                disco.getIdDisco(), new DiscoQrCopyCreateDTO(new BigDecimal("1450"), " vg+ "));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(result.getCantidadCopias()).isEqualTo(1);
+        assertThat(result.getEstado()).isEqualTo("DISPONIBLE");
+        assertThat(discoQrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco()))
+                .singleElement().satisfies(created -> {
+                    assertThat(created.getEstado()).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+                    assertThat(created.getCodigoQr()).isNotBlank();
+                    assertThat(created.getPrecioVenta()).isEqualByComparingTo("1450");
+                    assertThat(created.getCondicionFisica()).isEqualTo("VG+");
+                });
+        assertThat(discoRepository.findById(disco.getIdDisco())).get().satisfies(parent -> {
+            assertThat(parent.getCantidadCopias()).isEqualTo(1);
+            assertThat(parent.getPrecioVenta()).isEqualByComparingTo("1450");
+            assertThat(parent.getCondicionFisica()).isEqualTo("VG+");
+        });
+    }
+
+    @Test
+    void manualDiscogsProductRequiresItsImportFlowForAdditionalCopies() {
+        DiscogsManualBatch batch = saveManualBatch("USED-RECEIPT-LINEAGE");
+        Disco disco = saveDisco("USED-RECEIPT-LINEAGE");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+        saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
+
+        assertThatThrownBy(() -> discoService.agregarCopiaUsada(
+                disco.getIdDisco(), new DiscoQrCopyCreateDTO(new BigDecimal("1500"), "NM")))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("Importar")
+                .hasMessageContaining("procedencia");
+        assertThat(discoQrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).hasSize(1);
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERADOR")
+    void nonAdminCannotReceiveExactUsedCopy() throws Exception {
+        Disco disco = saveDisco("USED-RECEIPT-AUTH");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+
+        mockMvc.perform(post("/discos/{idDisco}/copias", disco.getIdDisco())
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"precioVenta\":1200,\"condicionFisica\":\"VG+\"}"))
+                .andExpect(status().isForbidden());
+        assertThat(discoQrCopyRepository.findByIdDiscoOrderByCopyNumber(disco.getIdDisco())).isEmpty();
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = "ADMIN")
+    void exactCommercialEditEndpointValidatesThatAtLeastOneFieldIsPresent() throws Exception {
+        Disco disco = saveDisco("EXACT-COMMERCIAL-HTTP");
+        disco.setCondicion(CondicionDisco.USADO);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy copy = saveCopy(disco, 1, EstadoCopiaDisco.DISPONIBLE);
+
+        mockMvc.perform(patch("/discos/{idDisco}/copias/{idCopia}/datos-comerciales",
+                        disco.getIdDisco(), copy.getId())
+                        .contentType(APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
     @WithMockUser(username = "admin", roles = "ADMIN")
     void adminCanDeleteOneCopyThroughCopySpecificEndpoint() throws Exception {
         Disco disco = saveDisco("COPY-HTTP");
@@ -810,7 +1030,7 @@ class DiscoPermanentDeletionIntegrationTest {
     }
 
     @Test
-    void manualCopyDeleteStateAndProductStatusBypassesAreRejected() {
+    void manualCopyDeleteRemovalAndProductStatusBypassesAreRejected() {
         DiscogsManualBatch batch = saveManualBatch("PHASE1-BYPASS");
         Disco disco = saveDisco("PHASE1-BYPASS");
         DiscoQrCopy copy = saveManualCopy(disco, batch, EstadoCopiaDisco.DISPONIBLE);
@@ -822,9 +1042,6 @@ class DiscoPermanentDeletionIntegrationTest {
         assertThatThrownBy(() -> discoService.eliminarCopia(disco.getIdDisco(), copy.getId()))
                 .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("motivo explícito");
         assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
-                disco.getIdDisco(), copy.getId(), EstadoCopiaDisco.VENDIDO))
-                .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("flujo de venta");
-        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
                 disco.getIdDisco(), copy.getId(), EstadoCopiaDisco.REMOVED))
                 .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("motivo explícito");
         assertThatThrownBy(() -> discoService.cambiarEstado(disco.getIdDisco(), EstadoDisco.VENDIDO))
@@ -832,6 +1049,81 @@ class DiscoPermanentDeletionIntegrationTest {
         assertThatThrownBy(() -> discoService.cambiarEstado(disco.getIdDisco(), EstadoDisco.SIN_STOCK))
                 .isInstanceOf(ConflictoNegocioException.class).hasMessageContaining("copias físicas");
         assertThat(discoQrCopyRepository.findById(copy.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+    }
+
+    @Test
+    void manualAvailableCopiesCanBeMarkedSoldExactlyWithoutCreatingSales() {
+        DiscogsManualBatch batch = saveManualBatch("MANUAL-STATUS-SOLD");
+        Disco disco = saveDisco("MANUAL-STATUS-SOLD");
+        disco.setCondicion(CondicionDisco.USADO);
+        disco.setCantidadCopias(2);
+        discoRepository.saveAndFlush(disco);
+        DiscoQrCopy selected = saveManualCopyWithNumber(
+                disco, batch, EstadoCopiaDisco.DISPONIBLE, 1);
+        DiscoQrCopy sibling = saveManualCopyWithNumber(
+                disco, batch, EstadoCopiaDisco.DISPONIBLE, 2);
+
+        DiscoResponseDTO afterFirst = discoService.cambiarEstadoCopia(
+                disco.getIdDisco(), selected.getId(), EstadoCopiaDisco.VENDIDO);
+
+        assertThat(afterFirst.getCantidadCopias()).isEqualTo(1);
+        assertThat(afterFirst.getEstado()).isEqualTo("DISPONIBLE");
+        assertThat(discoQrCopyRepository.findById(selected.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.VENDIDO);
+        assertThat(discoQrCopyRepository.findById(sibling.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+
+        DiscoResponseDTO afterSecond = discoService.cambiarEstadoCopia(
+                disco.getIdDisco(), sibling.getId(), EstadoCopiaDisco.VENDIDO);
+
+        assertThat(afterSecond.getCantidadCopias()).isZero();
+        assertThat(afterSecond.getEstado()).isEqualTo("VENDIDO");
+        assertThat(ventaRepository.count()).isZero();
+        assertThat(detalleVentaRepository.count()).isZero();
+    }
+
+    @Test
+    void exactCopyCannotBeMarkedSoldWhileProductHasPendingCommitments() {
+        Disco reservedDisco = saveDisco("STATUS-SOLD-RESERVED");
+        DiscoQrCopy reservedCopy = saveCopy(
+                reservedDisco, 1, EstadoCopiaDisco.DISPONIBLE);
+        Reserva reserva = new Reserva();
+        reserva.setCliente(saveClient());
+        reserva.setDisco(reservedDisco);
+        reserva.setEstado(EstadoReserva.ACTIVA);
+        reserva.setFechaReserva(LocalDateTime.now());
+        entityManager.persist(reserva);
+
+        Disco presaleDisco = saveDisco("STATUS-SOLD-PRESALE");
+        DiscoQrCopy presaleCopy = saveCopy(
+                presaleDisco, 1, EstadoCopiaDisco.DISPONIBLE);
+        Cliente presaleClient = saveClient();
+        entityManager.persist(PreVenta.builder()
+                .transaccion(savePreVentaTransaction(presaleClient, "status-sold"))
+                .cliente(presaleClient)
+                .disco(presaleDisco)
+                .fecha(LocalDate.now())
+                .cantidad(1)
+                .precio(new BigDecimal("1000"))
+                .estado("PENDIENTE")
+                .artistaSnap(presaleDisco.getArtista())
+                .albumSnap(presaleDisco.getAlbum())
+                .build());
+        entityManager.flush();
+
+        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
+                reservedDisco.getIdDisco(), reservedCopy.getId(), EstadoCopiaDisco.VENDIDO))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("reserva activa");
+        assertThatThrownBy(() -> discoService.cambiarEstadoCopia(
+                presaleDisco.getIdDisco(), presaleCopy.getId(), EstadoCopiaDisco.VENDIDO))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasMessageContaining("preventa pendiente");
+
+        assertThat(discoQrCopyRepository.findById(reservedCopy.getId())).get()
+                .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
+        assertThat(discoQrCopyRepository.findById(presaleCopy.getId())).get()
                 .extracting(DiscoQrCopy::getEstado).isEqualTo(EstadoCopiaDisco.DISPONIBLE);
     }
 
@@ -885,6 +1177,17 @@ class DiscoPermanentDeletionIntegrationTest {
                 .cantidadCopias(1)
                 .pricingMode(PricingMode.AUTO)
                 .build());
+    }
+
+    private DiscoRequestDTO editableRequestFor(Disco disco) {
+        DiscoRequestDTO request = new DiscoRequestDTO();
+        request.setCodigoInterno(disco.getCodigoInterno());
+        request.setArtista(disco.getArtista());
+        request.setAlbum(disco.getAlbum());
+        request.setCondicion(disco.getCondicion() == null ? CondicionDisco.USADO : disco.getCondicion());
+        request.setTipoDisco(disco.getTipoDisco() == null ? TipoDisco.VINILO : disco.getTipoDisco());
+        request.setPricingMode(PricingMode.MANUAL);
+        return request;
     }
 
     private Cliente saveClient() {

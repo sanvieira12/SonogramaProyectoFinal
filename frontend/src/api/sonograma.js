@@ -127,6 +127,10 @@ export const api = {
       request('PATCH', `/discos/${id}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
     cambiarEstadoCopia: (idDisco, idCopia, estado) =>
       request('PATCH', `/discos/${idDisco}/copias/${idCopia}/estado?nuevoEstado=${encodeURIComponent(estado)}`),
+    actualizarDatosCopia: (idDisco, idCopia, data) =>
+      request('PATCH', `/discos/${idDisco}/copias/${idCopia}/datos-comerciales`, data),
+    agregarCopiaUsada: (idDisco, data) =>
+      request('POST', `/discos/${idDisco}/copias`, data),
     retirarCopia: (idDisco, idCopia, data) =>
       request('POST', `/discos/${idDisco}/copias/${idCopia}/retiro`, data),
     eliminarCopia: (idDisco, idCopia) =>

@@ -46,7 +46,7 @@ class DiscoQrCopyServiceTest {
                 disco, createdCopies, new BigDecimal("900"), " vg+ ");
 
         assertEquals(new BigDecimal("900"), created.getPrecioVenta());
-        assertEquals("vg+", created.getCondicionFisica());
+        assertEquals("VG+", created.getCondicionFisica());
         verify(repository).saveAll(createdCopies);
     }
 

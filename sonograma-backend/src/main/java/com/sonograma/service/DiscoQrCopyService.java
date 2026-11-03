@@ -227,9 +227,54 @@ public class DiscoQrCopyService {
         return List.copyOf(repository.saveAll(createdCopies));
     }
 
+    /**
+     * Keeps the product edit form honest for a USED product with one unambiguous
+     * sellable copy. Multiple available copies remain copy-specific and are never
+     * overwritten by a product-level edit.
+     */
+    public void updateSingleAvailableUsedCopyCommercialData(
+            Disco disco,
+            BigDecimal explicitSalePrice,
+            String explicitPhysicalCondition) {
+        if (disco == null || disco.getIdDisco() == null
+                || disco.getCondicion() != CondicionDisco.USADO) {
+            return;
+        }
+        List<DiscoQrCopy> available = repository.findByIdDiscoAndEstadoOrderByCopyNumber(
+                disco.getIdDisco(), EstadoCopiaDisco.DISPONIBLE);
+        if (available.size() != 1) return;
+
+        String condition = normalizeExplicitCondition(explicitPhysicalCondition);
+        if (explicitSalePrice == null && condition == null) return;
+
+        DiscoQrCopy copy = available.getFirst();
+        if (explicitSalePrice != null) copy.setPrecioVenta(explicitSalePrice);
+        if (condition != null) copy.setCondicionFisica(condition);
+        repository.save(copy);
+    }
+
+    public DiscoQrCopy updateCommercialData(
+            Disco disco,
+            Long copyId,
+            BigDecimal explicitSalePrice,
+            String explicitPhysicalCondition) {
+        DiscoQrCopy copy = repository.findByIdForUpdate(copyId)
+                .filter(candidate -> Objects.equals(candidate.getIdDisco(), disco.getIdDisco()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("Copia", copyId));
+        if (copy.getEstado() == EstadoCopiaDisco.REMOVED) {
+            throw new ConflictoNegocioException(
+                    "Una copia retirada conserva sus datos históricos y no puede editarse.");
+        }
+        if (explicitSalePrice != null) copy.setPrecioVenta(explicitSalePrice);
+        if (explicitPhysicalCondition != null) {
+            copy.setCondicionFisica(normalizeExplicitCondition(explicitPhysicalCondition));
+        }
+        return repository.save(copy);
+    }
+
     private String normalizeExplicitCondition(String value) {
         if (value == null || value.isBlank()) return null;
-        String normalized = value.trim();
+        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
         return normalized.length() <= 50 ? normalized : normalized.substring(0, 50);
     }
 
@@ -451,10 +496,10 @@ public class DiscoQrCopyService {
             throw new ConflictoNegocioException(
                     "El retiro de una copia requiere el endpoint de retiro retenido y un motivo explícito.");
         }
-        if (copy.getManualDiscogsBatch() != null && copy.getEstado() != newState) {
-            throw new ConflictoNegocioException(
-                    "El estado de una copia manual USED solo puede cambiar mediante su flujo de venta, restauración o retiro.");
-        }
+        // Marking one exact AVAILABLE copy as SOLD is an inventory operation,
+        // including for manual Discogs/USED receipts. It deliberately does not
+        // create a sale. Restoring a historically sold copy is guarded by
+        // DiscoService before this lower-level mutation is reached.
         copy.setEstado(newState);
         return toDto(disco, repository.save(copy));
     }

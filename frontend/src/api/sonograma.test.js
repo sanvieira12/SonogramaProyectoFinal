@@ -72,6 +72,45 @@ describe('normalizeApiBase', () => {
     }))
   })
 
+  it('edits commercial data on one exact physical copy', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('{"idDisco":42}'),
+    })
+
+    await api.discos.actualizarDatosCopia(42, 77, {
+      precioVenta: 1350,
+      condicionFisica: 'VG+',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/discos/42/copias/77/datos-comerciales',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ precioVenta: 1350, condicionFisica: 'VG+' }),
+      }),
+    )
+  })
+
+  it('receives one exact used copy with its own price and condition', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 201,
+      text: () => Promise.resolve('{"idDisco":42,"cantidadCopias":2}'),
+    })
+
+    await api.discos.agregarCopiaUsada(42, {
+      precioVenta: 1450,
+      condicionFisica: 'NM',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/discos/42/copias', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ precioVenta: 1450, condicionFisica: 'NM' }),
+    }))
+  })
+
   it('loads the authoritative Stock valuation independently from pricing preview settings', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

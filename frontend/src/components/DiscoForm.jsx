@@ -5,11 +5,10 @@ import { stopAllPreviews } from './audioPreviewPlayback'
 
 const CONDICIONES = ['NUEVO', 'USADO', 'CONSIGNACION', 'CATALOGO']
 const TIPOS = ['VINILO', 'CD', 'DIGITAL', 'CASSETTE', 'OTRO']
-const ESTADOS = ['DISPONIBLE', 'RESERVADO', 'VENDIDO', 'FUERA_STOCK', 'DESCONTINUADO']
 
 const VACIO = {
   codigoInterno: '', artista: '', album: '', genero: '', selloDiscografico: '', descripcion: '', anio: '',
-  condicion: 'NUEVO', condicionFisica: '', tipoDisco: 'VINILO', formato: '', costo: '', precioVenta: '', pricingMode: 'AUTO', estado: 'DISPONIBLE', imagenUrl: '',
+  condicion: 'NUEVO', condicionFisica: '', tipoDisco: 'VINILO', formato: '', costo: '', precioVenta: '', pricingMode: 'AUTO', imagenUrl: '',
 }
 
 function resizarBase64(file, maxPx = 400) {
@@ -219,13 +218,15 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           costo: disco.costo || '',
           precioVenta: disco.precioVenta || '',
           pricingMode: disco.pricingMode || 'AUTO',
-          estado: disco.estado || 'DISPONIBLE',
           imagenUrl: disco.imagenUrl || '',
         }
       : VACIO
   )
   const [error, setError] = useState('')
   const [cargando, setCargando] = useState(false)
+  const commercialFieldsManagedPerCopy = esEdicion
+    && form.condicion === 'USADO'
+    && Number(disco?.cantidadCopias ?? 0) !== 1
 
   function set(field, value) {
     setForm(f => ({ ...f, [field]: value }))
@@ -330,7 +331,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Categoría</label>
               <select value={form.condicion} onChange={e => set('condicion', e.target.value)} className="input">
@@ -339,7 +340,7 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Condición física</label>
-              <input value={form.condicionFisica} onChange={e => set('condicionFisica', e.target.value)} className="input" placeholder="NM, VG+, VG" maxLength={50} />
+              <input value={form.condicionFisica} onChange={e => set('condicionFisica', e.target.value)} disabled={commercialFieldsManagedPerCopy} className="input disabled:cursor-not-allowed disabled:opacity-50" placeholder="NM, VG+, VG" maxLength={50} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Tipo</label>
@@ -351,13 +352,13 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Formato</label>
               <input value={form.formato} onChange={e => set('formato', e.target.value)} className="input" placeholder='LP, 2x12", 3LP, Box Set' />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Estado</label>
-              <select value={form.estado} onChange={e => set('estado', e.target.value)} className="input">
-                {ESTADOS.map(s => <option key={s}>{s}</option>)}
-              </select>
-            </div>
           </div>
+
+          {esEdicion && (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-stone-950 dark:text-stone-400">
+              El estado y el stock se calculan desde las copias físicas. Para vender, retirar o agregar una copia usá las acciones del detalle del catálogo.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -366,9 +367,15 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Precio venta (UYU)</label>
-              <input value={form.precioVenta} onChange={e => set('precioVenta', e.target.value)} className="input" placeholder="0.00" type="number" step="0.01" min="0" />
+              <input value={form.precioVenta} onChange={e => set('precioVenta', e.target.value)} disabled={commercialFieldsManagedPerCopy} className="input disabled:cursor-not-allowed disabled:opacity-50" placeholder="0.00" type="number" step="0.01" min="0" />
             </div>
           </div>
+
+          {commercialFieldsManagedPerCopy && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              Este producto tiene cero o varias copias disponibles. Editá precio y condición desde la copia física exacta en el detalle del catálogo.
+            </p>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Portada</label>

@@ -30,6 +30,8 @@ vi.mock('../services/discoService', () => ({
       porId: vi.fn(),
       copias: vi.fn(),
       cambiarEstadoCopia: vi.fn(),
+      actualizarDatosCopia: vi.fn(),
+      agregarCopiaUsada: vi.fn(),
       retirarCopia: vi.fn(),
       eliminarCopia: vi.fn(),
       previews: { listar: vi.fn().mockResolvedValue([]) },
@@ -405,6 +407,97 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.queryByTestId('new-copy-qr-section')).not.toBeInTheDocument()
   })
 
+  it('edits price and condition on one exact USED copy and refreshes backend authority', async () => {
+    const product = catalogDisco({
+      idDisco: 1310,
+      artista: 'Elecno Posse',
+      album: 'ELECNO POSSE',
+      condicion: 'USADO',
+      precioVenta: 1035,
+      condicionFisica: 'VG+',
+      cantidadCopias: 1,
+    })
+    const original = copyDetail({ id: 1311, productId: 1310, precioVenta: 1035, condicionFisica: 'VG+' })
+    const edited = copyDetail({ ...original, precioVenta: 1200, condicionFisica: 'NM' })
+    const updatedProduct = { ...product, precioVenta: 1200, condicionFisica: 'NM' }
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValueOnce([original]).mockResolvedValueOnce([edited])
+    api.discos.actualizarDatosCopia.mockResolvedValue(updatedProduct)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    fireEvent.click((await screen.findByText('Elecno Posse')).closest('tr'))
+    const section = await screen.findByTestId('physical-copy-section')
+    fireEvent.click(await within(section).findByRole('button', { name: 'Editar precio y condición' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Precio de la copia'), { target: { value: '1200' } })
+    fireEvent.change(within(dialog).getByLabelText('Condición física de la copia'), { target: { value: 'NM' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar copia' }))
+
+    await waitFor(() => expect(api.discos.actualizarDatosCopia).toHaveBeenCalledWith(1310, 1311, {
+      precioVenta: 1200,
+      condicionFisica: 'NM',
+    }))
+    await waitFor(() => expect(api.discos.copias).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(within(section).getByText('UYU $1.200')).toBeInTheDocument()
+    expect(within(section).getByText('NM')).toBeInTheDocument()
+  })
+
+  it('receives a new exact USED copy instead of incrementing anonymous aggregate stock', async () => {
+    const product = catalogDisco({
+      idDisco: 1320,
+      artista: 'Used Receipt',
+      condicion: 'USADO',
+      precioVenta: 900,
+      condicionFisica: 'VG',
+      cantidadCopias: 1,
+    })
+    const updatedProduct = { ...product, cantidadCopias: 2, precioVenta: 1100, condicionFisica: 'NM' }
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.agregarCopiaUsada.mockResolvedValue(updatedProduct)
+    api.discos.copias.mockResolvedValue([
+      copyDetail({ id: 1321, productId: 1320 }),
+      copyDetail({ id: 1322, productId: 1320, copyNumber: 2, precioVenta: 1100, condicionFisica: 'NM' }),
+    ])
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Used Receipt')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: 'Agregar copia usada' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Precio de la nueva copia'), { target: { value: '1100' } })
+    fireEvent.change(within(dialog).getByLabelText('Condición física de la nueva copia'), { target: { value: 'NM' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar copia' }))
+
+    await waitFor(() => expect(api.discos.agregarCopiaUsada).toHaveBeenCalledWith(1320, {
+      precioVenta: 1100,
+      condicionFisica: 'NM',
+    }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(within(row).getByText('2')).toBeInTheDocument()
+  })
+
+  it('marks an exact USED copy sold from its physical-copy detail', async () => {
+    const product = catalogDisco({ idDisco: 1330, artista: 'Exact Sold', condicion: 'USADO', cantidadCopias: 1 })
+    const available = copyDetail({ id: 1331, productId: 1330, estado: 'DISPONIBLE' })
+    const sold = copyDetail({ ...available, estado: 'VENDIDO' })
+    const updatedProduct = { ...product, cantidadCopias: 0, estado: 'VENDIDO' }
+    discoService.getAll.mockResolvedValue([product])
+    api.discos.copias.mockResolvedValueOnce([available]).mockResolvedValueOnce([sold])
+    api.discos.cambiarEstadoCopia.mockResolvedValue(updatedProduct)
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    fireEvent.click((await screen.findByText('Exact Sold')).closest('tr'))
+    const section = await screen.findByTestId('physical-copy-section')
+    fireEvent.click(await within(section).findByRole('button', { name: 'Marcar vendida' }))
+
+    await waitFor(() => expect(api.discos.cambiarEstadoCopia).toHaveBeenCalledWith(1330, 1331, 'VENDIDO'))
+    await waitFor(() => expect(api.discos.copias).toHaveBeenCalledTimes(2))
+    expect(within(section).getAllByText('Vendida').length).toBeGreaterThan(0)
+    expect(within(section).getByRole('button', { name: 'Marcar disponible' })).toBeInTheDocument()
+  })
+
   it('summarizes only AVAILABLE USED copies while retaining sold and removed copy history', async () => {
     const product = catalogDisco({
       idDisco: 1350,
@@ -610,6 +703,33 @@ describe('Catalog permanent deletion flow', () => {
     await waitFor(() => expect(api.discos.eliminarCopia).toHaveBeenCalledWith(42, 77))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByText('Este disco no tiene copias físicas con QR.')).toBeInTheDocument()
+  })
+
+  it('shows the backend reason when marking an exact copy sold fails and preserves the current state', async () => {
+    const availableCopy = copyDetail({ id: 77, productId: 42, copyNumber: 1, estado: 'DISPONIBLE' })
+    const withCopy = {
+      ...disco,
+      qrCopies: [availableCopy],
+      cantidadCopias: 1,
+      totalCopias: 1,
+    }
+    api.discos.porId.mockResolvedValue(withCopy)
+    api.discos.cambiarEstadoCopia.mockRejectedValue(
+      new Error('No se puede marcar esta copia porque tiene una reserva activa.'),
+    )
+    api.qr.urlDescargaCopia.mockReturnValue('/api/qr/42/1')
+
+    render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+    const row = (await screen.findByText('Deletion Artist')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: 'Ver QR' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Marcar vendida' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'No se puede marcar esta copia porque tiene una reserva activa.',
+    )
+    expect(api.discos.cambiarEstadoCopia).toHaveBeenCalledWith(42, 77, 'VENDIDO')
+    expect(screen.getByRole('button', { name: 'Marcar vendida' })).toBeInTheDocument()
+    expect(screen.getByText('Mostrando copia 1 de 1')).toBeInTheDocument()
   })
 
   it('keeps a sold new product visible and orders by update date with entry-date fallback', async () => {

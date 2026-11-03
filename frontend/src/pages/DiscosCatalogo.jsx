@@ -220,7 +220,17 @@ function chooseDefaultCopy(copies, activeSourceCode) {
     || null
 }
 
-function PhysicalCopiesSection({ copyState, activeSourceCode, onRetry, onViewQr, onRequestRemoval }) {
+function PhysicalCopiesSection({
+  copyState,
+  activeSourceCode,
+  onRetry,
+  onViewQr,
+  onRequestRemoval,
+  onRequestAddCopy,
+  onEditCopy,
+  onChangeCopyStatus,
+  copyMutation,
+}) {
   const copies = [...(copyState?.copies || [])].sort((a, b) =>
     (Number(a.copyNumber) - Number(b.copyNumber)) || (Number(a.id) - Number(b.id)))
   const [selectedCopyId, setSelectedCopyId] = useState(null)
@@ -245,7 +255,18 @@ function PhysicalCopiesSection({ copyState, activeSourceCode, onRetry, onViewQr,
             </p>
           )}
         </div>
+        {onRequestAddCopy && (
+          <button type="button" onClick={onRequestAddCopy} className="btn-secondary px-3 py-1.5 text-xs">
+            Agregar copia usada
+          </button>
+        )}
       </div>
+
+      {copyMutation?.error && (
+        <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+          {copyMutation.error}
+        </div>
+      )}
 
       {copyState?.loading && (
         <div role="status" className="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-500 dark:bg-stone-950 dark:text-stone-400">
@@ -351,6 +372,33 @@ function PhysicalCopiesSection({ copyState, activeSourceCode, onRetry, onViewQr,
               </button>
             )}
 
+            {selectedCopy.estado !== 'REMOVED' && (onEditCopy || onChangeCopyStatus) && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {onEditCopy && (
+                  <button
+                    type="button"
+                    onClick={() => onEditCopy(selectedCopy)}
+                    disabled={copyMutation?.loading}
+                    className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Editar precio y condición
+                  </button>
+                )}
+                {onChangeCopyStatus && (
+                  <button
+                    type="button"
+                    onClick={() => onChangeCopyStatus(selectedCopy)}
+                    disabled={copyMutation?.loading}
+                    className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {copyMutation?.loading && String(copyMutation.copyId) === String(selectedCopy.id)
+                      ? 'Actualizando…'
+                      : selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
+                  </button>
+                )}
+              </div>
+            )}
+
             {selectedCopy.estado === 'DISPONIBLE' && onRequestRemoval && (
               <button
                 type="button"
@@ -441,6 +489,102 @@ function RetainedCopyRemovalModal({ disco, copy, loading, error, onConfirm, onCa
   )
 }
 
+function CopyCommercialModal({ disco, copy, loading, error, onConfirm, onCancel }) {
+  const [precioVenta, setPrecioVenta] = useState(copy?.precioVenta ?? '')
+  const [condicionFisica, setCondicionFisica] = useState(copy?.condicionFisica ?? '')
+  if (!disco || !copy) return null
+  const validPrice = Number(precioVenta) > 0
+  const validCondition = condicionFisica.trim().length > 0
+
+  return (
+    <ConfirmModal
+      titulo={`Editar Copia ${copy.copyNumber ?? '—'}`}
+      mensaje={`${disco.artista || '—'} — ${disco.album || '—'}. Los cambios se aplican únicamente a esta copia física.`}
+      onConfirmar={() => onConfirm({
+        precioVenta: validPrice ? Number(precioVenta) : null,
+        condicionFisica: validCondition ? condicionFisica.trim() : '',
+      })}
+      onCancelar={onCancel}
+      cargando={loading}
+      cargandoTexto="Guardando…"
+      confirmarTexto="Guardar copia"
+      confirmarDeshabilitado={!validPrice || !validCondition}
+      error={error}
+      contenido={(
+        <div className="mb-5 grid grid-cols-2 gap-4">
+          <label className="block text-sm text-slate-600 dark:text-white/80">
+            Precio venta (UYU)
+            <input
+              aria-label="Precio de la copia"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={precioVenta}
+              onChange={event => setPrecioVenta(event.target.value)}
+              disabled={loading}
+              className="input mt-2 w-full"
+              required
+            />
+          </label>
+          <label className="block text-sm text-slate-600 dark:text-white/80">
+            Condición física
+            <input
+              aria-label="Condición física de la copia"
+              value={condicionFisica}
+              onChange={event => setCondicionFisica(event.target.value)}
+              disabled={loading}
+              maxLength={50}
+              className="input mt-2 w-full"
+              placeholder="NM, VG+, VG"
+              required
+            />
+          </label>
+        </div>
+      )}
+    />
+  )
+}
+
+function UsedCopyCreateModal({ disco, loading, error, onConfirm, onCancel }) {
+  const [precioVenta, setPrecioVenta] = useState(disco?.precioVenta ?? '')
+  const [condicionFisica, setCondicionFisica] = useState(disco?.condicionFisica ?? '')
+  if (!disco) return null
+  const validPrice = Number(precioVenta) > 0
+  const validCondition = condicionFisica.trim().length > 0
+
+  return (
+    <ConfirmModal
+      titulo="Agregar copia usada"
+      mensaje={`${disco.artista || '—'} — ${disco.album || '—'}. Se creará una copia física exacta con un QR nuevo.`}
+      onConfirmar={() => onConfirm({
+        precioVenta: Number(precioVenta),
+        condicionFisica: condicionFisica.trim(),
+      })}
+      onCancelar={onCancel}
+      cargando={loading}
+      cargandoTexto="Agregando…"
+      confirmarTexto="Agregar copia"
+      confirmarDeshabilitado={!validPrice || !validCondition}
+      error={error}
+      contenido={(
+        <div className="mb-5 grid grid-cols-2 gap-4">
+          <label className="block text-sm text-slate-600 dark:text-white/80">
+            Precio venta (UYU)
+            <input aria-label="Precio de la nueva copia" type="number" min="0.01" step="0.01" value={precioVenta}
+              onChange={event => setPrecioVenta(event.target.value)} disabled={loading} className="input mt-2 w-full" required />
+          </label>
+          <label className="block text-sm text-slate-600 dark:text-white/80">
+            Condición física
+            <input aria-label="Condición física de la nueva copia" value={condicionFisica}
+              onChange={event => setCondicionFisica(event.target.value)} disabled={loading} maxLength={50}
+              className="input mt-2 w-full" placeholder="NM, VG+, VG" required />
+          </label>
+        </div>
+      )}
+    />
+  )
+}
+
 function NewPhysicalCopiesQrSection({ disco, copyState, onRetry, onViewQr }) {
   const copies = [...(copyState?.copies || [])].sort((a, b) =>
     (Number(a.copyNumber) - Number(b.copyNumber)) || (Number(a.id) - Number(b.id)))
@@ -514,7 +658,18 @@ function NewPhysicalCopiesQrSection({ disco, copyState, onRetry, onViewQr }) {
   )
 }
 
-function CatalogPhysicalCopiesSection({ disco, copyState, activeSourceCode, onRetry, onViewQr, onRequestRemoval }) {
+function CatalogPhysicalCopiesSection({
+  disco,
+  copyState,
+  activeSourceCode,
+  onRetry,
+  onViewQr,
+  onRequestRemoval,
+  onRequestAddCopy,
+  onEditCopy,
+  onChangeCopyStatus,
+  copyMutation,
+}) {
   if (isNewCatalogProduct(disco)) {
     return (
       <NewPhysicalCopiesQrSection
@@ -535,6 +690,12 @@ function CatalogPhysicalCopiesSection({ disco, copyState, activeSourceCode, onRe
       onRequestRemoval={normalizedCategory(disco) === 'USADO'
         ? copy => onRequestRemoval?.(disco, copy)
         : undefined}
+      onRequestAddCopy={normalizedCategory(disco) === 'USADO'
+        ? () => onRequestAddCopy?.(disco)
+        : undefined}
+      onEditCopy={copy => onEditCopy?.(disco, copy)}
+      onChangeCopyStatus={copy => onChangeCopyStatus?.(disco, copy)}
+      copyMutation={copyMutation}
     />
   )
 }
@@ -743,6 +904,8 @@ function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
   const [copyToDelete, setCopyToDelete] = useState(null)
   const [deletingCopy, setDeletingCopy] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [changingCopyStatus, setChangingCopyStatus] = useState(false)
+  const [copyStatusError, setCopyStatusError] = useState('')
 
   if (!disco) return null
   const copies = qrCopiesForDisco(disco)
@@ -791,6 +954,28 @@ function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
     }
   }
 
+  async function handleChangeCopyStatus() {
+    if (!selectedCopy?.id || changingCopyStatus) return
+    const nuevoEstado = selectedCopy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
+    setChangingCopyStatus(true)
+    setCopyStatusError('')
+    try {
+      const actualizado = await api.discos.cambiarEstadoCopia(
+        disco.idDisco,
+        selectedCopy.id,
+        nuevoEstado,
+      )
+      onUpdated(actualizado)
+    } catch (err) {
+      const fallback = nuevoEstado === 'VENDIDO'
+        ? 'No se pudo marcar la copia como vendida. No se realizó ningún cambio.'
+        : 'No se pudo marcar la copia como disponible. No se realizó ningún cambio.'
+      setCopyStatusError(err.message || fallback)
+    } finally {
+      setChangingCopyStatus(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-stone-900 rounded-2xl border border-slate-200 dark:border-stone-700 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -831,6 +1016,7 @@ function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
                         setSelectedCopyKey(key)
                         setImageError('')
                         setDownloadError('')
+                        setCopyStatusError('')
                       }}
                       className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
                         active
@@ -882,6 +1068,9 @@ function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
               {downloadError && (
                 <p className="mt-4 text-sm text-red-600 dark:text-red-300">{downloadError}</p>
               )}
+              {copyStatusError && (
+                <p role="alert" className="mt-4 text-sm text-red-600 dark:text-red-300">{copyStatusError}</p>
+              )}
               <div className="mt-5 grid sm:grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -896,14 +1085,13 @@ function QrModal({ disco, initialCopy, loading, error, onClose, onUpdated }) {
                     {selectedCopy.estado !== 'REMOVED' && (
                       <button
                         type="button"
-                        onClick={async () => {
-                          const nuevoEstado = selectedCopy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
-                          const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, selectedCopy.id, nuevoEstado)
-                          onUpdated(actualizado)
-                        }}
-                        className="btn-secondary w-full"
+                        onClick={handleChangeCopyStatus}
+                        disabled={changingCopyStatus}
+                        className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
+                        {changingCopyStatus
+                          ? 'Actualizando…'
+                          : selectedCopy.estado === 'VENDIDO' ? 'Marcar disponible' : 'Marcar vendida'}
                       </button>
                     )}
                     {!usedProduct && (
@@ -1006,7 +1194,22 @@ function CustomerAffinityModal({ disco, onClose }) {
   )
 }
 
-function SlideOver({ disco, copyState, activeSourceCode, onRetryCopies, onCerrar, onEditar, onDarBaja, onViewQr, onViewCustomers, onRequestRemoval }) {
+function SlideOver({
+  disco,
+  copyState,
+  activeSourceCode,
+  onRetryCopies,
+  onCerrar,
+  onEditar,
+  onDarBaja,
+  onViewQr,
+  onViewCustomers,
+  onRequestRemoval,
+  onRequestAddCopy,
+  onEditCopy,
+  onChangeCopyStatus,
+  copyMutation,
+}) {
   if (!disco) return null
   const newProduct = isNewCatalogProduct(disco)
   const fields = [
@@ -1090,6 +1293,10 @@ function SlideOver({ disco, copyState, activeSourceCode, onRetryCopies, onCerrar
             onRetry={onRetryCopies}
             onViewQr={copy => onViewQr(disco, copy)}
             onRequestRemoval={onRequestRemoval}
+            onRequestAddCopy={onRequestAddCopy}
+            onEditCopy={onEditCopy}
+            onChangeCopyStatus={onChangeCopyStatus}
+            copyMutation={copyMutation}
           />
 
           {disco.observaciones && (
@@ -1126,7 +1333,23 @@ function SlideOver({ disco, copyState, activeSourceCode, onRetryCopies, onCerrar
   )
 }
 
-function CatalogPreview({ disco, pinned, copyState, activeSourceCode, onRetryCopies, onUnpin, onEditar, onDarBaja, onViewQr, onViewCustomers, onRequestRemoval }) {
+function CatalogPreview({
+  disco,
+  pinned,
+  copyState,
+  activeSourceCode,
+  onRetryCopies,
+  onUnpin,
+  onEditar,
+  onDarBaja,
+  onViewQr,
+  onViewCustomers,
+  onRequestRemoval,
+  onRequestAddCopy,
+  onEditCopy,
+  onChangeCopyStatus,
+  copyMutation,
+}) {
   const [loaded, setLoaded] = useState({ discoId: null, previews: [] })
   const previews = loaded.discoId === disco?.idDisco
     ? loaded.previews
@@ -1217,6 +1440,10 @@ function CatalogPreview({ disco, pinned, copyState, activeSourceCode, onRetryCop
           onRetry={onRetryCopies}
           onViewQr={copy => onViewQr(disco, copy)}
           onRequestRemoval={onRequestRemoval}
+          onRequestAddCopy={onRequestAddCopy}
+          onEditCopy={onEditCopy}
+          onChangeCopyStatus={onChangeCopyStatus}
+          copyMutation={copyMutation}
         />
 
         {/* Audio previews */}
@@ -1270,6 +1497,13 @@ export default function DiscosCatalogo() {
   const [copyRemovalTarget, setCopyRemovalTarget] = useState(null)
   const [removingCopy, setRemovingCopy] = useState(false)
   const [copyRemovalError, setCopyRemovalError] = useState('')
+  const [copyEditTarget, setCopyEditTarget] = useState(null)
+  const [editingCopy, setEditingCopy] = useState(false)
+  const [copyEditError, setCopyEditError] = useState('')
+  const [copyAddTarget, setCopyAddTarget] = useState(null)
+  const [addingCopy, setAddingCopy] = useState(false)
+  const [copyAddError, setCopyAddError] = useState('')
+  const [copyMutation, setCopyMutation] = useState({ copyId: null, loading: false, error: '' })
   const [qrState, setQrState] = useState({ disco: null, initialCopy: null, loading: false, error: '' })
   const [affinityDisco, setAffinityDisco] = useState(null)
   const [pagina, setPagina] = useState(1)
@@ -1362,6 +1596,69 @@ export default function DiscosCatalogo() {
       setCopyRemovalError(err.message || 'No se pudo retirar la copia. No se realizó ningún cambio.')
     } finally {
       setRemovingCopy(false)
+    }
+  }
+
+  function requestCopyEdit(disco, copy) {
+    if (!copy || copy.estado === 'REMOVED') return
+    setCopyEditError('')
+    setCopyEditTarget({ disco, copy })
+  }
+
+  async function handleCopyEdit(data) {
+    if (!copyEditTarget || editingCopy) return
+    const { disco, copy } = copyEditTarget
+    setEditingCopy(true)
+    setCopyEditError('')
+    try {
+      const actualizado = await api.discos.actualizarDatosCopia(disco.idDisco, copy.id, data)
+      reconcileProductFromBackend(actualizado)
+      await loadCopyDetails(actualizado.idDisco, true)
+      setCopyEditTarget(null)
+    } catch (err) {
+      setCopyEditError(err.message || 'No se pudo editar la copia. No se realizó ningún cambio.')
+    } finally {
+      setEditingCopy(false)
+    }
+  }
+
+  function requestCopyAdd(disco) {
+    if (normalizedCategory(disco) !== 'USADO') return
+    setCopyAddError('')
+    setCopyAddTarget(disco)
+  }
+
+  async function handleCopyAdd(data) {
+    if (!copyAddTarget || addingCopy) return
+    setAddingCopy(true)
+    setCopyAddError('')
+    try {
+      const actualizado = await api.discos.agregarCopiaUsada(copyAddTarget.idDisco, data)
+      reconcileProductFromBackend(actualizado)
+      await loadCopyDetails(actualizado.idDisco, true)
+      setCopyAddTarget(null)
+    } catch (err) {
+      setCopyAddError(err.message || 'No se pudo agregar la copia. No se realizó ningún cambio.')
+    } finally {
+      setAddingCopy(false)
+    }
+  }
+
+  async function handleCopyStatus(disco, copy) {
+    if (!copy?.id || copyMutation.loading || copy.estado === 'REMOVED') return
+    const nuevoEstado = copy.estado === 'VENDIDO' ? 'DISPONIBLE' : 'VENDIDO'
+    setCopyMutation({ copyId: copy.id, loading: true, error: '' })
+    try {
+      const actualizado = await api.discos.cambiarEstadoCopia(disco.idDisco, copy.id, nuevoEstado)
+      reconcileProductFromBackend(actualizado)
+      await loadCopyDetails(actualizado.idDisco, true)
+      setCopyMutation({ copyId: null, loading: false, error: '' })
+    } catch (err) {
+      setCopyMutation({
+        copyId: copy.id,
+        loading: false,
+        error: err.message || 'No se pudo cambiar el estado de la copia. No se realizó ningún cambio.',
+      })
     }
   }
 
@@ -1894,27 +2191,8 @@ export default function DiscosCatalogo() {
                       <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatImportDate(d.fechaActualizacion || d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
                       </td>
-                      <td className="px-3 py-3.5 align-middle" onClick={e => e.stopPropagation()}>
-                        <select
-                          value={d.estado}
-                          onChange={async (e) => {
-                            const nuevoEstado = e.target.value
-                            try {
-                              const actualizado = await discoService.cambiarEstado(d.idDisco, nuevoEstado)
-                              setDiscos(prev => prev.map(x => x.idDisco === d.idDisco ? actualizado : x))
-                              setSelectedDisco(prev => prev?.idDisco === d.idDisco ? actualizado : prev)
-                              if (copyDetailsByProduct[d.idDisco]) loadCopyDetails(d.idDisco, true)
-                            } catch (err) {
-                              alert('Error al cambiar estado: ' + err.message)
-                            }
-                          }}
-                          className="w-full min-w-[96px] text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-slate-700 dark:text-stone-300 px-2 py-1 cursor-pointer"
-                        >
-                          <option value="DISPONIBLE">Disponible</option>
-                          <option value="RESERVADO">Reservado</option>
-                          <option value="SIN_STOCK">Sin stock</option>
-                          <option value="VENDIDO">Vendido</option>
-                        </select>
+                      <td className="px-3 py-3.5 align-middle">
+                        <EstadoBadge estado={d.estado} />
                       </td>
                       {/* stopPropagation para que los botones no abran el slide-over */}
                       <td className="pl-3 pr-5 py-3.5 align-middle text-right" onClick={e => e.stopPropagation()}>
@@ -1944,7 +2222,16 @@ export default function DiscosCatalogo() {
                               {d.cantidadCopias ?? 1}
                             </span>
                             <button
+                              type="button"
+                              aria-label={normalizedCategory(d) === 'USADO' ? 'Agregar copia usada' : 'Aumentar cantidad de copias'}
+                              title={normalizedCategory(d) === 'USADO'
+                                ? 'Crea una copia física exacta con precio, condición y QR propios.'
+                                : undefined}
                               onClick={async () => {
+                                if (normalizedCategory(d) === 'USADO') {
+                                  requestCopyAdd(d)
+                                  return
+                                }
                                 const nuevaCantidad = (d.cantidadCopias ?? 1) + 1
                                 try {
                                   const actualizado = await discoService.actualizarCopias(d.idDisco, nuevaCantidad)
@@ -2001,6 +2288,10 @@ export default function DiscosCatalogo() {
         onViewQr={abrirQr}
         onViewCustomers={setAffinityDisco}
         onRequestRemoval={requestCopyRemoval}
+        onRequestAddCopy={requestCopyAdd}
+        onEditCopy={requestCopyEdit}
+        onChangeCopyStatus={handleCopyStatus}
+        copyMutation={copyMutation}
       />
       </div>
 
@@ -2016,6 +2307,10 @@ export default function DiscosCatalogo() {
         onViewQr={(d, copy) => { abrirQr(d, copy); setSlideOverDisco(null) }}
         onViewCustomers={setAffinityDisco}
         onRequestRemoval={requestCopyRemoval}
+        onRequestAddCopy={requestCopyAdd}
+        onEditCopy={requestCopyEdit}
+        onChangeCopyStatus={handleCopyStatus}
+        copyMutation={copyMutation}
       />
 
       <CustomerAffinityModal key={affinityDisco?.idDisco || 'sin-disco'} disco={affinityDisco} onClose={() => setAffinityDisco(null)} />
@@ -2046,6 +2341,33 @@ export default function DiscosCatalogo() {
           if (removingCopy) return
           setCopyRemovalTarget(null)
           setCopyRemovalError('')
+        }}
+      />
+
+      <CopyCommercialModal
+        key={copyEditTarget ? `${copyEditTarget.disco.idDisco}:${copyEditTarget.copy.id}` : 'no-copy-edit'}
+        disco={copyEditTarget?.disco}
+        copy={copyEditTarget?.copy}
+        loading={editingCopy}
+        error={copyEditError}
+        onConfirm={handleCopyEdit}
+        onCancel={() => {
+          if (editingCopy) return
+          setCopyEditTarget(null)
+          setCopyEditError('')
+        }}
+      />
+
+      <UsedCopyCreateModal
+        key={copyAddTarget?.idDisco || 'no-copy-add'}
+        disco={copyAddTarget}
+        loading={addingCopy}
+        error={copyAddError}
+        onConfirm={handleCopyAdd}
+        onCancel={() => {
+          if (addingCopy) return
+          setCopyAddTarget(null)
+          setCopyAddError('')
         }}
       />
 

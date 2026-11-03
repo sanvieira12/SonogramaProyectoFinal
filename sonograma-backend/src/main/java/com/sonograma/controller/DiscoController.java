@@ -5,6 +5,8 @@ import com.sonograma.dto.AudioPreviewRequestDTO;
 import com.sonograma.dto.DiscoRequestDTO;
 import com.sonograma.dto.DiscoResponseDTO;
 import com.sonograma.dto.DiscoQrCopyDetailDTO;
+import com.sonograma.dto.DiscoQrCopyCommercialUpdateDTO;
+import com.sonograma.dto.DiscoQrCopyCreateDTO;
 import com.sonograma.dto.DiscoSaleSearchResultDTO;
 import com.sonograma.dto.DiscogsCatalogJobFilterDTO;
 import com.sonograma.dto.DiscogsCatalogSourceDTO;
@@ -110,6 +112,24 @@ public class DiscoController {
             @PathVariable Long idCopia,
             @RequestParam("nuevoEstado") EstadoCopiaDisco nuevoEstado) {
         return ResponseEntity.ok(discoService.cambiarEstadoCopia(idDisco, idCopia, nuevoEstado));
+    }
+
+    @PatchMapping("/{idDisco}/copias/{idCopia}/datos-comerciales")
+    public ResponseEntity<DiscoResponseDTO> actualizarDatosComercialesCopia(
+            @PathVariable Long idDisco,
+            @PathVariable Long idCopia,
+            @Valid @RequestBody DiscoQrCopyCommercialUpdateDTO request) {
+        return ResponseEntity.ok(discoService.actualizarDatosComercialesCopia(
+                idDisco, idCopia, request));
+    }
+
+    @PostMapping("/{idDisco}/copias")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<DiscoResponseDTO> agregarCopiaUsada(
+            @PathVariable Long idDisco,
+            @Valid @RequestBody DiscoQrCopyCreateDTO request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(discoService.agregarCopiaUsada(idDisco, request));
     }
 
     @DeleteMapping("/{idDisco}/copias/{idCopia}")

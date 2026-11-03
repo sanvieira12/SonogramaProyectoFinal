@@ -14,15 +14,31 @@ function headers() {
 }
 
 async function request(method, path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(),
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: headers(),
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch (error) {
+    throw new Error('No se pudo conectar con Sonograma. Revisá la conexión e intentá nuevamente.', { cause: error })
+  }
   if (redirectIfUnauthorized(res)) throw new Error('Tu sesión venció. Ingresá nuevamente.')
   if (res.status === 204) return null
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.message || data.error || 'Error en la solicitud')
+  const text = await res.text()
+  let data
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = null
+  }
+  if (!res.ok) {
+    throw new Error(data?.message || data?.error || text || 'No se pudo completar la operación.')
+  }
+  if (text && data == null) {
+    throw new Error('El servidor devolvió una respuesta inesperada.')
+  }
   return data
 }
 
