@@ -43,6 +43,15 @@ class VinylFutureSearchServiceTest {
         );
     }
 
+    @Test
+    void acceptsSupplierUrlsThatRemovePunctuationFromTheCatalogueCode() {
+        InvoiceItem item = item("GT9.02", "Dojo Zone/Brian Topham/Nulek", "GT9.02");
+
+        assertThat(service.bestCandidate(item, List.of(
+            "https://www.deejay.de/Dojo_Zone_Brian_Topham_Nulek_GT902_GT902_Vinyl__1251241"
+        ))).isPresent();
+    }
+
     private InvoiceItem item(String code, String artist, String title) {
         return new InvoiceItem(code, artist, title, "12inch", BigDecimal.TEN, 1, null);
     }

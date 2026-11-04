@@ -235,6 +235,7 @@ public class VinylFutureAssetService {
     }
 
     private void downloadTo(String sourceUrl, Path target, int maxSize, String accept) throws IOException {
+        VinylFutureRequestGate.awaitTurn();
         HttpURLConnection connection = (HttpURLConnection) URI.create(sourceUrl).toURL().openConnection();
         try {
             connection.setInstanceFollowRedirects(true);

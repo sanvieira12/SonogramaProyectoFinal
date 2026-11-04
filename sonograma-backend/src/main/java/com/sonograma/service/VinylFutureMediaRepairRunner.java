@@ -49,6 +49,9 @@ public class VinylFutureMediaRepairRunner implements ApplicationRunner {
     @Value("${sonograma.vinylfuture.repair.export-path:}")
     private String exportPath;
 
+    @Value("${sonograma.vinylfuture.repair.product-url-overrides:}")
+    private String productUrlOverrides;
+
     @Override
     public void run(ApplicationArguments args) {
         LocalDate repairDate = repairDateValue == null || repairDateValue.isBlank()
@@ -104,7 +107,8 @@ public class VinylFutureMediaRepairRunner implements ApplicationRunner {
 
     @Transactional
     protected RepairResult repairDisco(Disco disco, InvoiceItem item) {
-        String productUrl = searchService.buscar(item)
+        String productUrl = overrideUrl(item.codigoCatalogo())
+            .or(() -> searchService.buscar(item))
             .orElseThrow(() -> new IllegalStateException("No se encontro pagina VinylFuture"));
 
         VinylPageData page = scraperService.scrape(productUrl)
@@ -141,6 +145,22 @@ public class VinylFutureMediaRepairRunner implements ApplicationRunner {
             disco.getCantidadCopias(),
             null
         );
+    }
+
+    private Optional<String> overrideUrl(String code) {
+        if (code == null || productUrlOverrides == null || productUrlOverrides.isBlank()) {
+            return Optional.empty();
+        }
+        for (String entry : productUrlOverrides.split(";")) {
+            int separator = entry.indexOf('=');
+            if (separator <= 0) continue;
+            String configuredCode = entry.substring(0, separator).strip();
+            String url = entry.substring(separator + 1).strip();
+            if (configuredCode.equalsIgnoreCase(code.strip()) && !url.isBlank()) {
+                return Optional.of(url);
+            }
+        }
+        return Optional.empty();
     }
 
     private void exportZip(

@@ -186,10 +186,14 @@ public class VinylFutureSearchService {
 
     private int score(InvoiceItem item, String url) {
         String normalizedUrl = normalize(decode(url));
-        boolean codeMatch = containsExactToken(normalizedUrl, normalize(item.codigoCatalogo()));
+        String normalizedCode = normalize(item.codigoCatalogo());
+        boolean codeMatch = containsExactToken(normalizedUrl, normalizedCode)
+            || compact(normalizedUrl).contains(compact(normalizedCode));
         double artistCoverage = tokenCoverage(item.artista(), normalizedUrl);
         double titleCoverage = tokenCoverage(item.album(), normalizedUrl);
-        if (!codeMatch || artistCoverage < 0.5 || titleCoverage < 0.5) return 0;
+        boolean titleMatch = titleCoverage >= 0.5
+            || compact(normalizedUrl).contains(compact(normalize(item.album())));
+        if (!codeMatch || artistCoverage < 0.5 || !titleMatch) return 0;
         return 200 + (int) Math.round(artistCoverage * 50) + (int) Math.round(titleCoverage * 50);
     }
 
@@ -212,6 +216,10 @@ public class VinylFutureSearchService {
     private boolean containsExactToken(String normalizedText, String normalizedToken) {
         if (normalizedToken == null || normalizedToken.isBlank()) return false;
         return (" " + normalizedText + " ").contains(" " + normalizedToken + " ");
+    }
+
+    private String compact(String value) {
+        return value == null ? "" : value.replace(" ", "");
     }
 
     private String encodePathSegment(String query) {

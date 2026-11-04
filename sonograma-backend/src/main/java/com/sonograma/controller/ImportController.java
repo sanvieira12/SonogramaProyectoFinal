@@ -792,14 +792,16 @@ public class ImportController {
             String normalizedUrl = normalize(decodedUrl);
             String normalizedCode = normalize(item.codigoCatalogo());
             boolean codeMatch = code.equals(pageCode)
-                || (" " + normalizedUrl + " ").contains(" " + normalizedCode + " ");
+                || (" " + normalizedUrl + " ").contains(" " + normalizedCode + " ")
+                || normalizedUrl.replace(" ", "").contains(normalizedCode.replace(" ", ""));
             if (!codeMatch) return false;
 
             boolean pageMetadataMatch = textPairMatches(
                 item.artista(), item.album(), page.artist(), page.title()
             );
             boolean urlMetadataMatch = tokenCoverage(item.artista(), normalizedUrl) >= 0.5
-                && tokenCoverage(item.album(), normalizedUrl) >= 0.5;
+                && (tokenCoverage(item.album(), normalizedUrl) >= 0.5
+                    || normalizedUrl.replace(" ", "").contains(normalize(item.album()).replace(" ", "")));
             return pageMetadataMatch || urlMetadataMatch;
         }
         return textPairMatches(item.artista(), item.album(), page.artist(), page.title());

@@ -53,6 +53,9 @@ public class VinylFutureScraperService {
     @Value("${sonograma.vinylfuture.timeout-ms:10000}")
     private int timeoutMs;
 
+    @Value("${sonograma.vinylfuture.prefer-archived-assets:false}")
+    private boolean preferArchivedAssets;
+
     public Optional<VinylPageData> scrape(String productUrl) {
         if (productUrl == null || productUrl.isBlank()) return Optional.empty();
         Optional<VinylPageData> cached = pageCache.get(productUrl);
@@ -64,6 +67,10 @@ public class VinylFutureScraperService {
     }
 
     private Optional<VinylPageData> scrapeSinCache(String productUrl) {
+        if (preferArchivedAssets) {
+            Optional<VinylPageData> archived = buildArchivedPageData(productUrl);
+            if (archived.isPresent()) return archived;
+        }
         try {
             Connection.Response response = Jsoup.connect(productUrl)
                 .userAgent(USER_AGENT)
@@ -85,7 +92,7 @@ public class VinylFutureScraperService {
             return Optional.of(data);
         } catch (Exception e) {
             log.warn("Cannot fetch '{}': {}", productUrl, e.getMessage());
-            return Optional.empty();
+            return buildArchivedPageData(productUrl);
         }
     }
 
@@ -122,6 +129,7 @@ public class VinylFutureScraperService {
     boolean mediaExists(String url) {
         if (url == null || url.isBlank()) return false;
         try {
+            VinylFutureRequestGate.awaitTurn();
             Connection.Response response = Jsoup.connect(url)
                 .method(Connection.Method.HEAD)
                 .userAgent(USER_AGENT)
