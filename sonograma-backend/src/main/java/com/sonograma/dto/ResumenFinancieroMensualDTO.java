@@ -20,6 +20,7 @@ public class ResumenFinancieroMensualDTO {
     private Long cantidadItemsUsados;
     private Long cantidadItemsSinClasificar;
     private BigDecimal totalVentas;
+    private BigDecimal promedioTicket;
     private BigDecimal ingresosRegistrados;
     private BigDecimal gananciaItems;
     private BigDecimal gastos;

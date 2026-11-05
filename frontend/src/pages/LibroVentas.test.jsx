@@ -220,6 +220,7 @@ const initialSummary = {
   cantidadItemsUsados: 1,
   cantidadItemsSinClasificar: 0,
   totalVentas: 3470,
+  promedioTicket: 867.5,
   ingresosRegistrados: 2850,
   gananciaItems: 170,
   gastos: 100,
@@ -263,6 +264,15 @@ describe('LibroVentas profit display', () => {
     expect(within(card).getByText('Nuevos 3')).toBeInTheDocument()
     expect(within(card).getByText('Usados 1')).toBeInTheDocument()
     expect(within(card).queryByText(/Sin clasificar/)).not.toBeInTheDocument()
+  })
+
+  it('shows the monthly average ticket alongside the sales count', async () => {
+    render(<LibroVentas />)
+
+    const label = await screen.findByText('Ventas')
+    const card = label.closest('.card')
+    expect(within(card).getByText('4', { selector: 'p' })).toBeInTheDocument()
+    expect(within(card).getByText('Promedio de ticket · UYU $867,50')).toBeInTheDocument()
   })
 
   it('shows unknown units only when present and keeps summary independent from table search', async () => {

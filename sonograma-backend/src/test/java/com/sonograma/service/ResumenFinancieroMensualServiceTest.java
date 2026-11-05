@@ -78,6 +78,7 @@ class ResumenFinancieroMensualServiceTest {
         assertThat(result.getCantidadItemsUsados()).isZero();
         assertThat(result.getCantidadItemsSinClasificar()).isEqualTo(2L);
         assertThat(result.getTotalVentas()).isEqualByComparingTo("1500.00");
+        assertThat(result.getPromedioTicket()).isEqualByComparingTo("750.00");
         assertThat(result.getIngresosRegistrados()).isEqualByComparingTo("750.00");
         assertThat(result.getGananciaItems()).isEqualByComparingTo("600.00");
         assertThat(result.getGastos()).isEqualByComparingTo("3100.00");
@@ -114,6 +115,7 @@ class ResumenFinancieroMensualServiceTest {
         assertThat(result.getCantidadVentas()).as(escenario).isZero();
         assertThat(result.getCantidadItems()).as(escenario).isZero();
         assertThat(result.getTotalVentas()).as(escenario).isEqualByComparingTo("0.00");
+        assertThat(result.getPromedioTicket()).as(escenario).isEqualByComparingTo("0.00");
         assertThat(result.getGananciaItems()).as(escenario).isEqualByComparingTo("0.00");
     }
 

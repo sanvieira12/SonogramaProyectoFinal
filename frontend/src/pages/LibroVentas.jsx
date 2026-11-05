@@ -851,7 +851,15 @@ export default function LibroVentas() {
       {resumen && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Ventas', value: resumen.cantidadVentas ?? 0 },
+            {
+              label: 'Ventas',
+              value: resumen.cantidadVentas ?? 0,
+              secondary: (
+                <span className="text-xs font-medium normal-case tracking-normal text-slate-500 dark:text-stone-400">
+                  Promedio de ticket · {fmt(resumen.promedioTicket)}
+                </span>
+              ),
+            },
             {
               label: 'Ítems vendidos',
               value: resumen.cantidadItems ?? 0,

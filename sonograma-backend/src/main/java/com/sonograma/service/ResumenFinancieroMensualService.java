@@ -128,6 +128,9 @@ public class ResumenFinancieroMensualService {
         BigDecimal ingresosPagos = pagos.stream().map(PagoDeuda::getMonto).filter(Objects::nonNull).reduce(ZERO, BigDecimal::add);
         BigDecimal ingresosRegistrados = ingresosVentas.add(ingresosPagos).setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalGastos = gastos.stream().map(GastoTienda::getMonto).filter(Objects::nonNull).reduce(ZERO, BigDecimal::add);
+        BigDecimal promedioTicket = ventas.isEmpty()
+                ? ZERO
+                : totalVentas.divide(BigDecimal.valueOf(ventas.size()), 2, RoundingMode.HALF_UP);
 
         return ResumenFinancieroMensualDTO.builder()
                 .periodo(selected.periodo)
@@ -139,6 +142,7 @@ public class ResumenFinancieroMensualService {
                 .cantidadItemsUsados(cantidadItemsUsados)
                 .cantidadItemsSinClasificar(cantidadItemsSinClasificar)
                 .totalVentas(totalVentas)
+                .promedioTicket(promedioTicket)
                 .ingresosRegistrados(ingresosRegistrados)
                 .gananciaItems(ganancia)
                 .gastos(totalGastos)
