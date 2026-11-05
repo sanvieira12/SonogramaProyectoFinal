@@ -295,6 +295,7 @@ export const api = {
     actualizarItem: (id, itemId, payload) => request('PUT', `/pre-venta-transacciones/${id}/items/${itemId}`, payload),
     eliminarItem: (id, itemId) => request('DELETE', `/pre-venta-transacciones/${id}/items/${itemId}`),
     pagarPendientes: (id) => request('POST', `/pre-venta-transacciones/${id}/pagar-pendientes`),
+    eliminarCliente: (clienteId) => request('DELETE', `/pre-venta-transacciones/clientes/${clienteId}`),
   },
 
   gastosTienda: {

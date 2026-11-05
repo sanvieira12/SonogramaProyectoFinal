@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import ConfirmModal from '../components/ConfirmModal'
 import { businessDateInMontevideo } from '../utils/businessDate'
-import { mergePreVentaItem, transactionTotal } from './preVentaTransactionUtils'
+import { groupPreVentaTransactionsByClient, mergePreVentaItem, transactionTotal } from './preVentaTransactionUtils'
 
 const emptyManual = () => ({ descripcion: '', codigoDisco: '', cantidad: '1', precioUnitario: '', notas: '' })
 const emptyMeta = () => ({ fecha: businessDateInMontevideo(), notas: '' })
@@ -90,6 +90,7 @@ export default function PreVentas() {
   const [idempotencyKey, setIdempotencyKey] = useState(newKey)
   const [selectedId, setSelectedId] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [deletingGroup, setDeletingGroup] = useState(null)
   const [payingAll, setPayingAll] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -123,12 +124,14 @@ export default function PreVentas() {
 
   const filteredDiscos = useMemo(() => {
     const q = normalize(discoQuery)
+    if (!q) return []
     return discos.filter(disco => normalize([
       disco.artista, disco.album, disco.codigoInterno, disco.selloDiscografico,
     ].filter(Boolean).join(' ')).includes(q)).slice(0, 12)
   }, [discos, discoQuery])
 
-  const selectedTransaction = transactions.find(tx => String(tx.idPreVentaTransaccion) === String(selectedId)) || null
+  const clientGroups = useMemo(() => groupPreVentaTransactionsByClient(transactions), [transactions])
+  const selectedGroup = clientGroups.find(group => String(group.idCliente) === String(selectedId)) || null
   const total = transactionTotal(items)
 
   function addCatalog(disco) {
@@ -213,7 +216,7 @@ export default function PreVentas() {
     setError('')
     try {
       await api.preVentas.marcarPagada(item.idPreVenta)
-      const updated = await api.preVentaTransacciones.obtener(selectedTransaction.idPreVentaTransaccion)
+      const updated = await api.preVentaTransacciones.obtener(item.idPreVentaTransaccion)
       replaceTransaction(updated)
       window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     } catch (err) {
@@ -228,8 +231,9 @@ export default function PreVentas() {
     setBusy(true)
     setError('')
     try {
-      const updated = await api.preVentaTransacciones.pagarPendientes(payingAll.idPreVentaTransaccion)
-      replaceTransaction(updated)
+      for (const transaction of payingAll.transactions.filter(tx => Number(tx.pendiente) > 0)) {
+        replaceTransaction(await api.preVentaTransacciones.pagarPendientes(transaction.idPreVentaTransaccion))
+      }
       setPayingAll(null)
       window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
     } catch (err) {
@@ -250,6 +254,23 @@ export default function PreVentas() {
       setDeleting(null)
     } catch (err) {
       setError(err.message || 'No se pudo eliminar el ítem')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteClientGroup() {
+    if (!deletingGroup) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.preVentaTransacciones.eliminarCliente(deletingGroup.idCliente)
+      setTransactions(current => current.filter(tx => String(tx.idCliente) !== String(deletingGroup.idCliente)))
+      setSelectedId(null)
+      setDeletingGroup(null)
+      window.dispatchEvent(new Event(FINANCIAL_DATA_CHANGED_EVENT))
+    } catch (err) {
+      setError(err.message || 'No se pudieron eliminar las pre-ventas del cliente')
     } finally {
       setBusy(false)
     }
@@ -304,7 +325,7 @@ export default function PreVentas() {
                   </button>)}
                 </div>
 
-                <button type="button" className="btn-secondary text-sm" onClick={() => setShowManual(value => !value)}>Agregar disco fuera de catálogo</button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => setShowManual(value => !value)}>Agregar manual</button>
                 {showManual && <ManualItemForm form={manual} setForm={setManual} onAdd={addManual} onCancel={() => setShowManual(false)} />}
               </section>
             </div>
@@ -320,13 +341,13 @@ export default function PreVentas() {
         )}
       </section>
 
-      <TransactionList transactions={transactions} onOpen={tx => setSelectedId(tx.idPreVentaTransaccion)} />
+      <ClientGroupList groups={clientGroups} onOpen={group => setSelectedId(group.idCliente)} />
 
-      {selectedTransaction && <TransactionPanel
-        transaction={selectedTransaction} discos={discos} busy={busy}
+      {selectedGroup && <ClientGroupPanel
+        group={selectedGroup} discos={discos} busy={busy}
         onClose={() => setSelectedId(null)} onUpdated={replaceTransaction}
-        onMarkPaid={markPaid} onDelete={item => setDeleting({ transactionId: selectedTransaction.idPreVentaTransaccion, item })}
-        onPayAll={() => setPayingAll(selectedTransaction)} onError={setError}
+        onMarkPaid={markPaid} onDelete={item => setDeleting({ transactionId: item.idPreVentaTransaccion, item })}
+        onPayAll={() => setPayingAll(selectedGroup)} onDeleteGroup={() => setDeletingGroup(selectedGroup)} onError={setError}
       />}
 
       {showClienteModal && <NuevoClienteModal onCerrar={() => setShowClienteModal(false)} onCreado={cliente => {
@@ -335,6 +356,7 @@ export default function PreVentas() {
 
       {deleting && <ConfirmModal titulo="Eliminar ítem pendiente" mensaje={`¿Eliminar “${itemTitle(deleting.item)}” de esta pre-venta?`} onConfirmar={deleteItem} onCancelar={() => setDeleting(null)} cargando={busy} />}
       {payingAll && <ConfirmModal titulo="Pagar saldo pendiente" mensaje={`Se registrarán cobros individuales por ${money(payingAll.pendiente)}. Los ítems ya pagados no se cobrarán nuevamente.`} onConfirmar={payRemaining} onCancelar={() => setPayingAll(null)} cargando={busy} />}
+      {deletingGroup && <ConfirmModal titulo="Eliminar preventa completa" mensaje={`¿Eliminar todas las preventas de ${deletingGroup.clienteNombre}, incluidos sus cobros pagados? Esta acción también las quitará del Libro de Ventas.`} onConfirmar={deleteClientGroup} onCancelar={() => setDeletingGroup(null)} cargando={busy} />}
     </div>
   )
 }
@@ -362,18 +384,18 @@ function ManualItemForm({ form, setForm, onAdd, onCancel, disabled = false }) {
   </div>
 }
 
-function TransactionList({ transactions, onOpen }) {
+function ClientGroupList({ groups, onOpen }) {
   return <section className="card overflow-hidden">
-    <div className="p-5 border-b border-slate-100 dark:border-stone-800"><h2 className="font-semibold text-slate-900 dark:text-white">Transacciones</h2><p className="text-sm text-slate-400 dark:text-stone-500 mt-1">Cada fila representa una reserva independiente.</p></div>
-    <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm" data-testid="preventa-transaction-table"><thead><tr className="border-b border-slate-100 dark:border-stone-800">{['Pre-venta', 'Fecha', 'Cliente', 'Discos', 'Total', 'Pagado', 'Pendiente', 'Estado', ''].map(label => <th key={label} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 dark:divide-stone-800">
-      {transactions.map(tx => <tr key={tx.idPreVentaTransaccion} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors"><td className="px-3 py-3 font-semibold text-slate-900 dark:text-white">#{tx.idPreVentaTransaccion}</td><td className="px-3 py-3 whitespace-nowrap text-slate-500 dark:text-stone-400">{fmtDate(tx.fecha)}</td><td className="px-3 py-3 font-medium text-slate-900 dark:text-white">{tx.clienteNombre}</td><td className="px-3 py-3 text-slate-700 dark:text-stone-300">{tx.cantidadItems} · {tx.cantidadUnidades} u.</td><td className="px-3 py-3 whitespace-nowrap font-semibold tabular-nums text-slate-800 dark:text-stone-200">{money(tx.total)}</td><td className="px-3 py-3 whitespace-nowrap tabular-nums text-slate-700 dark:text-stone-300">{money(tx.pagado)}</td><td className="px-3 py-3 whitespace-nowrap font-medium tabular-nums text-slate-800 dark:text-stone-200">{money(tx.pendiente)}</td><td className="px-3 py-3"><PaymentBadge status={tx.estadoPago} /></td><td className="px-3 py-3"><button type="button" className="btn-secondary text-xs" onClick={() => onOpen(tx)}>Ver detalle</button></td></tr>)}
-      {!transactions.length && <tr><td colSpan={9} className="p-10 text-center text-slate-400 dark:text-stone-500">No hay pre-ventas registradas.</td></tr>}
+    <div className="p-5 border-b border-slate-100 dark:border-stone-800"><h2 className="font-semibold text-slate-900 dark:text-white">Pre-ventas por cliente</h2><p className="text-sm text-slate-400 dark:text-stone-500 mt-1">Todos los discos encargados por una persona aparecen juntos.</p></div>
+    <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm" data-testid="preventa-client-table"><thead><tr className="border-b border-slate-100 dark:border-stone-800">{['Cliente', 'Último movimiento', 'Discos', 'Total', 'Pagado', 'Pendiente', 'Estado', ''].map(label => <th key={label} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 dark:divide-stone-800">
+      {groups.map(group => <tr key={group.idCliente} className="hover:bg-slate-50 dark:hover:bg-stone-900/50 transition-colors"><td className="px-3 py-3 font-semibold text-slate-900 dark:text-white">{group.clienteNombre}</td><td className="px-3 py-3 whitespace-nowrap text-slate-500 dark:text-stone-400">{fmtDate(group.fecha)}</td><td className="px-3 py-3 text-slate-700 dark:text-stone-300">{group.cantidadItems} · {group.cantidadUnidades} u.</td><td className="px-3 py-3 whitespace-nowrap font-semibold tabular-nums text-slate-800 dark:text-stone-200">{money(group.total)}</td><td className="px-3 py-3 whitespace-nowrap tabular-nums text-slate-700 dark:text-stone-300">{money(group.pagado)}</td><td className="px-3 py-3 whitespace-nowrap font-medium tabular-nums text-slate-800 dark:text-stone-200">{money(group.pendiente)}</td><td className="px-3 py-3"><PaymentBadge status={group.estadoPago} /></td><td className="px-3 py-3"><button type="button" className="btn-secondary text-xs" onClick={() => onOpen(group)}>Ver detalle</button></td></tr>)}
+      {!groups.length && <tr><td colSpan={8} className="p-10 text-center text-slate-400 dark:text-stone-500">No hay pre-ventas registradas.</td></tr>}
     </tbody></table></div>
-    <div className="md:hidden divide-y divide-slate-100 dark:divide-stone-800" data-testid="preventa-transaction-cards">{transactions.map(tx => <article key={tx.idPreVentaTransaccion} className="p-4 space-y-3"><div className="flex items-start justify-between"><div><p className="text-xs text-slate-400 dark:text-stone-500">Pre-venta #{tx.idPreVentaTransaccion} · {fmtDate(tx.fecha)}</p><h3 className="font-semibold text-slate-900 dark:text-white">{tx.clienteNombre}</h3></div><PaymentBadge status={tx.estadoPago} /></div><div className="grid grid-cols-3 gap-2"><Metric label="Total" value={money(tx.total)} /><Metric label="Pagado" value={money(tx.pagado)} /><Metric label="Pendiente" value={money(tx.pendiente)} /></div><button type="button" className="btn-secondary w-full text-sm" onClick={() => onOpen(tx)}>Ver {tx.cantidadItems} {tx.cantidadItems === 1 ? 'disco' : 'discos'}</button></article>)}</div>
+    <div className="md:hidden divide-y divide-slate-100 dark:divide-stone-800" data-testid="preventa-client-cards">{groups.map(group => <article key={group.idCliente} className="p-4 space-y-3"><div className="flex items-start justify-between"><div><p className="text-xs text-slate-400 dark:text-stone-500">Último movimiento · {fmtDate(group.fecha)}</p><h3 className="font-semibold text-slate-900 dark:text-white">{group.clienteNombre}</h3></div><PaymentBadge status={group.estadoPago} /></div><div className="grid grid-cols-3 gap-2"><Metric label="Total" value={money(group.total)} /><Metric label="Pagado" value={money(group.pagado)} /><Metric label="Pendiente" value={money(group.pendiente)} /></div><button type="button" className="btn-secondary w-full text-sm" onClick={() => onOpen(group)}>Ver {group.cantidadItems} {group.cantidadItems === 1 ? 'disco' : 'discos'}</button></article>)}</div>
   </section>
 }
 
-function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMarkPaid, onDelete, onPayAll, onError }) {
+function ClientGroupPanel({ group, discos, busy, onClose, onUpdated, onMarkPaid, onDelete, onPayAll, onDeleteGroup, onError }) {
   const [drafts, setDrafts] = useState({})
   const [query, setQuery] = useState('')
   const [manual, setManual] = useState(emptyManual)
@@ -385,6 +407,7 @@ function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMar
   const panelBusy = busy || Boolean(actionBusy)
   const matches = useMemo(() => {
     const q = normalize(query)
+    if (!q) return []
     return discos.filter(disco => normalize([disco.artista, disco.album, disco.codigoInterno].filter(Boolean).join(' ')).includes(q)).slice(0, 6)
   }, [discos, query])
 
@@ -412,7 +435,7 @@ function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMar
     actionInFlight.current = true
     setActionBusy(`save-${item.idPreVenta}`)
     try {
-      const updated = await api.preVentaTransacciones.actualizarItem(transaction.idPreVentaTransaccion, item.idPreVenta, {
+      const updated = await api.preVentaTransacciones.actualizarItem(item.idPreVentaTransaccion, item.idPreVenta, {
         cantidad: quantity(draft), precio: lineTotal(draft), notas: draft.notas || null,
       })
       onUpdated(updated)
@@ -436,7 +459,7 @@ function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMar
     actionInFlight.current = true
     setActionBusy('add')
     try {
-      const updated = await api.preVentaTransacciones.agregarItem(transaction.idPreVentaTransaccion, {
+      const updated = await api.preVentaTransacciones.agregarItem(group.primaryTransactionId, {
         ...payload, idempotencyKey,
       })
       addRetry.current = null
@@ -446,12 +469,12 @@ function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMar
   }
 
   return <><div className="fixed inset-0 z-40 bg-black/30" onClick={close} /><aside className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-white dark:bg-stone-950 border-l border-slate-200 dark:border-stone-800 shadow-2xl overflow-y-auto" role="dialog" aria-modal="true">
-    <div className="sticky top-0 z-10 bg-white/95 dark:bg-stone-950/95 backdrop-blur p-5 border-b border-slate-100 dark:border-stone-800 flex justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Pre-venta #{transaction.idPreVentaTransaccion}</p><h2 className="font-bold text-slate-900 dark:text-white">{transaction.clienteNombre}</h2><p className="text-sm text-slate-400 dark:text-stone-500">{fmtDate(transaction.fecha)} · {transaction.cantidadItems} ítems</p></div><button type="button" onClick={close} aria-label="Cerrar" className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:text-stone-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800">✕</button></div>
+    <div className="sticky top-0 z-10 bg-white/95 dark:bg-stone-950/95 backdrop-blur p-5 border-b border-slate-100 dark:border-stone-800 flex justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-400 dark:text-stone-500">Pre-venta</p><h2 className="font-bold text-slate-900 dark:text-white">{group.clienteNombre}</h2><p className="text-sm text-slate-400 dark:text-stone-500">{group.cantidadItems} ítems · {group.cantidadUnidades} unidades</p></div><button type="button" onClick={close} aria-label="Cerrar" className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:text-stone-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-stone-800">✕</button></div>
     <div className="p-5 space-y-5">
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3"><Metric label="Total" value={money(transaction.total)} /><Metric label="Pagado" value={money(transaction.pagado)} /><Metric label="Pendiente" value={money(transaction.pendiente)} /><div className="rounded-lg bg-slate-50 dark:bg-stone-900 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">Estado</p><div className="mt-1"><PaymentBadge status={transaction.estadoPago} /></div></div></section>
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3"><Metric label="Total" value={money(group.total)} /><Metric label="Pagado" value={money(group.pagado)} /><Metric label="Pendiente" value={money(group.pendiente)} /><div className="rounded-lg bg-slate-50 dark:bg-stone-900 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-stone-500">Estado</p><div className="mt-1"><PaymentBadge status={group.estadoPago} /></div></div></section>
       {actionBusy && <p role="status" className="text-sm text-slate-500 dark:text-stone-400">{actionBusy === 'add' ? 'Agregando ítem…' : 'Guardando cambios…'}</p>}
-      {Number(transaction.pendiente) > 0 && <button type="button" className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50" disabled={panelBusy} onClick={onPayAll}>Pagar saldo pendiente · {money(transaction.pendiente)}</button>}
-      <section className="space-y-3">{transaction.items.map(item => {
+      {Number(group.pendiente) > 0 && <button type="button" className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50" disabled={panelBusy} onClick={onPayAll}>Pagar saldo pendiente · {money(group.pendiente)}</button>}
+      <section className="space-y-3">{group.items.map(item => {
         const paid = item.estado === 'PAGADA'
         const draft = draftFor(item)
         return <article key={item.idPreVenta} className="rounded-xl border border-slate-200 dark:border-stone-800 p-4 space-y-3"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900 dark:text-white">{itemTitle(item)}</h3><p className="text-xs text-slate-400 dark:text-stone-500">Ítem #{item.idPreVenta}{item.codigoDisco ? ` · ${item.codigoDisco}` : ''}</p></div><PaymentBadge status={paid ? 'PAGADA' : 'PENDIENTE'} /></div>
@@ -459,6 +482,7 @@ function TransactionPanel({ transaction, discos, busy, onClose, onUpdated, onMar
         </article>
       })}</section>
       <section className="border-t border-slate-100 dark:border-stone-800 pt-5 space-y-3"><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-stone-400">Agregar ítem</h3><input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar catálogo…" /><div className="grid gap-2 sm:grid-cols-2">{matches.map(disco => <button type="button" key={disco.idDisco} disabled={panelBusy} className="rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-3 text-left text-slate-900 dark:text-white hover:border-[#5C7D87] disabled:opacity-50" onClick={() => addItem(catalogItem(disco))}><span className="block text-sm font-medium">{[disco.artista, disco.album].filter(Boolean).join(' — ')}</span><span className="text-xs text-slate-400 dark:text-stone-500">{money(disco.precioVenta)}</span></button>)}</div><button type="button" className="btn-secondary text-sm" disabled={panelBusy} onClick={() => setShowManual(value => !value)}>Agregar manual</button>{showManual && <ManualItemForm form={manual} setForm={setManual} disabled={panelBusy} onAdd={() => { const item = manualItem(manual); if (!item.descripcion || !quantity(item) || !unitPrice(item)) return onError('Completá descripción, cantidad y precio.'); addItem(item) }} onCancel={() => setShowManual(false)} />}</section>
+      <section className="border-t border-slate-100 dark:border-stone-800 pt-5"><button type="button" className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:text-red-400" disabled={panelBusy} onClick={onDeleteGroup}>Eliminar preventa completa</button></section>
     </div>
   </aside></>
 }

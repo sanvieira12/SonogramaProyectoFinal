@@ -165,6 +165,21 @@ class PreVentaTransaccionIntegrationTest {
             .hasSize(2);
     }
 
+    @Test
+    void deleteCustomerGroupRemovesPendingItemsPaidItemsAndTheirLedgerSales() {
+        Cliente cliente = cliente("Delete group");
+        var first = service.crearTransaccion(request(cliente, "integration-delete-group-a", "700", "900"));
+        var second = service.crearTransaccion(request(cliente, "integration-delete-group-b", "1100", "1300"));
+        var paid = service.marcarPagada(first.getItems().get(0).getIdPreVenta());
+
+        service.eliminarTodasDelCliente(cliente.getIdCliente());
+
+        assertThat(transaccionRepository.findById(first.getIdPreVentaTransaccion())).isEmpty();
+        assertThat(transaccionRepository.findById(second.getIdPreVentaTransaccion())).isEmpty();
+        assertThat(preVentaRepository.findById(paid.getIdPreVenta())).isEmpty();
+        assertThat(ventaRepository.findById(paid.getIdVentaPago())).isEmpty();
+    }
+
     private Cliente cliente(String name) {
         Cliente cliente = new Cliente();
         cliente.setNombre(name);

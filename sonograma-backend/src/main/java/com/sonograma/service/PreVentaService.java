@@ -185,6 +185,33 @@ public class PreVentaService {
         return toTransaccionDto(transaccion, items);
     }
 
+    public void eliminarTodasDelCliente(Long clienteId) {
+        List<Long> transactionIds = transaccionRepository.findIdsByClienteId(clienteId);
+        if (transactionIds.isEmpty()) {
+            throw new RecursoNoEncontradoException("Pre-ventas del cliente", clienteId);
+        }
+
+        List<PreVenta> items = new ArrayList<>();
+        for (Long transactionId : transactionIds) {
+            lockTransaccion(transactionId);
+            items.addAll(repository.findAllByTransaccionIdForUpdate(transactionId));
+        }
+
+        for (PreVenta item : items) {
+            if ("PAGADA".equals(item.getEstado()) || item.getVentaPago() != null) {
+                Venta venta = validarPago(item, item.getIdPreVenta());
+                validarSinMovimientosRelacionados(venta);
+            }
+        }
+
+        for (PreVenta item : items) {
+            if (estaPagada(item)) eliminarPagoAsociado(item);
+        }
+        repository.deleteAll(items);
+        repository.flush();
+        transactionIds.forEach(transaccionRepository::deleteIfEmpty);
+    }
+
     public VentaResponseDTO actualizarPago(Long id, PreVentaPagoUpdateRequestDTO request) {
         PreVenta preVenta = lockItem(id);
         Venta venta = validarPago(preVenta, id);
@@ -224,6 +251,11 @@ public class PreVentaService {
         PreVenta preVenta = lockItem(id);
         Venta venta = validarPago(preVenta, id);
         validarSinMovimientosRelacionados(venta);
+        eliminarPagoAsociado(preVenta);
+    }
+
+    private void eliminarPagoAsociado(PreVenta preVenta) {
+        Venta venta = preVenta.getVentaPago();
         preVenta.setVentaPago(null);
         preVenta.setFechaPago(null);
         preVenta.setEstado("PENDIENTE");

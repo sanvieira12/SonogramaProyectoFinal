@@ -16,6 +16,14 @@ public interface PreVentaTransaccionRepository extends JpaRepository<PreVentaTra
 
     Optional<PreVentaTransaccion> findByIdempotencyKey(String idempotencyKey);
 
+    @Query("""
+        select t.idPreVentaTransaccion
+        from PreVentaTransaccion t
+        where t.cliente.idCliente = :clienteId
+        order by t.idPreVentaTransaccion
+        """)
+    List<Long> findIdsByClienteId(@Param("clienteId") Long clienteId);
+
     @Modifying
     @Query(value = """
         DELETE FROM pre_venta_transaccion t

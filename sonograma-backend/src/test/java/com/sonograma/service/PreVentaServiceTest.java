@@ -219,6 +219,44 @@ class PreVentaServiceTest {
         verify(preVentas, never()).save(argThat(p -> p.getCantidad() == 3));
     }
 
+    @Test void eliminarTodasDelClienteBorraPendientesPagadasYCobros() {
+        PreVentaTransaccion paidTransaction = transaction();
+        PreVenta paid = pending();
+        paid.setTransaccion(paidTransaction);
+        Venta payment = paidVenta(paid);
+        paidTransaction.getItems().add(paid);
+
+        PreVentaTransaccion pendingTransaction = PreVentaTransaccion.builder()
+            .idPreVentaTransaccion(51L).cliente(cliente)
+            .fecha(java.time.LocalDate.of(2026, 10, 22)).idempotencyKey("tx-51").build();
+        PreVenta pending = pending();
+        pending.setIdPreVenta(9L);
+        pending.setTransaccion(pendingTransaction);
+        pendingTransaction.getItems().add(pending);
+
+        when(transacciones.findIdsByClienteId(3L)).thenReturn(List.of(50L, 51L));
+        when(transacciones.findByIdForUpdate(50L)).thenReturn(Optional.of(paidTransaction));
+        when(transacciones.findByIdForUpdate(51L)).thenReturn(Optional.of(pendingTransaction));
+        when(preVentas.findAllByTransaccionIdForUpdate(50L)).thenReturn(List.of(paid));
+        when(preVentas.findAllByTransaccionIdForUpdate(51L)).thenReturn(List.of(pending));
+        when(envios.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+        when(deudas.findByVentaIdVenta(44L)).thenReturn(Optional.empty());
+
+        service.eliminarTodasDelCliente(3L);
+
+        assertThat(payment.getIdPreVentaOrigen()).isNull();
+        verify(detalles).deleteAll(payment.getDetalles());
+        verify(ventas).delete(payment);
+        verify(preVentas).deleteAll(argThat(rows -> {
+            int count = 0;
+            for (PreVenta ignored : rows) count++;
+            return count == 2;
+        }));
+        verify(preVentas).flush();
+        verify(transacciones).deleteIfEmpty(50L);
+        verify(transacciones).deleteIfEmpty(51L);
+    }
+
     private PreVentaTransaccionItemRequestDTO item(String descripcion, String precio, int cantidad) {
         PreVentaTransaccionItemRequestDTO item = new PreVentaTransaccionItemRequestDTO();
         item.setDescripcion(descripcion);

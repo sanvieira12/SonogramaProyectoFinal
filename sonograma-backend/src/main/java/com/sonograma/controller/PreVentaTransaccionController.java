@@ -59,4 +59,10 @@ public class PreVentaTransaccionController {
     public ResponseEntity<PreVentaTransaccionResponseDTO> pagarPendientes(@PathVariable Long id) {
         return ResponseEntity.ok(service.pagarPendientes(id));
     }
+
+    @DeleteMapping("/clientes/{clienteId}")
+    public ResponseEntity<Void> eliminarTodasDelCliente(@PathVariable Long clienteId) {
+        service.eliminarTodasDelCliente(clienteId);
+        return ResponseEntity.noContent().build();
+    }
 }

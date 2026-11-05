@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PreVentas from './PreVentas'
-import { mergePreVentaItem, transactionTotal } from './preVentaTransactionUtils'
+import { groupPreVentaTransactionsByClient, mergePreVentaItem, transactionTotal } from './preVentaTransactionUtils'
 import { api } from '../api/sonograma'
 
 vi.mock('../api/sonograma', () => ({
@@ -9,7 +9,7 @@ vi.mock('../api/sonograma', () => ({
     preVentas: { marcarPagada: vi.fn() },
     preVentaTransacciones: {
       listar: vi.fn(), obtener: vi.fn(), crear: vi.fn(), agregarItem: vi.fn(),
-      actualizarItem: vi.fn(), eliminarItem: vi.fn(), pagarPendientes: vi.fn(),
+      actualizarItem: vi.fn(), eliminarItem: vi.fn(), pagarPendientes: vi.fn(), eliminarCliente: vi.fn(),
     },
     clientes: { todos: vi.fn(), crear: vi.fn() },
     discos: { todos: vi.fn() },
@@ -54,6 +54,18 @@ describe('PreVentas multi-item helpers', () => {
       { cantidad: '1', precioUnitario: '3000' },
     ])).toBe(6600)
   })
+
+  it('groups historical transactions by customer without losing their item transaction ids', () => {
+    const groups = groupPreVentaTransactionsByClient([
+      transaction,
+      { ...transaction, idPreVentaTransaccion: 106, total: 900, pendiente: 900,
+        items: [{ ...pendingItem, idPreVenta: 12, precio: 900 }] },
+    ])
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ idCliente: 7, cantidadItems: 2, total: 2370, pendiente: 2370 })
+    expect(groups[0].items.map(item => item.idPreVentaTransaccion)).toEqual([105, 106])
+  })
 })
 
 describe('PreVentas transaction UI', () => {
@@ -64,30 +76,30 @@ describe('PreVentas transaction UI', () => {
     api.discos.todos.mockResolvedValue(discs)
   })
 
-  it('renders persisted transactions rather than grouping by customer', async () => {
+  it('renders one row per customer and combines historical transactions', async () => {
     api.preVentaTransacciones.listar.mockResolvedValue([
       transaction,
       { ...transaction, idPreVentaTransaccion: 106, fecha: '2026-09-12' },
     ])
     render(<PreVentas />)
 
-    const table = await screen.findByTestId('preventa-transaction-table')
-    expect(within(table).getAllByRole('row')).toHaveLength(3)
-    expect(within(table).getByText('#105')).toBeInTheDocument()
-    expect(within(table).getByText('#106')).toBeInTheDocument()
+    const table = await screen.findByTestId('preventa-client-table')
+    expect(within(table).getAllByRole('row')).toHaveLength(2)
+    expect(within(table).getByText('Frank')).toBeInTheDocument()
+    expect(within(table).getByText('2 · 2 u.')).toBeInTheDocument()
   })
 
   it('applies explicit light and dark theme contrast to transaction content and details', async () => {
     render(<PreVentas />)
 
-    const table = await screen.findByTestId('preventa-transaction-table')
-    expect(within(table).getByText('#105').closest('td')).toHaveClass('text-slate-900', 'dark:text-white')
+    const table = await screen.findByTestId('preventa-client-table')
     expect(within(table).getByText('11/09/2026').closest('td')).toHaveClass('text-slate-500', 'dark:text-stone-400')
     expect(within(table).getByText('Frank').closest('td')).toHaveClass('text-slate-900', 'dark:text-white')
     expect(within(table).getByText('1 · 1 u.').closest('td')).toHaveClass('text-slate-700', 'dark:text-stone-300')
-    expect(within(table).getByText('Pre-venta')).toHaveClass('dark:text-stone-500')
+    expect(within(table).getByText('Cliente')).toHaveClass('dark:text-stone-500')
 
     fireEvent.click(within(table).getByRole('button', { name: 'Ver detalle' }))
+    fireEvent.change(screen.getByPlaceholderText('Buscar catálogo…'), { target: { value: 'Radiohead' } })
     const catalogButton = await screen.findByRole('button', { name: /Radiohead — OK Computer/i })
     expect(catalogButton).toHaveClass('text-slate-900', 'dark:text-white', 'dark:bg-stone-900')
     expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveClass('dark:text-stone-400', 'dark:hover:text-white')
@@ -100,7 +112,9 @@ describe('PreVentas transaction UI', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Nueva pre-venta/i }))
     fireEvent.click(screen.getByRole('button', { name: /Frank Ocean/i }))
+    fireEvent.change(screen.getByPlaceholderText(/Buscar disco por artista/i), { target: { value: 'Radiohead' } })
     fireEvent.click(screen.getByRole('button', { name: /Radiohead — OK Computer/i }))
+    fireEvent.change(screen.getByPlaceholderText(/Buscar disco por artista/i), { target: { value: 'Daft Punk' } })
     fireEvent.click(screen.getByRole('button', { name: /Daft Punk — Discovery/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar pre-venta' }))
 
@@ -119,7 +133,7 @@ describe('PreVentas transaction UI', () => {
     api.preVentaTransacciones.pagarPendientes.mockResolvedValue(paid)
     render(<PreVentas />)
 
-    const table = await screen.findByTestId('preventa-transaction-table')
+    const table = await screen.findByTestId('preventa-client-table')
     fireEvent.click(within(table).getByRole('button', { name: 'Ver detalle' }))
     fireEvent.click(await screen.findByRole('button', { name: /Pagar saldo pendiente.*1\.470/i }))
     expect(screen.getByText(/cobros individuales por UYU \$1\.470/i)).toBeInTheDocument()
@@ -136,8 +150,9 @@ describe('PreVentas transaction UI', () => {
       .mockResolvedValueOnce({ ...transaction, items: [...transaction.items, { ...pendingItem, idPreVenta: 12 }] })
     render(<PreVentas />)
 
-    const table = await screen.findByTestId('preventa-transaction-table')
+    const table = await screen.findByTestId('preventa-client-table')
     fireEvent.click(within(table).getByRole('button', { name: 'Ver detalle' }))
+    fireEvent.change(screen.getByPlaceholderText('Buscar catálogo…'), { target: { value: 'Radiohead' } })
     const catalogButton = await screen.findByRole('button', { name: /Radiohead — OK Computer/i })
     fireEvent.click(catalogButton)
     fireEvent.click(catalogButton)
@@ -154,5 +169,19 @@ describe('PreVentas transaction UI', () => {
 
     await waitFor(() => expect(api.preVentaTransacciones.agregarItem).toHaveBeenCalledTimes(2))
     expect(api.preVentaTransacciones.agregarItem.mock.calls[1][1].idempotencyKey).toBe(firstKey)
+  })
+
+  it('deletes the complete customer pre-sale group, including paid records', async () => {
+    api.preVentaTransacciones.eliminarCliente.mockResolvedValue(undefined)
+    render(<PreVentas />)
+
+    const table = await screen.findByTestId('preventa-client-table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Ver detalle' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Eliminar preventa completa' }))
+    expect(screen.getByText(/incluidos sus cobros pagados/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(api.preVentaTransacciones.eliminarCliente).toHaveBeenCalledWith(7))
+    await waitFor(() => expect(within(table).queryByText('Frank')).not.toBeInTheDocument())
   })
 })
