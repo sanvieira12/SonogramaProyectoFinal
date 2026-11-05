@@ -64,7 +64,7 @@ class FinancialReportingConsistencyTest {
                 mock(DireccionClienteRepository.class), deudas, mock(DetalleVentaRepository.class), pagos,
                 mock(ClienteService.class), mock(DeudaService.class), mock(CostosVentaService.class),
                 mock(ProfitCalculationService.class), mock(DiscoQrCopyService.class), mock(DiscoEstadoService.class),
-                calculator, time, policy);
+                calculator, time, policy, mock(NumeroFacturaVentaService.class));
         EstadisticasService dashboardService = new EstadisticasService(ventas, discos, pagos, calculator, time, policy);
         ResumenFinancieroMensualService summaryService = new ResumenFinancieroMensualService(
                 ventas, pagos, gastos, mock(ProfitCalculationService.class), calculator, time, policy);
@@ -146,7 +146,8 @@ class FinancialReportingConsistencyTest {
                 ventas, envios, mock(ClienteRepository.class), discos,
                 mock(DireccionClienteRepository.class), deudas, mock(DetalleVentaRepository.class), pagos,
                 mock(ClienteService.class), mock(DeudaService.class), mock(CostosVentaService.class), profit,
-                mock(DiscoQrCopyService.class), mock(DiscoEstadoService.class), calculator, time, policy);
+                mock(DiscoQrCopyService.class), mock(DiscoEstadoService.class), calculator, time, policy,
+                mock(NumeroFacturaVentaService.class));
         EstadisticasService dashboardService = new EstadisticasService(ventas, discos, pagos, calculator, time, policy);
         ResumenFinancieroMensualService summaryService = new ResumenFinancieroMensualService(
                 ventas, pagos, gastos, profit, calculator, time, policy);

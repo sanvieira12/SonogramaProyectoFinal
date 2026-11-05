@@ -78,8 +78,11 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
         nativeQuery = true)
     List<Object[]> obtenerVentasAgrupadasPorMes();
 
-    @Query("SELECT COUNT(v) FROM Venta v WHERE YEAR(v.fechaVenta) = :anio")
-    long countByAnio(@Param("anio") int anio);
+    @Query("""
+        SELECT v.numeroFactura FROM Venta v
+        WHERE v.numeroFactura LIKE CONCAT('F-', :anio, '-%')
+        """)
+    List<String> findNumerosFacturaByAnio(@Param("anio") int anio);
 
     @Query("""
         SELECT v FROM Venta v

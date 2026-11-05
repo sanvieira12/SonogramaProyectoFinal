@@ -69,6 +69,7 @@ class VentaServiceTest {
     @Mock private DiscoQrCopyService discoQrCopyService;
     @Mock private DiscoEstadoService discoEstadoService;
     @Mock private ProfitCalculationService profitCalculationService;
+    @Mock private NumeroFacturaVentaService numeroFacturaVentaService;
 
     private VentaService ventaService;
     private BusinessTime businessTime;
@@ -97,8 +98,10 @@ class VentaServiceTest {
                 discoEstadoService,
                 new IngresoLibroCalculator(deudaRepository),
                 businessTime,
-                new FinancialMovementPolicy()
+                new FinancialMovementPolicy(),
+                numeroFacturaVentaService
         );
+        lenient().when(numeroFacturaVentaService.generar(2026)).thenReturn("F-2026-001");
         lenient().doAnswer(invocation -> {
             Disco disco = invocation.getArgument(0);
             disco.setEstado(disco.getCantidadCopias() != null && disco.getCantidadCopias() > 0

@@ -77,6 +77,7 @@ public class VentaService {
     private final IngresoLibroCalculator ingresoLibroCalculator;
     private final BusinessTime businessTime;
     private final FinancialMovementPolicy financialMovementPolicy;
+    private final NumeroFacturaVentaService numeroFacturaVentaService;
 
     private static final BigDecimal CIEN = new BigDecimal("100");
 
@@ -91,7 +92,7 @@ public class VentaService {
         TipoEntrega entrega = parseEntrega(dto.getTipoEntrega());
         DacBranchCatalog.Branch sucursalDac = validarSucursalDac(dto, entrega);
         LocalDateTime fechaVenta = dto.getFechaVenta() != null ? dto.getFechaVenta() : businessTime.now();
-        String numeroFactura = generarNumeroFactura(fechaVenta.getYear());
+        String numeroFactura = numeroFacturaVentaService.generar(fechaVenta.getYear());
         String clienteSnapshot = cliente.getNombre() + (cliente.getApellido() != null ? " " + cliente.getApellido() : "");
 
         MedioPago medioPago = parseMedioPago(dto.getMedioPago());
@@ -618,11 +619,6 @@ public class VentaService {
                 .origen(venta.getOrigen())
                 .idPreVentaOrigen(venta.getIdPreVentaOrigen())
                 .build();
-    }
-
-    private String generarNumeroFactura(int anio) {
-        long count = ventaRepository.countByAnio(anio) + 1;
-        return String.format("F-%d-%03d", anio, count);
     }
 
     private PreparedDetalle prepararDetalle(DetalleVentaDTO dto) {
