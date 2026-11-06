@@ -1,5 +1,5 @@
 import { salesChannelStats } from './salesChannelStats'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonograma'
 import { redirectIfUnauthorized } from '../api/session'
 import ConfirmModal from '../components/ConfirmModal'
@@ -592,8 +592,52 @@ function numeroBoletaMovimiento(v) {
     : '—'
 }
 
+const SORTABLE_COLUMNS = {
+  fecha: {
+    label: 'Fecha',
+    value: venta => {
+      const time = venta.fechaVenta ? new Date(venta.fechaVenta).getTime() : Number.NaN
+      return Number.isFinite(time) ? time : null
+    },
+  },
+  ganancia: {
+    label: 'Ganancia bruta',
+    value: venta => {
+      if (venta.tipoMovimiento === 'PAGO_DEUDA' || venta.estadoGanancia === 'UNAVAILABLE') return null
+      const amount = Number(venta.grossProfit ?? venta.gananciaNeta)
+      return Number.isFinite(amount) ? amount : null
+    },
+  },
+  ingreso: {
+    label: 'Ingreso',
+    value: venta => {
+      const amount = Number(venta.montoMovimiento ?? venta.montoPagado ?? venta.totalFinal)
+      return Number.isFinite(amount) ? amount : null
+    },
+  },
+}
+
+const TABLE_COLUMNS = [
+  { key: 'fecha', label: 'Fecha' },
+  { label: 'Movimiento' },
+  { label: 'Cliente' },
+  { label: 'Artista / Álbum' },
+  { key: 'ganancia', label: 'Ganancia bruta' },
+  { key: 'ingreso', label: 'Ingreso' },
+  { label: 'N° Boleta' },
+  { label: 'Estado Pago' },
+]
+
+function SortArrow({ active, direction }) {
+  if (!active) {
+    return <span aria-hidden="true" className="text-[10px] text-slate-300 dark:text-stone-600">↕</span>
+  }
+  return <span aria-hidden="true" className="text-[11px] text-slate-700 dark:text-stone-200">{direction === 'asc' ? '↑' : '↓'}</span>
+}
+
 export default function LibroVentas() {
   const [ventas, setVentas] = useState([])
+  const [sort, setSort] = useState(null)
   const canales = salesChannelStats(ventas)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -615,6 +659,23 @@ export default function LibroVentas() {
   const [success, setSuccess] = useState('')
   const ventasRequestId = useRef(0)
   const resumenRequestId = useRef(0)
+
+  const ventasOrdenadas = useMemo(() => {
+    if (!sort) return ventas
+    const getValue = SORTABLE_COLUMNS[sort.key].value
+    const direction = sort.direction === 'asc' ? 1 : -1
+
+    return ventas
+      .map((venta, index) => ({ venta, index, value: getValue(venta) }))
+      .sort((a, b) => {
+        if (a.value == null && b.value == null) return a.index - b.index
+        if (a.value == null) return 1
+        if (b.value == null) return -1
+        if (a.value === b.value) return a.index - b.index
+        return (a.value - b.value) * direction
+      })
+      .map(({ venta }) => venta)
+  }, [sort, ventas])
 
   const cargar = useCallback(async (params) => {
     const requestId = ++ventasRequestId.current
@@ -675,6 +736,13 @@ export default function LibroVentas() {
     setApplied(params)
     cargar(params)
     cargarResumen(periodoActual)
+  }
+
+  function ordenarPor(key) {
+    setSort(current => ({
+      key,
+      direction: current?.key === key && current.direction === 'desc' ? 'asc' : 'desc',
+    }))
   }
 
   function exportar() {
@@ -915,9 +983,24 @@ export default function LibroVentas() {
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 dark:border-stone-800">
-                {['Fecha', 'Movimiento', 'Cliente', 'Artista / Álbum', 'Ganancia bruta', 'Ingreso', 'N° Boleta', 'Estado Pago'].map(h => (
-                  <th key={h} className="text-left px-2 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-[0.02em] whitespace-nowrap">
-                    {h}
+                {TABLE_COLUMNS.map(({ key, label }) => (
+                  <th
+                    key={label}
+                    aria-sort={key && sort?.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+                    className="text-left px-2 py-3 text-[11px] font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-[0.02em] whitespace-nowrap"
+                  >
+                    {key ? (
+                      <button
+                        type="button"
+                        onClick={() => ordenarPor(key)}
+                        className="group inline-flex items-center gap-1 rounded-sm hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:hover:text-stone-200"
+                        aria-label={`Ordenar por ${label}`}
+                        title={`Ordenar por ${label}`}
+                      >
+                        <span>{label}</span>
+                        <SortArrow active={sort?.key === key} direction={sort?.direction} />
+                      </button>
+                    ) : label}
                   </th>
                 ))}
               </tr>
@@ -929,7 +1012,7 @@ export default function LibroVentas() {
                 <tr><td colSpan={8} className="px-2.5 py-12 text-center text-red-500">{error}</td></tr>
               ) : ventas.length === 0 ? (
                 <tr><td colSpan={8} className="px-2.5 py-12 text-center text-slate-400 dark:text-stone-500">No hay ventas</td></tr>
-              ) : ventas.map(v => {
+              ) : ventasOrdenadas.map(v => {
                 const cliente = nombreClienteMovimiento(v)
                 const disco = discoMovimiento(v)
                 const boleta = numeroBoletaMovimiento(v)

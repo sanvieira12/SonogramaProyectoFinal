@@ -335,6 +335,50 @@ describe('LibroVentas profit display', () => {
     expect(await screen.findByText('Discos vendidos')).toBeInTheDocument()
   })
 
+  it('sorts the sales book by date in both directions from the column header', async () => {
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    const dateHeader = screen.getByRole('columnheader', { name: 'Fecha' })
+    const dateSort = within(dateHeader).getByRole('button', { name: 'Ordenar por Fecha' })
+
+    fireEvent.click(dateSort)
+    expect(dateHeader).toHaveAttribute('aria-sort', 'descending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Ana Pérez')
+
+    fireEvent.click(dateSort)
+    expect(dateHeader).toHaveAttribute('aria-sort', 'ascending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Eva López')
+  })
+
+  it('sorts by gross profit and leaves unavailable values at the end', async () => {
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('button', { name: 'Ordenar por Ganancia bruta' }))
+
+    const rows = within(table).getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('Ana Pérez')
+    expect(rows[2]).toHaveTextContent('Carla Ruiz')
+    expect(rows[3]).toHaveTextContent('Bruno Díaz')
+    expect(rows[4]).toHaveTextContent('Diego Soto')
+    expect(rows[5]).toHaveTextContent('Eva López')
+  })
+
+  it('sorts by recorded income instead of the sale total', async () => {
+    render(<LibroVentas />)
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('button', { name: 'Ordenar por Ingreso' }))
+
+    const rows = within(table).getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('Ana Pérez')
+    expect(rows[2]).toHaveTextContent('Bruno Díaz')
+    expect(rows[3]).toHaveTextContent('Diego Soto')
+    expect(rows[4]).toHaveTextContent('Carla Ruiz')
+    expect(rows[5]).toHaveTextContent('Eva López')
+  })
+
   it('keeps payment method in details and shows matching sale/item profit including missing cost state', async () => {
     render(<LibroVentas />)
 
