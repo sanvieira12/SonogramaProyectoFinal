@@ -75,8 +75,7 @@ function parseSortValue(disco, sortKey) {
     return Number.isFinite(value) ? value : null
   }
   if (sortKey === 'importDate') {
-    const effectiveDate = disco.fechaActualizacion || disco.fechaIngreso
-    const time = effectiveDate ? new Date(effectiveDate).getTime() : Number.NaN
+    const time = disco.fechaIngreso ? new Date(disco.fechaIngreso).getTime() : Number.NaN
     return Number.isFinite(time) ? time : null
   }
   return null
@@ -2189,7 +2188,7 @@ export default function DiscosCatalogo() {
                         {copyPriceSummary(d, copyDetailsByProduct[d.idDisco])}
                       </td>
                       <td className="px-3 py-3.5 align-middle text-xs text-slate-500 dark:text-stone-400 tabular-nums whitespace-nowrap hidden md:table-cell">
-                        {formatImportDate(d.fechaActualizacion || d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
+                        {formatImportDate(d.fechaIngreso) || <span className="text-slate-400 dark:text-stone-600">—</span>}
                       </td>
                       <td className="px-3 py-3.5 align-middle">
                         <EstadoBadge estado={d.estado} />

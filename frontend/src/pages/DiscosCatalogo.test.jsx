@@ -732,7 +732,7 @@ describe('Catalog permanent deletion flow', () => {
     expect(screen.getByText('Mostrando copia 1 de 1')).toBeInTheDocument()
   })
 
-  it('keeps a sold new product visible and orders by update date with entry-date fallback', async () => {
+  it('keeps a sold new product visible and uses its original import date', async () => {
     discoService.getAll.mockResolvedValue([
       catalogDisco({
         idDisco: 1210,
@@ -772,10 +772,11 @@ describe('Catalog permanent deletion flow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Fecha importación/i }))
     const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1)
-    expect(rows[0]).toHaveTextContent('Various')
-    expect(rows[0]).toHaveTextContent('Vendido')
-    expect(rows[1]).toHaveTextContent('Invisible')
-    expect(rows[2]).toHaveTextContent('Señor Coconut')
+    expect(rows[0]).toHaveTextContent('Invisible')
+    expect(rows[1]).toHaveTextContent('Señor Coconut')
+    expect(rows[2]).toHaveTextContent('Various')
+    expect(rows[2]).toHaveTextContent('31/08/2026')
+    expect(rows[2]).toHaveTextContent('Vendido')
   })
 
   it('preserves state filters, search, and pagination behavior', async () => {
