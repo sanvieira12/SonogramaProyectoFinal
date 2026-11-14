@@ -316,6 +316,28 @@ describe('DiscogsTab manual import', () => {
     expect(section).toHaveTextContent('Las cantidades coinciden')
   })
 
+  it('lets the user change a release missing from the catalog from used to new before saving', async () => {
+    api.importaciones.discogsDesdeLink.mockResolvedValue({ ...existingPreview, productoExistente: false })
+    api.importaciones.discogsGuardar.mockResolvedValue({ resultType: 'NEW_PRODUCT', copiesAdded: 1 })
+
+    render(<DiscogsTab />)
+    fireEvent.change(screen.getByPlaceholderText('https://www.discogs.com/release/12345'), {
+      target: { value: 'https://www.discogs.com/release/456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }))
+
+    const condition = await screen.findByRole('combobox', { name: 'Estado en el catálogo' })
+    expect(condition).toHaveValue('USADO')
+    fireEvent.change(condition, { target: { value: 'NUEVO' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar producto' }))
+
+    expect(await screen.findByText(/Producto importado como nuevo/)).toBeInTheDocument()
+    expect(api.importaciones.discogsGuardar).toHaveBeenCalledWith(expect.objectContaining({
+      condicion: 'NUEVO',
+      physicalCondition: 'VG+',
+    }))
+  })
+
   it('shows existing stock and disables confirmation while one operation is saving', async () => {
     let resolveSave
     api.importaciones.discogsDesdeLink
@@ -330,6 +352,7 @@ describe('DiscogsTab manual import', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Buscar' }))
 
     expect(await screen.findByText('Producto ya existente')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Estado en el catálogo' })).toBeDisabled()
     await waitFor(() => expect(api.importaciones.discogsManualSourceReconciliation)
       .toHaveBeenCalledWith('JPH'))
     expect(api.importaciones.discogsDesdeLink).toHaveBeenCalledWith(

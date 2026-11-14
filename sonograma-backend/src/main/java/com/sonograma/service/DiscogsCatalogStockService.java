@@ -35,10 +35,24 @@ public class DiscogsCatalogStockService {
 
     @Transactional
     public ReceiptResult receive(ReceiptCommand command) {
+        return receive(command, false);
+    }
+
+    @Transactional
+    public ReceiptResult receiveManual(ReceiptCommand command) {
+        return receive(command, true);
+    }
+
+    private ReceiptResult receive(ReceiptCommand command, boolean requireMatchingCondition) {
         validate(command);
         lockReleaseIdentity(command.discogsReleaseId());
 
         Disco existing = resolveExisting(command.discogsReleaseId());
+        if (requireMatchingCondition && existing != null && existing.getCondicion() != null
+                && existing.getCondicion() != command.metadata().condicion()) {
+            throw new ConflictoNegocioException(
+                    "Este release ya está registrado con otro estado en el catálogo. Volvé a buscar el enlace para revisar el producto.");
+        }
         boolean isNew = existing == null;
         Disco disco = isNew ? newDisco(command) : existing;
         if (!isNew) applyMetadata(disco, command.metadata());

@@ -127,6 +127,21 @@ function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, med
         />
       </div>
 
+      {!tieneErrores && (!preview.productoExistente || ['NUEVO', 'USADO'].includes(preview.condicion)) && (
+        <label className="block text-xs text-slate-400 dark:text-stone-500">
+          Estado en el catálogo
+          <select
+            className="input mt-1 w-full text-sm"
+            value={preview.condicion || 'USADO'}
+            onChange={e => onChange({ ...preview, condicion: e.target.value })}
+            disabled={saving || preview.productoExistente}
+          >
+            <option value="NUEVO">Nuevo</option>
+            <option value="USADO">Usado</option>
+          </select>
+        </label>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <p className="text-xs text-slate-400 dark:text-stone-500 mb-1">Precio venta</p>
@@ -170,8 +185,8 @@ function PreviewCard({ preview, onChange, onGuardar, onCover, onZip, saving, med
         </div>
       ) : !tieneErrores && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
-          <p className="font-medium">Producto nuevo</p>
-          <p>Se agregará {preview.cantidadCopias || 1} copia al catálogo.</p>
+          <p className="font-medium">Producto aún no registrado</p>
+          <p>Se agregará {preview.cantidadCopias || 1} copia al catálogo como {preview.condicion === 'NUEVO' ? 'nuevo' : 'usado'}.</p>
         </div>
       )}
 
@@ -328,7 +343,7 @@ function LinkSingle() {
       const data = await api.importaciones.discogsDesdeLink(url.trim(), sourceCode.trim())
       const resolvedSource = sourceCode.trim() || preview?.customerCode?.trim() || data.customerCode?.trim() || ''
       setSourceCode(resolvedSource)
-      setPreview({ ...data, customerCode: resolvedSource })
+      setPreview({ ...data, condicion: data.condicion || 'USADO', customerCode: resolvedSource })
       setEstado('preview')
     } catch (err) {
       setErrorMsg(err.message || 'Error al consultar Discogs')
@@ -584,7 +599,7 @@ function LinkSingle() {
               ? 'La importación ya había sido confirmada correctamente.'
               : result?.resultType === 'EXISTING_PRODUCT'
                 ? `Producto ya existente: se agregó ${result?.copiesAdded || 1} copia al stock.`
-                : 'Producto nuevo importado correctamente.'}
+                : `Producto importado como ${preview?.condicion === 'NUEVO' ? 'nuevo' : 'usado'}.`}
           </p>
           {result?.availableCopies !== undefined && <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">Copias disponibles: {result.availableCopies}</p>}
           {preview && <div className="mt-3 grid grid-cols-2 gap-3">

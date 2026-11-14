@@ -97,6 +97,26 @@ class ManualDiscogsReceiptOperationServiceTest {
     }
 
     @Test
+    void manualReceiptPersistsNewConditionAndRejectsConflictingReceipt() {
+        DiscoImportPreviewDTO newRecord = pendingPreview(456L);
+        newRecord.setCondicion("NUEVO");
+        importService.guardar(newRecord);
+
+        DiscoImportPreviewDTO conflictingRecord = pendingPreview(456L);
+        conflictingRecord.setCustomerCode("OTRO");
+        conflictingRecord.setCondicion("USADO");
+        assertThatThrownBy(() -> importService.guardar(conflictingRecord))
+                .isInstanceOf(com.sonograma.exception.ConflictoNegocioException.class)
+                .hasMessageContaining("otro estado en el catálogo");
+
+        assertThat(discoRepository.findAll()).singleElement().satisfies(disco -> {
+            assertThat(disco.getCondicion().name()).isEqualTo("NUEVO");
+            assertThat(disco.getCantidadCopias()).isEqualTo(1);
+        });
+        assertThat(copyRepository.count()).isEqualTo(1);
+    }
+
+    @Test
     void sameOperationIsReceivedExactlyOnceAndReplayIsSuccessful() {
         DiscoImportPreviewDTO preview = pendingPreview(456L);
 

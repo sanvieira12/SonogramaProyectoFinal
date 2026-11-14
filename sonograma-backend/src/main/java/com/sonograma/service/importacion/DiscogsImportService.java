@@ -72,7 +72,7 @@ public class DiscogsImportService {
             throw new com.sonograma.exception.NegocioException("No se pudo identificar el release concreto de Discogs. Volvé a consultarlo.");
         }
         return receiptOperationService.confirm(preview, batch -> {
-            DiscogsCatalogStockService.ReceiptResult receipt = catalogStockService.receive(
+            DiscogsCatalogStockService.ReceiptResult receipt = catalogStockService.receiveManual(
                     new DiscogsCatalogStockService.ReceiptCommand(
                             preview.getDiscogsReleaseId(), preview.getCantidadCopias(), toMetadata(preview)
                     ));
@@ -235,6 +235,7 @@ public class DiscogsImportService {
         preview.setProductoExistente(!matches.isEmpty());
         if (matches.size() == 1) {
             Disco disco = matches.values().iterator().next();
+            if (disco.getCondicion() != null) preview.setCondicion(disco.getCondicion().name());
             int available = disco.getIdDisco() != null && qrCopyService.hasCopyInventory(disco.getIdDisco())
                     ? Math.toIntExact(qrCopyService.countAvailableCopies(disco.getIdDisco()))
                     : Math.max(0, Optional.ofNullable(disco.getCantidadCopias()).orElse(0));
