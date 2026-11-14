@@ -46,7 +46,8 @@ function CoverUpload({ value, onChange }) {
     <div className="space-y-2">
       <div className="flex gap-2">
         <input
-          type="url"
+          type="text"
+          inputMode="url"
           className="input flex-1"
           value={isBase64 ? '' : (value || '')}
           onChange={e => onChange(e.target.value)}
@@ -363,11 +364,11 @@ export default function DiscoForm({ disco, onGuardar, onCancelar }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Costo (EUR)</label>
-              <input value={form.costo} onChange={e => set('costo', e.target.value)} className="input" placeholder="0.00" type="number" step="0.01" min="0" />
+              <input value={form.costo} onChange={e => set('costo', e.target.value)} className="input" placeholder="0.00" type="number" step="any" min="0" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-stone-400 mb-1.5 uppercase tracking-wide">Precio venta (UYU)</label>
-              <input value={form.precioVenta} onChange={e => set('precioVenta', e.target.value)} disabled={commercialFieldsManagedPerCopy} className="input disabled:cursor-not-allowed disabled:opacity-50" placeholder="0.00" type="number" step="0.01" min="0" />
+              <input value={form.precioVenta} onChange={e => set('precioVenta', e.target.value)} disabled={commercialFieldsManagedPerCopy} className="input disabled:cursor-not-allowed disabled:opacity-50" placeholder="0.00" type="number" step="any" min="0" />
             </div>
           </div>
 

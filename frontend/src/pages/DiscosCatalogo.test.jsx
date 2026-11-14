@@ -129,6 +129,40 @@ function matchedReconciliation(overrides = {}) {
   }
 }
 
+it('saves edits to an imported disc with a relative cover path and fractional prices', async () => {
+  const imported = catalogDisco({
+    idDisco: 43,
+    imagenUrl: '/api/importar/vinylfuture/media/QRK018%20-%20Peacewave/cover.jpg',
+    costo: 11.794821,
+    precioVenta: 1412.1213,
+    pricingMode: 'AUTO',
+  })
+  const descripcion = 'Edición importada'
+  discoService.getAll.mockResolvedValue([imported])
+  discoService.listarFuentesImportacionDiscogs.mockResolvedValue([])
+  discoService.actualizar.mockResolvedValue({ ...imported, descripcion })
+  window.matchMedia = vi.fn().mockReturnValue({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })
+
+  render(<MemoryRouter><DiscosCatalogo /></MemoryRouter>)
+  const row = await screen.findByRole('row', { name: /Artist 43/ })
+  fireEvent.click(within(row).getByRole('button', { name: 'Editar' }))
+  fireEvent.change(screen.getByPlaceholderText('Edición, notas, palabras clave...'), { target: { value: descripcion } })
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+  await waitFor(() => expect(discoService.actualizar).toHaveBeenCalledWith(imported.idDisco, expect.objectContaining({
+    descripcion,
+    imagenUrl: imported.imagenUrl,
+    costo: imported.costo,
+    precioVenta: imported.precioVenta,
+    pricingMode: 'AUTO',
+  })))
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Editar disco' })).not.toBeInTheDocument())
+})
+
 describe('Catalog permanent deletion flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
