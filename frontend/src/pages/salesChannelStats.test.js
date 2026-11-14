@@ -14,11 +14,12 @@ describe('salesChannelStats', () => {
       sale(4, 'LOCAL', { tipoMovimiento: 'PRE_VENTA' }),
       sale(5, 'LOCAL', { estado: 'CANCELADA' }),
       sale(6, 'LOCAL', { estado: 'PENDIENTE' }),
-    ])).toEqual({ local: 1, instagram: 1, unknown: 0 })
+      sale(7, 'WEB'), sale(8, 'ENCARGUE'), sale(9, 'OTROS'),
+    ])).toEqual({ LOCAL: 1, INSTAGRAM: 1, WEB: 1, ENCARGUE: 1, OTROS: 1, unknown: 0 })
   })
 
   it('reports missing and unknown channels without assigning a channel', () => {
     expect(salesChannelStats([sale(1, null), sale(2, undefined), sale(3, 'OTHER')]))
-      .toEqual({ local: 0, instagram: 0, unknown: 3 })
+      .toEqual({ LOCAL: 0, INSTAGRAM: 0, WEB: 0, ENCARGUE: 0, OTROS: 0, unknown: 3 })
   })
 })

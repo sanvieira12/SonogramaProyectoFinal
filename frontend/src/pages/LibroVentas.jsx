@@ -4,6 +4,7 @@ import { api, FINANCIAL_DATA_CHANGED_EVENT, resolveApiUrl } from '../api/sonogra
 import { redirectIfUnauthorized } from '../api/session'
 import ConfirmModal from '../components/ConfirmModal'
 import { businessDateInMontevideo } from '../utils/businessDate'
+import { CANALES_VENTA } from '../utils/canalesVenta'
 
 const ESTADO_PAGO_STYLES = {
   PAGADO:   'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -952,7 +953,13 @@ export default function LibroVentas() {
             { label: 'Balance final', value: fmt(resumen.balanceFinal), tone: profitToneClass(null, resumen.balanceFinal) },
             {
               label: 'Ventas por canal',
-              value: <span className="block text-sm leading-6">Local: {canales.local}<br />Instagram: {canales.instagram}</span>,
+              value: (
+                <span className="block text-sm leading-6">
+                  {Object.entries(CANALES_VENTA).map(([valor, etiqueta]) => (
+                    <span key={valor} className="block">{etiqueta}: {canales[valor]}</span>
+                  ))}
+                </span>
+              ),
               secondary: canales.unknown > 0 && (
                 <span className="text-xs text-slate-600 dark:text-stone-400">Sin canal: {canales.unknown}</span>
               ),

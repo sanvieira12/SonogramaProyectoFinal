@@ -57,9 +57,11 @@ describe('NuevaVenta manual items', () => {
     fireEvent.change(clientInput, { target: { value: 'Ana' } })
     await waitFor(() => expect(screen.getByRole('button', { name: /Ana Pérez/ })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /Ana Pérez/ }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Canal' }), { target: { value: 'ENCARGUE' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar venta' }))
 
     await waitFor(() => expect(api.ventas.registrar).toHaveBeenCalledWith(expect.objectContaining({
+      canalVenta: 'ENCARGUE',
       detalles: [expect.objectContaining({ manualItem: true, clasificacionItem: 'USADO', descripcion: 'Vinilo manual' })],
     })))
   })

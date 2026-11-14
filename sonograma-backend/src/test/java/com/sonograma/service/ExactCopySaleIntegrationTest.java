@@ -65,8 +65,13 @@ class ExactCopySaleIntegrationTest {
 
     @Test
     void saleLocksAndSellsTheSelectedCopyAndExposesItsSnapshotIdentity() {
-        VentaResponseDTO response = ventaService.registrarVenta(request(fixture, fixture.copyBId(), fixture.copyBQr(), null));
+        VentaRequestDTO saleRequest = request(fixture, fixture.copyBId(), fixture.copyBQr(), null);
+        saleRequest.setCanalVenta("WEB");
+        VentaResponseDTO response = ventaService.registrarVenta(saleRequest);
 
+        assertThat(response.getCanalVenta()).isEqualTo("WEB");
+        assertThat(ventaRepository.findById(response.getIdVenta()).orElseThrow().getCanalVenta().name())
+                .isEqualTo("WEB");
         assertThat(copyRepository.findById(fixture.copyAId()).orElseThrow().getEstado())
                 .isEqualTo(EstadoCopiaDisco.DISPONIBLE);
         assertThat(copyRepository.findById(fixture.copyBId()).orElseThrow().getEstado())

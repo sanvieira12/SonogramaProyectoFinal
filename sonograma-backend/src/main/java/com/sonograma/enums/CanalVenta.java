@@ -1,5 +1,5 @@
 package com.sonograma.enums;
 
 public enum CanalVenta {
-    LOCAL, INSTAGRAM
+    LOCAL, INSTAGRAM, WEB, ENCARGUE, OTROS
 }

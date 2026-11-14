@@ -4,6 +4,7 @@ import { api, resolveApiUrl } from '../api/sonograma'
 import QRScanner from '../components/QRScanner'
 import DacBranchSelect from '../components/DacBranchSelect'
 import { getDacBranchId } from '../components/dacBranches'
+import { CANALES_VENTA } from '../utils/canalesVenta'
 import { parseQrPayload } from '../utils/qrPayload'
 
 const DEPARTAMENTOS_FALLBACK = [
@@ -905,10 +906,11 @@ export default function NuevaVenta() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Canal</label>
-              <select value={canalVenta} onChange={e => setCanalVenta(e.target.value)} className="input">
-                <option value="LOCAL">Local</option>
-                <option value="INSTAGRAM">Instagram</option>
+              <label htmlFor="canal-venta" className="block text-xs font-semibold text-slate-500 dark:text-stone-500 uppercase tracking-wider mb-1.5">Canal</label>
+              <select id="canal-venta" value={canalVenta} onChange={e => setCanalVenta(e.target.value)} className="input">
+                {Object.entries(CANALES_VENTA).map(([valor, etiqueta]) => (
+                  <option key={valor} value={valor}>{etiqueta}</option>
+                ))}
               </select>
             </div>
             <div>

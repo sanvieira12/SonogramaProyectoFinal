@@ -63,7 +63,7 @@
 | id_cliente | BIGINT | FK → cliente |
 | id_disco | BIGINT | FK → disco |
 | fecha_venta | TIMESTAMP | NOT NULL |
-| canal_venta | VARCHAR | LOCAL, INSTAGRAM |
+| canal_venta | VARCHAR | LOCAL, INSTAGRAM, WEB, ENCARGUE, OTROS |
 | total | NUMERIC(10,2) | |
 | costo_disco | NUMERIC(10,2) | |
 | precio_venta | NUMERIC(10,2) | |
