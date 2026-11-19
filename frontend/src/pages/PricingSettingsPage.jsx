@@ -171,6 +171,7 @@ function applyProposedMarkup(rows, form) {
       realCostUyu,
       markup,
       finalSalePriceUyu: realCostUyu * markup,
+      proposedMarkupScenario: true,
     }
   })
 }
@@ -381,6 +382,17 @@ export default function PricingSettingsPage() {
     () => pricingScenario === 'after' ? applyProposedMarkup(preview, form) : preview,
     [form, pricingScenario, preview]
   )
+  const scenarioProjectedNewValue = useMemo(() => {
+    if (pricingScenario === 'before') return valuation.projectedNewUyu
+    const priceDifference = scenarioPreview.reduce((total, row, index) => {
+      if (!row.proposedMarkupScenario) return total
+      const availableQuantity = Math.max(0, Number(row.quantity) || 0)
+      const beforePrice = Number(preview[index]?.finalSalePriceUyu) || 0
+      const afterPrice = Number(row.finalSalePriceUyu) || 0
+      return total + ((afterPrice - beforePrice) * availableQuantity)
+    }, 0)
+    return valuation.projectedNewUyu + priceDifference
+  }, [preview, pricingScenario, scenarioPreview, valuation.projectedNewUyu])
 
   const normalizedSearch = normalizeSearchValue(search)
   const filteredPreview = useMemo(() => {
@@ -706,10 +718,10 @@ export default function PricingSettingsPage() {
         <div className="card p-4">
           <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-stone-500">Valor proyectado — Nuevos</p>
           <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">
-            {valuationLoading ? '…' : `UYU $${formatDecimal(valuation.projectedNewUyu, 2)}`}
+            {valuationLoading ? '…' : `UYU $${formatDecimal(scenarioProjectedNewValue, 2)}`}
           </p>
           <p className="mt-2 text-xs text-slate-500 dark:text-stone-500">
-            {copiesLabel(valuation.availableNewCopies)} disponibles · precio actual de Catálogo
+            {copiesLabel(valuation.availableNewCopies)} disponibles · {pricingScenario === 'after' ? 'precio simulado de Catálogo' : 'precio actual de Catálogo'}
           </p>
           {!valuationLoading && valuation.newAvailableCopiesWithoutSalePrice > 0 ? (
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
