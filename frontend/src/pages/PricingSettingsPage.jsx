@@ -33,6 +33,11 @@ const CONDITION_FILTERS = [
   { value: 'USADO', label: 'Usados' },
 ]
 
+const PRICING_SCENARIOS = [
+  { value: 'before', label: 'Antes' },
+  { value: 'after', label: 'Después' },
+]
+
 const EMPTY_VALUATION = {
   importedNewEur: 0,
   importedNewUyu: 0,
@@ -131,6 +136,43 @@ function dateLabel(value) {
 function markupDraftValue(value) {
   if (value == null || value === '') return ''
   return String(value)
+}
+
+function proposedMarkupForVinylFutureCost(cost) {
+  if (!Number.isFinite(cost) || cost <= 8.99) return 2
+  if (cost <= 10.99) return 2 - ((cost - 8.99) * 0.125)
+  if (cost <= 12.99) return 1.75 - ((cost - 10.99) * 0.035)
+  if (cost <= 14.99) return 1.68 - ((cost - 12.99) * 0.025)
+  if (cost <= 16.99) return 1.63 - ((cost - 14.99) * 0.015)
+  if (cost <= 20.99) return 1.6 - ((cost - 16.99) * 0.01)
+  if (cost <= 30.99) return 1.56 - ((cost - 20.99) * 0.006)
+  if (cost <= 50.99) return 1.5 - ((cost - 30.99) * 0.0025)
+  if (cost <= 90.49) return 1.45 - ((cost - 50.99) * (0.05 / 39.5))
+  return 1.4
+}
+
+function isEligibleForNewMarkup(row) {
+  return normalizeCondition(row.condicion) === 'NUEVO'
+    && normalizeSearchValue(row.supplier).includes('future')
+    && row.pricingMode === 'AUTO'
+    && Number(row.unitPriceEur) > 0
+}
+
+function applyProposedMarkup(rows, form) {
+  const rate = Number(normalizeDecimalString(form.eurUyuRate))
+  return rows.map(row => {
+    if (!isEligibleForNewMarkup(row)) return row
+    const markup = proposedMarkupForVinylFutureCost(Number(row.unitPriceEur))
+    const realCostEur = Number(row.unitPriceEur) + Number(row.extraCostEur || 0)
+    const realCostUyu = realCostEur * rate
+    return {
+      ...row,
+      realCostEur,
+      realCostUyu,
+      markup,
+      finalSalePriceUyu: realCostUyu * markup,
+    }
+  })
 }
 
 function normalizeSearchValue(value) {
@@ -253,6 +295,7 @@ export default function PricingSettingsPage() {
   const [selectedDialogOpen, setSelectedDialogOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [conditionFilter, setConditionFilter] = useState('TODOS')
+  const [pricingScenario, setPricingScenario] = useState('before')
   const [supplierSort, setSupplierSort] = useState('none')
   const [valuation, setValuation] = useState(EMPTY_VALUATION)
   const [valuationLoading, setValuationLoading] = useState(true)
@@ -334,16 +377,21 @@ export default function PricingSettingsPage() {
     }, { auto: 0, manual: 0 })
   }, [preview])
 
+  const scenarioPreview = useMemo(
+    () => pricingScenario === 'after' ? applyProposedMarkup(preview, form) : preview,
+    [form, pricingScenario, preview]
+  )
+
   const normalizedSearch = normalizeSearchValue(search)
   const filteredPreview = useMemo(() => {
-    return preview.filter(row => {
+    return scenarioPreview.filter(row => {
       const matchesCondition = conditionFilter === 'TODOS'
         || normalizeCondition(row.condicion) === conditionFilter
       const matchesSearch = !normalizedSearch
         || searchableValuesForRow(row).some(value => value.includes(normalizedSearch))
       return matchesCondition && matchesSearch
     })
-  }, [conditionFilter, normalizedSearch, preview])
+  }, [conditionFilter, normalizedSearch, scenarioPreview])
   const sortedPreview = useMemo(() => {
     if (supplierSort === 'none') return filteredPreview
     const factor = supplierSort === 'asc' ? 1 : -1
@@ -559,9 +607,30 @@ export default function PricingSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <section className="card space-y-5 p-5">
+      <div
+        className="inline-flex w-fit rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-stone-700 dark:bg-stone-900"
+        role="tablist"
+        aria-label="Comparación de markup"
+      >
+        {PRICING_SCENARIOS.map(option => (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={pricingScenario === option.value}
+            className={`rounded-md px-5 py-2 text-sm font-semibold transition-colors ${pricingScenario === option.value ? 'bg-white text-slate-900 shadow-sm dark:bg-stone-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-stone-400 dark:hover:text-stone-200'}`}
+            onClick={() => setPricingScenario(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <section className="card space-y-5 p-5" role="tabpanel" aria-label={pricingScenario === 'before' ? 'Cálculo actual' : 'Cálculo propuesto'}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {Object.keys(FIELD_CONFIG).map(field => (
+          {Object.keys(FIELD_CONFIG)
+            .filter(field => pricingScenario === 'before' || !field.startsWith('markup'))
+            .map(field => (
             <InputField
               key={field}
               field={field}
@@ -572,25 +641,31 @@ export default function PricingSettingsPage() {
           ))}
         </div>
 
+        {pricingScenario === 'after' ? (
+          <p className="text-sm text-slate-600 dark:text-stone-400">
+            Curva propuesta por costo de compra VinylFuture. Solo se simula para discos NUEVOS con precio automático; los demás conservan el cálculo actual.
+          </p>
+        ) : null}
+
         <div className="flex flex-wrap gap-3">
           <button type="button" onClick={() => refreshPreview({ successMessage: 'Vista previa actualizada.' })} className="btn-secondary" disabled={previewing}>
             {previewing ? 'Actualizando…' : 'Actualizar vista previa'}
           </button>
-          <button type="button" onClick={() => apply('automatic')} className="btn-primary" disabled={saving !== ''}>
+          <button type="button" onClick={() => apply('automatic')} className="btn-primary" disabled={saving !== '' || pricingScenario === 'after'}>
             {saving === 'automatic' ? 'Aplicando…' : 'Aplicar a precios automáticos'}
           </button>
-          <button type="button" onClick={() => apply('all')} className="btn-secondary" disabled={saving !== ''}>
+          <button type="button" onClick={() => apply('all')} className="btn-secondary" disabled={saving !== '' || pricingScenario === 'after'}>
             {saving === 'all' ? 'Aplicando…' : 'Aplicar a todos los discos'}
           </button>
           <button
             type="button"
             onClick={() => setSelectedDialogOpen(true)}
             className="btn-secondary"
-            disabled={saving !== '' || selectedCount === 0}
+            disabled={saving !== '' || selectedCount === 0 || pricingScenario === 'after'}
           >
             Aplicar a seleccionados
           </button>
-          <button type="button" onClick={resetDefaults} className="btn-secondary" disabled={saving !== ''}>
+          <button type="button" onClick={resetDefaults} className="btn-secondary" disabled={saving !== '' || pricingScenario === 'after'}>
             {saving === 'reset' ? 'Restableciendo…' : 'Restablecer valores predeterminados'}
           </button>
         </div>
@@ -842,11 +917,12 @@ export default function PricingSettingsPage() {
                         <input
                           type="number"
                           className={`input h-9 min-w-[8rem] py-1.5 text-sm ${feedback?.type === 'error' ? 'border-red-400 dark:border-red-700' : ''}`}
-                          value={markupDrafts[row.idDisco] ?? ''}
+                          value={pricingScenario === 'after' ? markupDraftValue(row.markup) : (markupDrafts[row.idDisco] ?? '')}
                           step="0.0001"
                           min="0.0001"
                           inputMode="decimal"
                           aria-label={`Markup del disco ${row.artist || row.title || row.idDisco}`}
+                          disabled={pricingScenario === 'after'}
                           onChange={event => setMarkupDraft(row.idDisco, event.target.value)}
                           onKeyDown={event => {
                             if (event.key === 'Enter') {
@@ -864,7 +940,7 @@ export default function PricingSettingsPage() {
                           type="button"
                           className="btn-secondary inline-flex h-9 min-w-[140px] items-center justify-center whitespace-nowrap px-4 py-1.5 text-xs"
                           onClick={() => saveMarkup(row)}
-                          disabled={savingMarkup}
+                          disabled={savingMarkup || pricingScenario === 'after'}
                           aria-label={`Guardar markup del disco ${row.artist || row.title || row.idDisco}`}
                         >
                           {savingMarkup ? 'Guardando…' : 'Guardar markup'}
